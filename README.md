@@ -1,4 +1,4 @@
-<p align="center"><img src="https://github.com/stacksjs/rpx/blob/main/.github/art/cover.jpg?raw=true" alt="Social Card of this repo"></p>
+<p align="center"><img src="https://github.com/stacksjs/localtunnels/blob/main/.github/art/cover.jpg?raw=true" alt="Social Card of this repo"></p>
 
 [![npm version][npm-version-src]][npm-version-href]
 [![GitHub Actions][github-actions-src]][github-actions-href]
@@ -8,148 +8,83 @@
 
 # A Better Developer Experience
 
-> A zero-config reverse proxy for local development with SSL support, custom domains, and more.
+> A zero-config local tunnel that's simple, lightweight, and secure.
 
 ## Features
 
-- Simple, lightweight Reverse Proxy
-- Custom Domains _(with wildcard support)_
-- Zero-Config Setup
-- SSL Support _(HTTPS by default)_
-- Auto HTTP-to-HTTPS Redirection
-- Self `/etc/hosts` Management
+- Simple, lightweight local tunnel
+- Security built-in, including HTTPS
+- IAC, self-hostable _(via AWS)_
+- Custom subdomains
+- CLI & Library
 
 ## Install
 
 ```bash
-bun install -d @stacksjs/rpx
+bun install -d localtunnels
 ```
 
 <!-- _Alternatively, you can install:_
 
 ```bash
-brew install rpx # wip
-pkgx install rpx # wip
+brew install localtunnels # wip
+pkgx install localtunnels # wip
 ``` -->
 
 ## Get Started
 
-There are two ways of using this reverse proxy: _as a library or as a CLI._
+There are two ways of using this local tunnel: _as a library or as a CLI._
 
 ### Library
 
 Given the npm package is installed:
 
 ```ts
-import type { TlsConfig } from '@stacksjs/rpx'
-import { startProxy } from '@stacksjs/rpx'
+import type { LocalTunnelConfig } from 'localtunnels'
+import { startLocalTunnel } from 'localtunnels'
 
-export interface ReverseProxyConfig {
-  from: string // domain to proxy from, defaults to localhost:3000
-  to: string // domain to proxy to, defaults to stacks.localhost
-  cleanUrls?: boolean // removes the .html extension from URLs, defaults to false
-  https: boolean | TlsConfig // automatically uses https, defaults to true, also redirects http to https
-  etcHostsCleanup?: boolean // automatically cleans up /etc/hosts, defaults to false
-  verbose: boolean // log verbose output, defaults to false
+const config: LocalTunnelConfig = {
+  from: 'localhost:5173',
+  domain: 'stacksjs.dev', // optional, defaults to the stacksjs.dev domain
+  subdomain: 'test', // optional, uses a random subdomain by default
+  verbose: true, // optional, defaults to false
 }
 
-const config: ReverseProxyOptions = {
-  from: 'localhost:3000',
-  to: 'my-docs.localhost',
-  cleanUrls: true,
-  https: true,
-  etcHostsCleanup: true,
-}
-
-startProxy(config)
+startLocalTunnel(config)
 ```
 
-In case you are trying to start multiple proxies, you may use this configuration:
+You may als use a configuration file:
 
 ```ts
-// reverse-proxy.config.{ts,js}
-import type { ReverseProxyOptions } from '@stacksjs/rpx'
-import os from 'node:os'
-import path from 'node:path'
+// tunnel.config.{ts,js}
+import type { LocalTunnelConfig } from '@stacksjs/localtunnels'
 
-const config: ReverseProxyOptions = {
-  https: { // https: true -> also works with sensible defaults
-    caCertPath: path.join(os.homedir(), '.stacks', 'ssl', `stacks.localhost.ca.crt`),
-    certPath: path.join(os.homedir(), '.stacks', 'ssl', `stacks.localhost.crt`),
-    keyPath: path.join(os.homedir(), '.stacks', 'ssl', `stacks.localhost.crt.key`),
-  },
-
-  etcHostsCleanup: true,
-
-  proxies: [
-    {
-      from: 'localhost:5173',
-      to: 'my-app.localhost',
-      cleanUrls: true,
-    },
-    {
-      from: 'localhost:5174',
-      to: 'my-api.local',
-    },
-  ],
-
-  verbose: true,
+const config: LocalTunnelConfig = {
+  from: 'localhost:5173',
+  domain: 'stacksjs.dev', // optional, defaults to the stacksjs.dev domain
+  subdomain: 'test', // optional, uses a random subdomain by default
+  verbose: true, // optional, defaults to false
 }
 
 export default config
+```
+
+
+_Then run:_
+
+```bash
+./localtunnels start
 ```
 
 ### CLI
 
 ```bash
-rpx --from localhost:3000 --to my-project.localhost
-rpx --from localhost:8080 --to my-project.test --keyPath ./key.pem --certPath ./cert.pem
-rpx --help
-rpx --version
+localtunnels start --from localhost:5173 --subdomain test --verbose
+localtunnels --help
+localtunnels --version
 ```
 
-## Configuration
-
-The Reverse Proxy can be configured using a `reverse-proxy.config.ts` _(or `reverse-proxy.config.js`)_ file and it will be automatically loaded when running the `reverse-proxy` command.
-
-```ts
-// reverse-proxy.config.{ts,js}
-import type { ReverseProxyOptions } from '@stacksjs/rpx'
-import os from 'node:os'
-import path from 'node:path'
-
-const config: ReverseProxyOptions = {
-  from: 'localhost:5173',
-  to: 'stacks.localhost',
-  https: {
-    domain: 'stacks.localhost',
-    hostCertCN: 'stacks.localhost',
-    caCertPath: path.join(os.homedir(), '.stacks', 'ssl', `stacks.localhost.ca.crt`),
-    certPath: path.join(os.homedir(), '.stacks', 'ssl', `stacks.localhost.crt`),
-    keyPath: path.join(os.homedir(), '.stacks', 'ssl', `stacks.localhost.crt.key`),
-    altNameIPs: ['127.0.0.1'],
-    altNameURIs: ['localhost'],
-    organizationName: 'stacksjs.org',
-    countryName: 'US',
-    stateName: 'California',
-    localityName: 'Playa Vista',
-    commonName: 'stacks.localhost',
-    validityDays: 180,
-    verbose: false,
-  },
-  verbose: false,
-}
-
-export default config
-```
-
-_Then run:_
-
-```bash
-./rpx start
-```
-
-To learn more, head over to the [documentation](https://reverse-proxy.sh/).
+To learn more, head over to the [documentation](https://localtunnels.sh/).
 
 ## Testing
 
@@ -159,7 +94,7 @@ bun test
 
 ## Changelog
 
-Please see our [releases](https://github.com/stacksjs/stacks/releases) page for more information on what has changed recently.
+Please see our [releases](https://github.com/stacksjs/localtunnels/releases) page for more information on what has changed recently.
 
 ## Contributing
 
@@ -200,10 +135,10 @@ The MIT License (MIT). Please see [LICENSE](https://github.com/stacksjs/stacks/t
 Made with 💙
 
 <!-- Badges -->
-[npm-version-src]: https://img.shields.io/npm/v/@stacksjs/rpx?style=flat-square
-[npm-version-href]: https://npmjs.com/package/@stacksjs/rpx
-[github-actions-src]: https://img.shields.io/github/actions/workflow/status/stacksjs/rpx/ci.yml?style=flat-square&branch=main
-[github-actions-href]: https://github.com/stacksjs/rpx/actions?query=workflow%3Aci
+[npm-version-src]: https://img.shields.io/npm/v/localtunnels?style=flat-square
+[npm-version-href]: https://npmjs.com/package/localtunnels
+[github-actions-src]: https://img.shields.io/github/actions/workflow/status/stacksjs/localtunnels/ci.yml?style=flat-square&branch=main
+[github-actions-href]: https://github.com/stacksjs/localtunnels/actions?query=workflow%3Aci
 
-<!-- [codecov-src]: https://img.shields.io/codecov/c/gh/stacksjs/rpx/main?style=flat-square
-[codecov-href]: https://codecov.io/gh/stacksjs/rpx -->
+<!-- [codecov-src]: https://img.shields.io/codecov/c/gh/stacksjs/localtunnels/main?style=flat-square
+[codecov-href]: https://codecov.io/gh/stacksjs/localtunnels -->
