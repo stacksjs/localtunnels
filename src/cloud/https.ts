@@ -1,4 +1,5 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda'
+import { Buffer } from 'node:buffer'
 import process from 'node:process'
 import { ApiGatewayManagementApiClient, PostToConnectionCommand } from '@aws-sdk/client-apigatewaymanagementapi'
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'

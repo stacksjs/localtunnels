@@ -97,13 +97,11 @@ export class TunnelStack extends cdk.Stack {
     }))
 
     // Outputs
-    // eslint-disable-next-line no-new
     new cdk.CfnOutput(this, 'WebSocketApiUrl', {
       value: webSocketStage.url,
       description: 'WebSocket API URL',
     })
 
-    // eslint-disable-next-line no-new
     new cdk.CfnOutput(this, 'HttpApiUrl', {
       value: httpApi.url!,
       description: 'HTTP API URL',

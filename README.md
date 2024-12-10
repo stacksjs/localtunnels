@@ -69,7 +69,6 @@ const config: LocalTunnelConfig = {
 export default config
 ```
 
-
 _Then run:_
 
 ```bash
