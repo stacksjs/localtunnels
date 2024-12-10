@@ -43,10 +43,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            bin/rpx-linux-x64
-            bin/rpx-linux-arm64
-            bin/rpx-windows-x64.exe
-            bin/rpx-darwin-x64
-            bin/rpx-darwin-arm64
+            bin/lpx-linux-x64
+            bin/lpx-linux-arm64
+            bin/lpx-windows-x64.exe
+            bin/lpx-darwin-x64
+            bin/lpx-darwin-arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
