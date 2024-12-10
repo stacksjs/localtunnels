@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.1.0...main
+
+[compare changes](https://github.com/stacksjs/localtunnels/compare/v0.1.0...main)
+
+### 🏡 Chore
+
+- Minor adjustments ([980d404](https://github.com/stacksjs/localtunnels/commit/980d404))
+
+### ❤️ Contributors
+
+- Chris ([@chrisbbreuer](http://github.com/chrisbbreuer))
+
 ## ...main
 
 
