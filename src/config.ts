@@ -7,6 +7,6 @@ export const defaultConfig: TunnelOptions = {
 
 // eslint-disable-next-line antfu/no-top-level-await
 export const config: TunnelOptions = await loadConfig({
-  name: 'localtunnel',
+  name: 'tunnel',
   defaultConfig,
 })
