@@ -1,6 +1,4 @@
-/**
- * Utility functions for the local tunnel implementation
- */
+/* eslint-disable no-console */
 
 /**
  * Debug logging levels
@@ -118,7 +116,11 @@ export function isWebSocketSupported(): boolean {
 
 /**
  * Format a URL with the correct protocol and port
- * @param options - URL formatting options
+ * @param options - The URL components
+ * @param options.host - The host name
+ * @param options.port - The port number
+ * @param options.pathname - The path
+ * @param options.protocol - The protocol (default: 'http')
  * @returns The formatted URL
  */
 export function formatUrl({
