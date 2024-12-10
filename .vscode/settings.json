@@ -58,7 +58,7 @@
 
   "typescript.preferGoToSourceDefinition": true,
   "files.associations": {
-    "rpx": "typescript"
+    "lpx": "typescript"
   },
   "editor.quickSuggestions": {
     "strings": true
