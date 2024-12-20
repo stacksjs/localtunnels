@@ -1,85 +1,92 @@
-# Markdown Extension Examples
+# Install
 
-This page demonstrates some of the built-in markdown extensions provided by VitePress.
+## Bun & Node.js
 
-## Syntax Highlighting
+```bash
+bun install -d localtunnels
+npm install -g localtunnels
 
-VitePress provides Syntax Highlighting powered by [Shiki](https://github.com/shikijs/shiki), with additional features like line-highlighting:
-
-**Input**
-
-````md
-```js{4}
-export default {
-  data () {
-    return {
-      msg: 'Highlighted!'
-    }
-  }
-}
-```
-````
-
-**Output**
-
-```js{4}
-export default {
-  data () {
-    return {
-      msg: 'Highlighted!'
-    }
-  }
-}
+# or, invoke immediately
+bunx localtunnels
+npx localtunnels
 ```
 
-## Custom Containers
+_We are looking to publish this package npm under the name `localtunnels`. We are also hoping npm will release the name for us._
 
-**Input**
+## Binaries
 
-```md
-::: info
-This is an info box.
-:::
+For now, you can download the `localtunnels` binaries from the [releases page](https://github.com/stacksjs/localtunnels/releases/tag/v0.1.1). Choose the binary that matches your platform and architecture:
 
-::: tip
-This is a tip.
-:::
+## macOS (Darwin)
 
-::: warning
-This is a warning.
-:::
+For M1/M2 Macs (arm64):
 
-::: danger
-This is a dangerous warning.
-:::
+```bash
+# Download the binary
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-darwin-arm64 -o localtunnels
 
-::: details
-This is a details block.
-:::
+# Make it executable
+chmod +x localtunnels
+
+# Move it to your PATH
+mv localtunnels /usr/local/bin/localtunnels
 ```
 
-**Output**
+For Intel Macs (amd64):
 
-::: info
-This is an info box.
-:::
+```bash
+# Download the binary
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-darwin-x64 -o localtunnels
 
-::: tip
-This is a tip.
-:::
+# Make it executable
+chmod +x localtunnels
 
-::: warning
-This is a warning.
-:::
+# Move it to your PATH
+mv localtunnels /usr/local/bin/localtunnels
+```
 
-::: danger
-This is a dangerous warning.
-:::
+## Linux
 
-::: details
-This is a details block.
-:::
+For ARM64:
 
-## More
+```bash
+# Download the binary
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-linux-arm64 -o localtunnels
 
-Check out the documentation for the [full list of markdown extensions](https://vitepress.dev/guide/markdown).
+# Make it executable
+chmod +x localtunnels
+
+# Move it to your PATH
+mv localtunnels /usr/local/bin/localtunnels
+```
+
+For x64:
+
+```bash
+# Download the binary
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-linux-x64 -o localtunnels
+
+# Make it executable
+chmod +x localtunnels
+
+# Move it to your PATH
+mv localtunnels /usr/local/bin/localtunnels
+```
+
+## Windows
+
+For x64:
+
+```bash
+# Download the binary
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-windows-x64.exe -o localtunnels.exe
+
+# Move it to your PATH (adjust the path as needed)
+move localtunnels.exe C:\Windows\System32\localtunnels.exe
+```
+
+<!-- _Alternatively, you can install:_
+```bash
+brew install localtunnels # wip
+pkgx install localtunnels # wip
+``` -->

@@ -1,54 +1,60 @@
----
-outline: deep
----
-
 <p align="center"><img src="https://github.com/stacksjs/localtunnels/blob/main/.github/art/cover.jpg?raw=true" alt="Social Card of this repo"></p>
 
-# Runtime API Examples
+# A Better Developer Experience
 
-This page demonstrates usage of some of the runtime APIs provided by VitePress.
+> A zero-config local tunnel that's simple, lightweight, and secure.
 
-The main `useData()` API can be used to access site, theme, and page data for the current page. It works in both `.md` and `.vue` files:
+## Features
 
-```md
-<script setup>
-import { useData } from 'vitepress'
+- Simple, lightweight local tunnel
+- Security built-in, including HTTPS
+- IAC, self-hostable _(via AWS)_
+- Custom subdomains
+- CLI & Library
 
-const { theme, page, frontmatter } = useData()
-</script>
+## Changelog
 
-## Results
+Please see our [releases](https://github.com/stacksjs/localtunnels/releases) page for more information on what has changed recently.
 
-### Theme Data
-<pre>{{ theme }}</pre>
+## Contributing
 
-### Page Data
-<pre>{{ page }}</pre>
+Please review the [Contributing Guide](https://github.com/stacksjs/contributing) for details.
 
-### Page Frontmatter
-<pre>{{ frontmatter }}</pre>
-```
+## Community
 
-<script setup>
-import { useData } from 'vitepress'
+For help, discussion about best practices, or any other conversation that would benefit from being searchable:
 
-const { site, theme, page, frontmatter } = useData()
-</script>
+[Discussions on GitHub](https://github.com/stacksjs/stacks/discussions)
 
-## Results
+For casual chit-chat with others using this package:
 
-### Theme Data
+[Join the Stacks Discord Server](https://discord.gg/stacksjs)
 
-<pre>{{ theme }}</pre>
+## Postcardware
 
-### Page Data
+Two things are true: Stacks OSS will always stay open-source, and we do love to receive postcards from wherever Stacks is used! 🌍 _We also publish them on our website. And thank you, Spatie_
 
-<pre>{{ page }}</pre>
+Our address: Stacks.js, 12665 Village Ln #2306, Playa Vista, CA 90094
 
-### Page Frontmatter
+## Sponsors
 
-<pre>{{ frontmatter }}</pre>
+We would like to extend our thanks to the following sponsors for funding Stacks development. If you are interested in becoming a sponsor, please reach out to us.
 
-## More
+- [JetBrains](https://www.jetbrains.com/)
+- [The Solana Foundation](https://solana.com/)
 
-Check out the documentation for the [full list of runtime APIs](https://vitepress.dev/reference/runtime-api#usedata).
+## Credits
+
+- [Chris Breuer](https://github.com/chrisbbreuer)
+- [All Contributors](../../contributors)
+
+## License
+
+The MIT License (MIT). Please see [LICENSE](https://github.com/stacksjs/stacks/tree/main/LICENSE.md) for more information.
+
+Made with 💙
+
+<!-- Badges -->
+
+<!-- [codecov-src]: https://img.shields.io/codecov/c/gh/stacksjs/localtunnels/main?style=flat-square
+[codecov-href]: https://codecov.io/gh/stacksjs/localtunnels -->

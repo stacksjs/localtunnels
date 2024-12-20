@@ -54,6 +54,7 @@ const sidebar = [
     items: [
       { text: 'Introduction', link: '/intro' },
       { text: 'Install', link: '/install' },
+      { text: 'Usage', link: '/usage' },
     ],
   },
 ]
@@ -61,8 +62,8 @@ const sidebar = [
 export default withPwa(
   defineConfig({
     lang: 'en-US',
-    title: 'Local Tunnels',
-    description: 'A better developer environment.',
+    title: 'localtunnels',
+    description: 'A simple and smart tunneling alternative. Without or with self-hosting.',
     lastUpdated: true,
     cleanUrls: true,
     metaChunk: true,
@@ -73,8 +74,8 @@ export default withPwa(
       ['meta', { name: 'theme-color', content: '#0A0ABC' }],
       ['meta', { property: 'og:type', content: 'website' }],
       ['meta', { property: 'og:locale', content: 'en' }],
-      ['meta', { property: 'og:title', content: 'Local Tunnels | A better developer environment.' }],
-      ['meta', { property: 'og:site_name', content: 'Local Tunnels' }],
+      ['meta', { property: 'og:title', content: 'localtunnels | A simple and smart tunneling alternative. Without or with self-hosting.' }],
+      ['meta', { property: 'og:site_name', content: 'localtunnels' }],
       ['meta', { property: 'og:image', content: './images/og-image.jpg' }],
       ['meta', { property: 'og:url', content: 'https://localtunnel.sh/' }],
       // ['script', { 'src': 'https://cdn.usefathom.com/script.js', 'data-site': '', 'data-spa': 'auto', 'defer': '' }],
