@@ -7,7 +7,6 @@ import viteConfig from './vite.config'
 
 // https://vitepress.dev/reference/site-config
 
-
 const analyticsHead: HeadConfig[] = [
   [
     'script',
