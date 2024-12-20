@@ -23,7 +23,7 @@ For M1/M2 Macs (arm64):
 
 ```bash
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-darwin-arm64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-darwin-arm64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -36,7 +36,7 @@ For Intel Macs (amd64):
 
 ```bash
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-darwin-x64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-darwin-x64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -51,7 +51,7 @@ For ARM64:
 
 ```bash
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-linux-arm64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-linux-arm64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -64,7 +64,7 @@ For x64:
 
 ```bash
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-linux-x64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-linux-x64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -79,7 +79,7 @@ For x64:
 
 ```bash
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.10.0/lpx-windows-x64.exe -o localtunnels.exe
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-windows-x64.exe -o localtunnels.exe
 
 # Move it to your PATH (adjust the path as needed)
 move localtunnels.exe C:\Windows\System32\localtunnels.exe
