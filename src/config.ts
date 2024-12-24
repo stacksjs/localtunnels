@@ -1,5 +1,5 @@
 import type { TunnelOptions } from './types'
-import { loadConfig } from 'bun-config'
+import { loadConfig } from 'bunfig'
 
 export const defaultConfig: TunnelOptions = {
   verbose: true,
