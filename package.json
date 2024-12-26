@@ -62,18 +62,18 @@
     "@types/aws-lambda": "^8.10.146",
     "@types/bun": "^1.1.14",
     "@vite-pwa/vitepress": "^0.5.3",
-    "aws-cdk": "^2.173.2",
+    "aws-cdk": "^2.173.3",
     "bun-plugin-dtsx": "^0.21.9",
     "bunfig": "^0.4.0",
     "typescript": "^5.7.2",
-    "unocss": "^0.65.2",
+    "unocss": "^0.65.3",
     "unplugin-icons": "^0.22.0",
     "unplugin-vue-components": "^0.28.0",
     "vite-plugin-pwa": "^0.21.1",
     "vitepress": "^1.5.0"
   },
   "overrides": {
-    "unconfig": "0.3.10"
+    "unconfig": "0.6.0"
   },
   "simple-git-hooks": {
     "pre-commit": "bunx lint-staged"
