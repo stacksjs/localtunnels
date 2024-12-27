@@ -49,5 +49,3 @@ localtunnels start --from localhost:5173 --subdomain test --verbose
 localtunnels --help
 localtunnels --version
 ```
-
-To learn more, head over to the [documentation](https://localtunnels.sh/).

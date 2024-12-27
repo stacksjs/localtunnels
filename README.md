@@ -20,13 +20,13 @@
 
 ## Install
 
-```bash
+```sh
 bun install -d localtunnels
 ```
 
 <!-- _Alternatively, you can install:_
 
-```bash
+```sh
 brew install localtunnels # wip
 pkgx install localtunnels # wip
 ``` -->
@@ -71,13 +71,13 @@ export default config
 
 _Then run:_
 
-```bash
+```sh
 ./localtunnels start
 ```
 
 ### CLI
 
-```bash
+```sh
 localtunnels start --from localhost:5173 --subdomain test --verbose
 localtunnels --help
 localtunnels --version
@@ -87,7 +87,7 @@ To learn more, head over to the [documentation](https://localtunnels.sh/).
 
 ## Testing
 
-```bash
+```sh
 bun test
 ```
 

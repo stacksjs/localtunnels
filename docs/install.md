@@ -1,29 +1,67 @@
 # Install
 
-## Bun & Node.js
+Installing `localtunnels` is easy. Simply pull it in via your package manager of choice, or download the binary directly.
 
-```bash
-bun install -d localtunnels
-npm install -g localtunnels
+## Package Managers
 
-# or, invoke immediately
-bunx localtunnels
-npx localtunnels
+Choose your package manager of choice:
+
+::: code-group
+
+```sh [npm]
+npm install --save-dev localtunnels
+# npm i -d localtunnels
+
+# or, install globally via
+npm i -g localtunnels
 ```
 
-_We are looking to publish this package npm under the name `localtunnels`. We are also hoping npm will release the name for us._
+```sh [bun]
+bun install --dev localtunnels
+# bun add --dev localtunnels
+# bun i -d localtunnels
+
+# or, install globally via
+bun add --global localtunnels
+```
+
+```sh [pnpm]
+pnpm add --save-dev localtunnels
+# pnpm i -d localtunnels
+
+# or, install globally via
+pnpm add --global localtunnels
+```
+
+```sh [yarn]
+yarn add --dev localtunnels
+# yarn i -d localtunnels
+
+# or, install globally via
+yarn global add localtunnels
+```
+
+```sh [brew]
+brew install localtunnels # coming soon
+```
+
+```sh [pkgx]
+pkgx localtunnels # coming soon
+```
+
+:::
+
+Read more about how to use it in the Usage section of the documentation.
 
 ## Binaries
 
-For now, you can download the `localtunnels` binaries from the [releases page](https://github.com/stacksjs/localtunnels/releases/tag/v0.1.1). Choose the binary that matches your platform and architecture:
+Choose the binary that matches your platform and architecture:
 
-## macOS (Darwin)
+::: code-group
 
-For M1/M2 Macs (arm64):
-
-```bash
+```sh [macOS (arm64)]
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-darwin-arm64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.2.0/localtunnels-darwin-arm64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -32,11 +70,9 @@ chmod +x localtunnels
 mv localtunnels /usr/local/bin/localtunnels
 ```
 
-For Intel Macs (amd64):
-
-```bash
+```sh [macOS (x64)]
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-darwin-x64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.2.0/localtunnels-darwin-x64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -45,13 +81,9 @@ chmod +x localtunnels
 mv localtunnels /usr/local/bin/localtunnels
 ```
 
-## Linux
-
-For ARM64:
-
-```bash
+```sh [Linux (arm64)]
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-linux-arm64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.2.0/localtunnels-linux-arm64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -60,11 +92,9 @@ chmod +x localtunnels
 mv localtunnels /usr/local/bin/localtunnels
 ```
 
-For x64:
-
-```bash
+```sh [Linux (x64)]
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-linux-x64 -o localtunnels
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.2.0/localtunnels-linux-x64 -o localtunnels
 
 # Make it executable
 chmod +x localtunnels
@@ -73,20 +103,14 @@ chmod +x localtunnels
 mv localtunnels /usr/local/bin/localtunnels
 ```
 
-## Windows
-
-For x64:
-
-```bash
+```sh [Windows (x64)]
 # Download the binary
-curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.1.0/lpx-windows-x64.exe -o localtunnels.exe
+curl -L https://github.com/stacksjs/localtunnels/releases/download/v0.2.0/localtunnels-windows-x64.exe -o localtunnels.exe
 
 # Move it to your PATH (adjust the path as needed)
 move localtunnels.exe C:\Windows\System32\localtunnels.exe
 ```
 
-<!-- _Alternatively, you can install:_
-```bash
-brew install localtunnels # wip
-pkgx install localtunnels # wip
-``` -->
+::: tip
+You can also find the `localtunnels` binaries in GitHub [releases](https://github.com/stacksjs/localtunnels/releases).
+:::
