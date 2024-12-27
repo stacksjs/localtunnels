@@ -61,7 +61,7 @@ const sidebar = [
 ]
 
 const description = 'A simple and smart tunneling alternative. Without or with self-hosting.'
-const title = 'localtunnels | ' + description
+const title = `localtunnels | ${description}`
 
 export default withPwa(
   defineConfig({
