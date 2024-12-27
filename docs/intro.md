@@ -46,7 +46,7 @@ We would like to extend our thanks to the following sponsors for funding Stacks 
 ## Credits
 
 - [Chris Breuer](https://github.com/chrisbbreuer)
-- [All Contributors](../../contributors)
+- [All Contributors](https://github.com/stacksjs/localtunnels/graphs/contributors)
 
 ## License
 
