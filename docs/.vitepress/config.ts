@@ -2,7 +2,6 @@ import type { HeadConfig } from 'vitepress'
 import { transformerTwoslash } from '@shikijs/vitepress-twoslash'
 import { withPwa } from '@vite-pwa/vitepress'
 import { defineConfig } from 'vitepress'
-
 import viteConfig from './vite.config'
 
 // https://vitepress.dev/reference/site-config
@@ -82,7 +81,7 @@ export default withPwa(
       ['meta', { name: 'author', content: 'Stacks.js, Inc.' }],
       ['meta', {
         name: 'tags',
-        content: 'local, tunnel, localtunnels, stacksjs, domain, https',
+        content: 'local, tunnel, localtunnels, stacksjs, domain, https, ngrok alternative, self-hosted, open-source, free',
       }],
       ['meta', { property: 'og:type', content: 'website' }],
       ['meta', { property: 'og:locale', content: 'en' }],
@@ -137,8 +136,8 @@ export default withPwa(
 
     markdown: {
       theme: {
-        light: 'vitesse-light',
-        dark: 'vitesse-dark',
+        light: 'github-light',
+        dark: 'github-dark'
       },
 
       codeTransformers: [

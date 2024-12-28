@@ -80,7 +80,6 @@ const config: LocalTunnelOptions = {
    */
   maxRequests: 10,
 
-
   /**
    * SSL private key, certificate, and CA certificate to use for the tunnel.
    * @default null
