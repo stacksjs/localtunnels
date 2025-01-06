@@ -2,7 +2,7 @@ import type { HeadConfig } from 'vitepress'
 import { transformerTwoslash } from '@shikijs/vitepress-twoslash'
 import { withPwa } from '@vite-pwa/vitepress'
 import { defineConfig } from 'vitepress'
-import viteConfig from './vite.config'
+import vite from './vite.config'
 
 // https://vitepress.dev/reference/site-config
 
@@ -113,7 +113,7 @@ export default withPwa(
 
       footer: {
         message: 'Released under the MIT License.',
-        copyright: 'Copyright © 2024-present Stacks.js, Inc.',
+        copyright: 'Copyright © 2025-present Stacks.js, Inc.',
       },
 
       socialLinks: [
@@ -148,6 +148,6 @@ export default withPwa(
       ],
     },
 
-    vite: viteConfig,
+    vite,
   }),
 )
