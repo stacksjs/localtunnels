@@ -56,7 +56,7 @@
   },
   "devDependencies": {
     "@iconify-json/carbon": "^1.2.6",
-    "@shikijs/vitepress-twoslash": "^2.3.2",
+    "@shikijs/vitepress-twoslash": "^3.0.0",
     "@stacksjs/cli": "^0.68.2",
     "@stacksjs/eslint-config": "^3.13.1-beta.2",
     "@types/aws-lambda": "^8.10.147",
