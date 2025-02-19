@@ -1,0 +1,85 @@
+---
+description: General information based on the latest ./README.md content
+globs: 
+---
+Update it if APIs change:
+
+
+# localtunnels
+
+> A zero-config local tunnel that's simple, lightweight, and secure.
+
+## Features
+
+- Simple, lightweight local tunnel
+- Security built-in, including HTTPS
+- IAC, self-hostable _(via AWS)_
+- Custom subdomains
+- CLI & Library
+
+## Install
+
+```sh
+bun install -d localtunnels
+```
+
+<!-- _Alternatively, you can install:_
+
+```sh
+brew install localtunnels # wip
+pkgx install localtunnels # wip
+``` -->
+
+## Get Started
+
+There are two ways of using this local tunnel: _as a library or as a CLI._
+
+### Library
+
+Given the npm package is installed:
+
+```ts
+import type { LocalTunnelConfig } from 'localtunnels'
+import { startLocalTunnel } from 'localtunnels'
+
+const config: LocalTunnelConfig = {
+  from: 'localhost:5173',
+  domain: 'stacksjs.dev', // optional, defaults to the stacksjs.dev domain
+  subdomain: 'test', // optional, uses a random subdomain by default
+  verbose: true, // optional, defaults to false
+}
+
+startLocalTunnel(config)
+```
+
+You may als use a configuration file:
+
+```ts
+// tunnel.config.{ts,js}
+import type { LocalTunnelConfig } from '@stacksjs/localtunnels'
+
+const config: LocalTunnelConfig = {
+  from: 'localhost:5173',
+  domain: 'stacksjs.dev', // optional, defaults to the stacksjs.dev domain
+  subdomain: 'test', // optional, uses a random subdomain by default
+  verbose: true, // optional, defaults to false
+}
+
+export default config
+```
+
+_Then run:_
+
+```sh
+./localtunnels start
+```
+
+### CLI
+
+```sh
+localtunnels start --from localhost:5173 --subdomain test --verbose
+localtunnels --help
+localtunnels --version
+```
+
+To learn more, head over to the [documentation](https://localtunnels.sh/).
