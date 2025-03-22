@@ -55,15 +55,15 @@
     "preview:docs": "bun --bun vitepress preview docs"
   },
   "devDependencies": {
-    "@stacksjs/cli": "^0.68.2",
-    "@stacksjs/docs": "^0.69.3",
+    "@stacksjs/cli": "^0.70.10",
+    "@stacksjs/docs": "^0.70.10",
     "@stacksjs/eslint-config": "^3.13.1-beta.2",
     "@types/aws-lambda": "^8.10.147",
-    "@types/bun": "^1.2.2",
-    "aws-cdk": "^2.178.1",
+    "@types/bun": "^1.2.5",
+    "aws-cdk": "^2.1005.0",
     "bun-plugin-dtsx": "^0.21.9",
-    "bunfig": "^0.5.3",
-    "typescript": "^5.7.3",
+    "bunfig": "^0.8.2",
+    "typescript": "^5.8.2",
     "unocss": "^66.0.0"
   },
   "overrides": {
