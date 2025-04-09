@@ -13,3 +13,5 @@ node_modules
 temp
 docs/.vitepress/cache
 storage
+bin/localtunnels
+bin/localtunnels*
