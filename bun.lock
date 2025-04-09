@@ -9,7 +9,7 @@
         "@stacksjs/eslint-config": "^3.13.1-beta.2",
         "@types/aws-lambda": "^8.10.147",
         "@types/bun": "^1.2.2",
-        "aws-cdk": "^2.178.1",
+        "aws-cdk": "^3.0.0",
         "bun-plugin-dtsx": "^0.21.9",
         "bunfig": "^0.5.3",
         "typescript": "^5.7.3",
@@ -631,7 +631,7 @@
 
     "available-typed-arrays": ["available-typed-arrays@1.0.7", "", { "dependencies": { "possible-typed-array-names": "^1.0.0" } }, "sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ=="],
 
-    "aws-cdk": ["aws-cdk@2.1000.2", "", { "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "cdk": "bin/cdk" } }, "sha512-QsXqJhGWjHNqP7etgE3sHOTiDBXItmSKdFKgsm1qPMBabCMyFfmWZnEeUxfZ4sMaIoxvLpr3sqoWSNeLuUk4sg=="],
+    "aws-cdk": ["aws-cdk@3.0.0", "", { "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "cdk": "bin/cdk" } }, "sha512-VBc2jv0In++hzlRwvCDf5VdodTivKE1GsNggudKEAfVCTx0r73vpbY245ktWGJf5yXVl3d2wjfEZv8TRW+i9eQ=="],
 
     "b4a": ["b4a@1.6.7", "", {}, "sha512-OnAYlL5b7LEkALw87fUVafQw5rVR9RjwGd4KUwNQ6DrrNmaVaUCgLipfVlzrPQ4tWOR9P0IXGNOx50jYCCdSJg=="],
 
