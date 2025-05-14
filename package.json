@@ -65,9 +65,11 @@
     "@stacksjs/cli": "^0.68.2",
     "@stacksjs/docs": "^0.69.3",
     "@stacksjs/eslint-config": "^3.13.1-beta.2",
+    "@stacksjs/gitlint": "^0.1.5",
     "@types/aws-lambda": "^8.10.147",
     "@types/bun": "^1.2.2",
     "aws-cdk": "^2.178.1",
+    "bun-git-hooks": "^0.2.16",
     "bun-plugin-dtsx": "^0.21.9",
     "bunfig": "^0.5.3",
     "typescript": "^5.7.3",
@@ -76,10 +78,12 @@
   "overrides": {
     "unconfig": "0.3.10"
   },
-  "simple-git-hooks": {
-    "pre-commit": "bunx lint-staged"
-  },
-  "lint-staged": {
-    "*.{js,ts}": "bunx eslint . --fix"
+  "git-hooks": {
+    "pre-commit": {
+      "staged-lint": {
+        "*.{js,ts,json,yaml,yml,md}": "bunx --bun eslint . --fix"
+      }
+    },
+    "commit-msg": "bunx gitlint .git/COMMIT_EDITMSG"
   }
 }

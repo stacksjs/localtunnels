@@ -10,6 +10,9 @@ const config: ESLintConfig = stacks({
   typescript: true,
   jsonc: true,
   yaml: true,
+  ignores: [
+    'docs/**',
+  ]
 })
 
 export default config

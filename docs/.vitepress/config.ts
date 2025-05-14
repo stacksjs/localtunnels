@@ -58,6 +58,26 @@ const sidebar = [
       { text: 'Config', link: '/config' },
     ],
   },
+  {
+    text: 'Features',
+    items: [
+      { text: 'WebSocket Support', link: '/features/websocket' },
+      { text: 'Custom Subdomains', link: '/features/subdomains' },
+      { text: 'SSL/TLS Support', link: '/features/ssl' },
+      { text: 'Request Forwarding', link: '/features/forwarding' },
+    ],
+  },
+  {
+    text: 'Advanced',
+    items: [
+      { text: 'Server Configuration', link: '/advanced/server-config' },
+      { text: 'Client Configuration', link: '/advanced/client-config' },
+      { text: 'Security Best Practices', link: '/advanced/security' },
+      { text: 'Performance Tuning', link: '/advanced/performance' },
+      { text: 'Troubleshooting', link: '/advanced/troubleshooting' },
+    ],
+  },
+  { text: 'API Reference', link: '/api-reference' },
   { text: 'Showcase', link: '/Showcase' },
 ]
 
