@@ -62,18 +62,18 @@
     "zip:darwin-arm64": "zip -j bin/localtunnels-darwin-arm64.zip bin/localtunnels-darwin-arm64"
   },
   "devDependencies": {
-    "@stacksjs/cli": "^0.68.2",
-    "@stacksjs/docs": "^0.69.3",
+    "@stacksjs/cli": "^0.70.23",
+    "@stacksjs/docs": "^0.70.23",
     "@stacksjs/eslint-config": "^3.13.1-beta.2",
     "@stacksjs/gitlint": "^0.1.5",
-    "@types/aws-lambda": "^8.10.147",
-    "@types/bun": "^1.2.2",
-    "aws-cdk": "^2.178.1",
-    "bun-git-hooks": "^0.2.16",
-    "bun-plugin-dtsx": "^0.21.9",
-    "bunfig": "^0.5.3",
-    "typescript": "^5.7.3",
-    "unocss": "^66.0.0"
+    "@types/aws-lambda": "^8.10.152",
+    "@types/bun": "^1.2.23",
+    "aws-cdk": "^2.1029.3",
+    "bun-git-hooks": "^0.2.19",
+    "bun-plugin-dtsx": "^0.21.12",
+    "bunfig": "^0.15.0",
+    "typescript": "^5.9.2",
+    "unocss": "^66.5.2"
   },
   "overrides": {
     "unconfig": "0.3.10"
