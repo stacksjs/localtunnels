@@ -62,6 +62,7 @@
     "zip:darwin-arm64": "zip -j bin/localtunnels-darwin-arm64.zip bin/localtunnels-darwin-arm64"
   },
   "devDependencies": {
+    "@stacksjs/clarity": "^0.3.23",
     "@stacksjs/cli": "^0.70.23",
     "@stacksjs/docs": "^0.70.23",
     "@stacksjs/eslint-config": "^3.13.1-beta.2",

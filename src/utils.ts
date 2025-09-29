@@ -1,4 +1,8 @@
-/* eslint-disable no-console */
+import { Logger } from '@stacksjs/clarity'
+
+const logger = new Logger('localtunnels', {
+  showTags: false,
+})
 
 /**
  * Debug logging levels
@@ -41,16 +45,16 @@ export function debugLog(
 
   switch (level) {
     case 'error':
-      console.error(`${prefix} ${message}`)
+      logger.error(`${prefix} ${message}`)
       break
     case 'warn':
-      console.warn(`${prefix} ${message}`)
+      logger.warn(`${prefix} ${message}`)
       break
     case 'info':
-      console.info(`${prefix} ${message}`)
+      logger.info(`${prefix} ${message}`)
       break
     default:
-      console.debug(`${prefix} ${message}`)
+      logger.debug(`${prefix} ${message}`)
   }
 }
 

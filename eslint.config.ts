@@ -12,7 +12,7 @@ const config: ESLintConfig = stacks({
   yaml: true,
   ignores: [
     'docs/**',
-  ]
+  ],
 })
 
 export default config
