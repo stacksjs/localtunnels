@@ -1,3 +1,4 @@
+import type { ServerWebSocket } from 'bun'
 import { debugLog } from './utils'
 
 interface TunnelOptions {
@@ -18,7 +19,7 @@ export class TunnelServer {
   private server: ReturnType<typeof Bun.serve> | null = null
   private options: Required<TunnelOptions>
   private responseHandlers: Map<string, (response: any) => void> = new Map()
-  private subdomainSockets: Map<string, Set<WebSocket>> = new Map()
+  private subdomainSockets: Map<string, Set<ServerWebSocket<WebSocketData>>> = new Map()
 
   constructor(options: TunnelOptions = {}) {
     this.options = {
@@ -32,14 +33,14 @@ export class TunnelServer {
     }
   }
 
-  private addSocket(subdomain: string, socket: WebSocket) {
+  private addSocket(subdomain: string, socket: ServerWebSocket<WebSocketData>) {
     if (!this.subdomainSockets.has(subdomain)) {
       this.subdomainSockets.set(subdomain, new Set())
     }
     this.subdomainSockets.get(subdomain)?.add(socket)
   }
 
-  private removeSocket(subdomain: string, socket: WebSocket) {
+  private removeSocket(subdomain: string, socket: ServerWebSocket<WebSocketData>) {
     this.subdomainSockets.get(subdomain)?.delete(socket)
     if (this.subdomainSockets.get(subdomain)?.size === 0) {
       this.subdomainSockets.delete(subdomain)
@@ -148,10 +149,6 @@ export class TunnelServer {
             debugLog('server', `WebSocket closed for subdomain: ${ws.data.subdomain}`, this.options.verbose)
             this.removeSocket(ws.data.subdomain, ws)
           }
-        },
-
-        error: (ws, error) => {
-          debugLog('server', `WebSocket error: ${error}`, this.options.verbose, 'error')
         },
       },
     })
