@@ -11,8 +11,15 @@ const config: ESLintConfig = stacks({
   jsonc: true,
   yaml: true,
   ignores: [
-    'docs/**',
+    'fixtures/**',
+    '**/logger.md',
+    'CHANGELOG.md',
   ],
+  // Temporarily disable due to @stylistic/eslint-plugin crash in tests
+  rules: {
+    'style/indent': 'off',
+    '@stylistic/indent': 'off',
+  },
 })
 
 export default config
