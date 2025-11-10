@@ -117,7 +117,7 @@ export default withPwa(
 
     themeConfig: {
       search: {
-        provider: 'local'
+        provider: 'local',
       },
       logo: {
         light: './images/logo-transparent.svg',
@@ -161,7 +161,7 @@ export default withPwa(
     markdown: {
       theme: {
         light: 'github-light',
-        dark: 'github-dark'
+        dark: 'github-dark',
       },
 
       codeTransformers: [

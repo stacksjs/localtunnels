@@ -27,7 +27,7 @@ const client = new TunnelClient({
   host: 'tunnel.example.com',
   localPort: 8000,
   localHost: 'localhost',
-  secure: true,  // Use secure WebSocket
+  secure: true, // Use secure WebSocket
   reconnect: {
     retries: 5,
     minTimeout: 1000,
@@ -42,7 +42,7 @@ const client = new TunnelClient({
 const client = new TunnelClient({
   port: 3000,
   host: 'tunnel.example.com',
-  subdomain: 'myapp',  // Request specific subdomain
+  subdomain: 'myapp', // Request specific subdomain
   onSubdomainConflict: (subdomain) => {
     console.log(`Subdomain ${subdomain} is already in use`)
   }
@@ -124,7 +124,7 @@ const client = new TunnelClient({
 ### SSL/TLS
 
 ```typescript
-import { readFileSync } from 'fs'
+import { readFileSync } from 'node:fs'
 
 const client = new TunnelClient({
   port: 3000,
@@ -160,7 +160,7 @@ const client = new TunnelClient({
   port: 3000,
   host: 'tunnel.example.com',
   verbose: true,
-  logLevel: 'debug'  // 'error' | 'warn' | 'info' | 'debug'
+  logLevel: 'debug' // 'error' | 'warn' | 'info' | 'debug'
 })
 ```
 
@@ -171,9 +171,9 @@ const client = new TunnelClient({
   port: 3000,
   host: 'tunnel.example.com',
   logger: {
-    info: (message) => console.log(`[INFO] ${message}`),
-    error: (message) => console.error(`[ERROR] ${message}`),
-    debug: (message) => console.debug(`[DEBUG] ${message}`)
+    info: message => console.log(`[INFO] ${message}`),
+    error: message => console.error(`[ERROR] ${message}`),
+    debug: message => console.debug(`[DEBUG] ${message}`)
   }
 })
 ```

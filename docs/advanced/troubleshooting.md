@@ -18,9 +18,9 @@ This guide covers common issues and their solutions when using localtunnels.
 const server = new TunnelServer({
   port: 3000,
   timeout: {
-    connect: 10000,    // Increase connection timeout
-    request: 30000,    // Adjust request timeout
-    response: 30000    // Adjust response timeout
+    connect: 10000, // Increase connection timeout
+    request: 30000, // Adjust request timeout
+    response: 30000 // Adjust response timeout
   }
 })
 ```
@@ -49,7 +49,7 @@ kill -9 <PID>
 ```typescript
 const server = new TunnelServer({
   port: 3000,
-  host: '0.0.0.0',  // Listen on all interfaces
+  host: '0.0.0.0', // Listen on all interfaces
   firewall: {
     allowedPorts: [3000],
     allowedIps: ['0.0.0.0/0']

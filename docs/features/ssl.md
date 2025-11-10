@@ -7,8 +7,8 @@ localtunnels provides built-in SSL/TLS support for secure communication between 
 SSL/TLS can be enabled by providing SSL certificate information in the tunnel options:
 
 ```typescript
+import { readFileSync } from 'node:fs'
 import { TunnelServer } from 'localtunnels'
-import { readFileSync } from 'fs'
 
 const server = new TunnelServer({
   port: 3000,
@@ -58,8 +58,8 @@ mkcert tunnel.example.com
 Here's a complete example of setting up a secure tunnel server:
 
 ```typescript
+import { readFileSync } from 'node:fs'
 import { TunnelServer } from 'localtunnels'
-import { readFileSync } from 'fs'
 
 const server = new TunnelServer({
   port: 3000,

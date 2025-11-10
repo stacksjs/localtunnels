@@ -12,7 +12,7 @@ Optimize connection reuse with connection pooling:
 const server = new TunnelServer({
   port: 3000,
   pool: {
-    min: 2,  // Minimum connections in pool
+    min: 2, // Minimum connections in pool
     max: 10, // Maximum connections in pool
     idleTimeoutMillis: 30000, // Time before idle connections are closed
     acquireTimeoutMillis: 30000 // Time to wait for a connection
@@ -45,10 +45,10 @@ Configure timeouts for different operations:
 const server = new TunnelServer({
   port: 3000,
   timeout: {
-    connect: 5000,    // Connection timeout
-    request: 30000,   // Request timeout
-    response: 30000,  // Response timeout
-    idle: 60000      // Idle timeout
+    connect: 5000, // Connection timeout
+    request: 30000, // Request timeout
+    response: 30000, // Response timeout
+    idle: 60000 // Idle timeout
   }
 })
 ```
@@ -62,7 +62,7 @@ const server = new TunnelServer({
   port: 3000,
   buffer: {
     maxSize: 1024 * 1024, // 1MB
-    highWaterMark: 8192   // 8KB
+    highWaterMark: 8192 // 8KB
   }
 })
 ```
@@ -93,7 +93,7 @@ const server = new TunnelServer({
   gc: {
     enabled: true,
     interval: 30000, // Run GC every 30 seconds
-    threshold: 0.8   // Run GC when memory usage is above 80%
+    threshold: 0.8 // Run GC when memory usage is above 80%
   }
 })
 ```
@@ -198,7 +198,7 @@ const server = new TunnelServer({
   profiling: {
     enabled: true,
     interval: 300000, // Profile every 5 minutes
-    duration: 60000,  // Profile for 1 minute
+    duration: 60000, // Profile for 1 minute
     output: '/path/to/profiles'
   }
 })

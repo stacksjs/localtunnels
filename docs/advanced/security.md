@@ -45,8 +45,8 @@ const server = new TunnelServer({
   auth: {
     type: 'basic',
     users: {
-      'user1': 'password1',
-      'user2': 'password2'
+      user1: 'password1',
+      user2: 'password2'
     }
   }
 })
@@ -135,7 +135,7 @@ const server = new TunnelServer({
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
-    'Content-Security-Policy': "default-src 'self'"
+    'Content-Security-Policy': 'default-src \'self\''
   }
 })
 ```

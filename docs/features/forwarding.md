@@ -11,8 +11,8 @@ import { TunnelServer } from 'localtunnels'
 
 const server = new TunnelServer({
   port: 3000,
-  localPort: 8000,  // Your local service port
-  localHost: 'localhost'  // Your local service host
+  localPort: 8000, // Your local service port
+  localHost: 'localhost' // Your local service host
 })
 
 await server.start()
@@ -47,7 +47,7 @@ const server = new TunnelServer({
   localPort: 8000,
   forwardOptions: {
     pathRewrite: {
-      '^/api': '/v1'  // Rewrite /api to /v1
+      '^/api': '/v1' // Rewrite /api to /v1
     }
   }
 })
@@ -135,8 +135,8 @@ const server = new TunnelServer({
   port: 3000,
   localPort: 8000,
   forwardOptions: {
-    timeout: 5000,  // 5 seconds
-    proxyTimeout: 30000  // 30 seconds
+    timeout: 5000, // 5 seconds
+    proxyTimeout: 30000 // 30 seconds
   }
 })
 ```

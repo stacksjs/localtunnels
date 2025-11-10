@@ -31,7 +31,7 @@ const server = new TunnelServer({
 ### SSL Configuration
 
 ```typescript
-import { readFileSync } from 'fs'
+import { readFileSync } from 'node:fs'
 
 const server = new TunnelServer({
   port: 3000,
@@ -120,9 +120,9 @@ Implement custom logging:
 const server = new TunnelServer({
   port: 3000,
   logger: {
-    info: (message) => console.log(`[INFO] ${message}`),
-    error: (message) => console.error(`[ERROR] ${message}`),
-    debug: (message) => console.debug(`[DEBUG] ${message}`)
+    info: message => console.log(`[INFO] ${message}`),
+    error: message => console.error(`[ERROR] ${message}`),
+    debug: message => console.debug(`[DEBUG] ${message}`)
   }
 })
 ```
