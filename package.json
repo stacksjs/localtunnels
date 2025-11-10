@@ -64,7 +64,7 @@
   "devDependencies": {
     "@stacksjs/cli": "^0.70.23",
     "@stacksjs/docs": "^0.70.23",
-    "@stacksjs/eslint-config": "^3.13.1-beta.2",
+    "@stacksjs/eslint-config": "^4.14.0-beta.3",
     "@types/aws-lambda": "^8.10.157",
     "aws-cdk": "^2.1031.2",
     "better-dx": "^0.2.3",
