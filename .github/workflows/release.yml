@@ -6,8 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  release:
-    name: release
+  npm:
+    name: npm
     runs-on: ubuntu-latest
 
     steps:
