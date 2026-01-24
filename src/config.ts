@@ -11,9 +11,9 @@ let _config: TunnelOptions | null = null
 export async function getConfig(): Promise<TunnelOptions> {
   if (!_config) {
     _config = await loadConfig({
-  name: 'tunnel',
-  defaultConfig,
-})
+      name: 'tunnel',
+      defaultConfig,
+    })
   }
   return _config
 }

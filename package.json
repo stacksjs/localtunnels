@@ -1,8 +1,8 @@
 {
   "name": "localtunnels",
   "type": "module",
-  "version": "0.1.1",
-  "description": "A simple and smart tunneling alternative.",
+  "version": "0.2.0",
+  "description": "A simple and smart tunneling solution. Expose your localhost to the world.",
   "author": "Chris Breuer <chris@stacksjs.org>",
   "license": "MIT",
   "homepage": "https://github.com/stacksjs/localtunnels",
@@ -16,7 +16,13 @@
   "keywords": [
     "local",
     "tunnel",
+    "localtunnel",
+    "ngrok",
     "self-hosted",
+    "websocket",
+    "proxy",
+    "expose",
+    "localhost",
     "bun",
     "stacks",
     "typescript",
@@ -24,15 +30,24 @@
   ],
   "exports": {
     ".": {
+      "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
+    },
+    "./cloud": {
+      "types": "./dist/src/cloud/index.d.ts",
+      "import": "./dist/src/cloud/index.js"
     }
   },
   "module": "./dist/src/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "bin": {
-    "localtunnel": "./dist/bin/cli.js"
+    "localtunnel": "./dist/bin/cli.js",
+    "lt": "./dist/bin/cli.js"
   },
-  "files": ["README.md", "dist"],
+  "files": [
+    "README.md",
+    "dist"
+  ],
   "scripts": {
     "build": "bun build.ts && bun run compile",
     "compile": "bun build ./bin/cli.ts --compile --minify --outfile bin/localtunnels",
@@ -49,7 +64,7 @@
     "prepublishOnly": "bun --bun run build && bun run compile:all && bun run zip",
     "release": "bun run changelog && bunx bumpp package.json --all",
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit",
+    "typecheck": "bunx tsc --noEmit --project tsconfig.json",
     "dev:docs": "bun --bun vitepress dev docs",
     "build:docs": "bun --bun vitepress build docs",
     "preview:docs": "bun --bun vitepress preview docs",
@@ -59,14 +74,29 @@
     "zip:linux-arm64": "zip -j bin/localtunnels-linux-arm64.zip bin/localtunnels-linux-arm64",
     "zip:windows-x64": "zip -j bin/localtunnels-windows-x64.zip bin/localtunnels-windows-x64.exe",
     "zip:darwin-x64": "zip -j bin/localtunnels-darwin-x64.zip bin/localtunnels-darwin-x64",
-    "zip:darwin-arm64": "zip -j bin/localtunnels-darwin-arm64.zip bin/localtunnels-darwin-arm64"
+    "zip:darwin-arm64": "zip -j bin/localtunnels-darwin-arm64.zip bin/localtunnels-darwin-arm64",
+    "deploy": "bun run bin/cli.ts deploy",
+    "destroy": "bun run bin/cli.ts destroy",
+    "server": "bun run bin/cli.ts server",
+    "client": "bun run bin/cli.ts start"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "bunfig": "^0.8.0"
   },
   "devDependencies": {
     "@stacksjs/cli": "^0.70.23",
     "@stacksjs/docs": "^0.70.23",
     "@stacksjs/eslint-config": "^4.14.0-beta.3",
     "@types/aws-lambda": "^8.10.157",
-    "aws-cdk": "^2.1031.2",
+    "@types/bun": "^1.2.3",
     "better-dx": "^0.2.3",
     "unocss": "^66.5.5"
   },

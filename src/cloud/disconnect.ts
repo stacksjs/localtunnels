@@ -1,25 +1,69 @@
-import type { APIGatewayProxyWebsocketHandlerV2 } from 'aws-lambda'
-import process from 'node:process'
-import { DeleteItemCommand, DynamoDBClient } from '@aws-sdk/client-dynamodb'
+/**
+ * Lambda handler for WebSocket $disconnect route
+ * This is deployed to AWS Lambda and uses the AWS SDK v3
+ */
 
-const dynamoDB = new DynamoDBClient({})
-const TABLE_NAME = process.env.TABLE_NAME!
+export async function handler(event: any): Promise<any> {
+  const { DynamoDBClient, DeleteItemCommand, GetItemCommand } = await import('@aws-sdk/client-dynamodb')
 
-export const handler: APIGatewayProxyWebsocketHandlerV2 = async (event) => {
-  const connectionId = event.requestContext.connectionId
+  const dynamodb = new DynamoDBClient({})
+  const TABLE_NAME = process.env.TABLE_NAME!
+
+  const connectionId = event.requestContext?.connectionId
 
   try {
-    await dynamoDB.send(new DeleteItemCommand({
+    // First, get the connection to log what subdomain is being released
+    const existing = await dynamodb.send(new GetItemCommand({
       TableName: TABLE_NAME,
       Key: {
         connectionId: { S: connectionId },
       },
     }))
 
-    return { statusCode: 200, body: 'Disconnected' }
+    const subdomain = existing.Item?.subdomain?.S
+
+    // Delete the connection record
+    await dynamodb.send(new DeleteItemCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        connectionId: { S: connectionId },
+      },
+    }))
+
+    console.log(`Connection closed: ${connectionId}${subdomain ? ` (subdomain: ${subdomain})` : ''}`)
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: 'Disconnected',
+        connectionId,
+        subdomain: subdomain || null,
+      }),
+    }
   }
   catch (error) {
     console.error('Disconnection error:', error)
-    return { statusCode: 500, body: 'Failed to disconnect' }
+
+    // Still try to delete even if getting the record failed
+    try {
+      const { DeleteItemCommand: DeleteCmd } = await import('@aws-sdk/client-dynamodb')
+      await dynamodb.send(new DeleteCmd({
+        TableName: TABLE_NAME,
+        Key: {
+          connectionId: { S: connectionId },
+        },
+      }))
+    }
+    catch {
+      // Ignore secondary errors
+    }
+
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        error: 'Disconnection error',
+        message: 'An error occurred during disconnection, but the connection was likely cleaned up',
+      }),
+    }
   }
 }

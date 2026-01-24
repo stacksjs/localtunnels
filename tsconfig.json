@@ -20,5 +20,15 @@
     "skipDefaultLibCheck": true,
     "skipLibCheck": true
   },
-  "exclude": ["src/cloud/**/*"]
+  "include": [
+    "src/**/*.ts",
+    "bin/**/*.ts"
+  ],
+  "exclude": [
+    "src/cloud/**",
+    "dist/**",
+    "node_modules/**",
+    "bunpress.config.ts",
+    "docs/**"
+  ]
 }

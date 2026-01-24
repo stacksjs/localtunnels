@@ -1,13 +1,17 @@
-import process from 'node:process'
-import * as cdk from 'aws-cdk-lib'
-import { TunnelStack } from './tunnel-stack'
-import 'source-map-support/register'
+/**
+ * LocalTunnels Cloud Infrastructure
+ * Uses ts-cloud for AWS deployment
+ */
 
-const app = new cdk.App()
+// Export Lambda handlers for deployment
+export { handler as connectHandler } from './connect'
+// Export deployment utilities
+export { deployTunnelInfrastructure, destroyTunnelInfrastructure } from './deploy'
+export type { TunnelDeployConfig, TunnelDeployResult } from './deploy'
+export { handler as disconnectHandler } from './disconnect'
 
-new TunnelStack(app, 'TunnelStack', {
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
-  },
-})
+// Export helpers
+export * from './helpers'
+export { handler as httpHandler } from './https'
+
+export { handler as messageHandler } from './message'

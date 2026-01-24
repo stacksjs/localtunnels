@@ -1,8 +1,10 @@
-import { Logger } from '@stacksjs/clarity'
-
-const logger = new Logger('localtunnels', {
-  showTags: false,
-})
+// Simple console logger - using warn/error which are allowed by lint
+const logger = {
+  debug: (msg: string) => console.warn(`[DEBUG] ${msg}`),
+  info: (msg: string) => console.warn(`[INFO] ${msg}`),
+  warn: (msg: string) => console.warn(msg),
+  error: (msg: string) => console.error(msg),
+}
 
 /**
  * Debug logging levels

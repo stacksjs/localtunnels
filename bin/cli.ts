@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+/* eslint-disable node/prefer-global/process */
 import { CAC } from '@stacksjs/cli'
 import { version } from '../package.json'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
@@ -22,9 +23,14 @@ interface ServerOptions {
   domain?: string
 }
 
+interface DeployOptions {
+  region?: string
+  prefix?: string
+  verbose?: boolean
+}
+
 // Default tunnel server
 const DEFAULT_SERVER = 'localtunnel.dev'
-const DEFAULT_PORT = 3000
 
 cli
   .command('start', 'Start a local tunnel to expose your local server')
@@ -87,11 +93,32 @@ cli
       process.on('SIGINT', cleanup)
       process.on('SIGTERM', cleanup)
 
+      // Set up event listeners
+      client.on('request', (req) => {
+        if (options.verbose) {
+          console.log(`→ ${req.method} ${req.url}`)
+        }
+      })
+
+      client.on('response', (res) => {
+        if (options.verbose) {
+          console.log(`← ${res.status} (${res.size} bytes, ${res.duration}ms)`)
+        }
+      })
+
+      client.on('reconnecting', (info) => {
+        console.log(`Reconnecting... (attempt ${info.attempt}/${info.maxAttempts})`)
+      })
+
+      client.on('error', (err) => {
+        if (options.verbose) {
+          console.error(`Error: ${err}`)
+        }
+      })
+
       await client.connect()
 
-      const tunnelUrl = secure
-        ? `https://${subdomain}.${serverHost}`
-        : `http://${subdomain}.${serverHost}`
+      const tunnelUrl = client.getTunnelUrl()
 
       console.log('')
       console.log('╔══════════════════════════════════════════════════════════════╗')
@@ -162,6 +189,15 @@ cli
       process.on('SIGINT', cleanup)
       process.on('SIGTERM', cleanup)
 
+      // Set up event listeners
+      server.on('connection', (info) => {
+        console.log(`+ Client connected: ${info.subdomain}`)
+      })
+
+      server.on('disconnection', (info) => {
+        console.log(`- Client disconnected: ${info.subdomain}`)
+      })
+
       await server.start()
 
       console.log('╔══════════════════════════════════════════════════════════════╗')
@@ -187,6 +223,109 @@ cli
   })
 
 cli
+  .command('deploy', 'Deploy tunnel infrastructure to AWS using ts-cloud')
+  .option('--region <region>', 'AWS region', { default: 'us-east-1' })
+  .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
+  .option('--verbose', 'Enable verbose logging')
+  .action(async (options: DeployOptions) => {
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║              localtunnels cloud deployment                   ║
+╚══════════════════════════════════════════════════════════════╝
+`)
+
+    console.log(`Region:          ${options.region}`)
+    console.log(`Prefix:          ${options.prefix}`)
+    console.log('')
+    console.log('Deploying infrastructure...')
+    console.log('')
+
+    try {
+      const cloudModule = '../src/cloud/deploy'
+      const { deployTunnelInfrastructure } = await import(/* @vite-ignore */ cloudModule) as any
+
+      const result = await deployTunnelInfrastructure({
+        region: options.region,
+        prefix: options.prefix,
+        verbose: options.verbose,
+      })
+
+      console.log('')
+      console.log('╔══════════════════════════════════════════════════════════════╗')
+      console.log('║                   DEPLOYMENT COMPLETE                        ║')
+      console.log('╚══════════════════════════════════════════════════════════════╝')
+      console.log('')
+      console.log('Resources created:')
+      console.log(`  DynamoDB Tables:`)
+      console.log(`    - ${result.connectionsTable}`)
+      console.log(`    - ${result.responsesTable}`)
+      console.log('')
+      console.log(`  Lambda Functions:`)
+      console.log(`    - ${result.functions.http}`)
+      console.log(`    - ${result.functions.message}`)
+      console.log('')
+      console.log('Endpoints:')
+      if (result.httpUrl) {
+        console.log(`  HTTP URL:      ${result.httpUrl}`)
+      }
+      if (result.wsUrl) {
+        console.log(`  Message URL:   ${result.wsUrl}`)
+      }
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`Deployment failed: ${error.message}`)
+      if (options.verbose) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  })
+
+cli
+  .command('destroy', 'Destroy tunnel infrastructure from AWS')
+  .option('--region <region>', 'AWS region', { default: 'us-east-1' })
+  .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
+  .option('--verbose', 'Enable verbose logging')
+  .action(async (options: DeployOptions) => {
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║              localtunnels cloud destruction                  ║
+╚══════════════════════════════════════════════════════════════╝
+`)
+
+    console.log(`Region:          ${options.region}`)
+    console.log(`Prefix:          ${options.prefix}`)
+    console.log('')
+    console.log('Destroying infrastructure...')
+    console.log('')
+
+    try {
+      const cloudModuleD = '../src/cloud/deploy'
+      const { destroyTunnelInfrastructure } = await import(/* @vite-ignore */ cloudModuleD) as any
+
+      await destroyTunnelInfrastructure({
+        region: options.region,
+        prefix: options.prefix,
+        verbose: options.verbose,
+      })
+
+      console.log('')
+      console.log('╔══════════════════════════════════════════════════════════════╗')
+      console.log('║                  DESTRUCTION COMPLETE                        ║')
+      console.log('╚══════════════════════════════════════════════════════════════╝')
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`Destruction failed: ${error.message}`)
+      if (options.verbose) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  })
+
+cli
   .command('status', 'Check tunnel server status')
   .option('--server <server>', 'Tunnel server URL', { default: DEFAULT_SERVER })
   .action(async (options: { server: string }) => {
@@ -203,7 +342,12 @@ cli
       })
 
       if (response.ok) {
-        const status = await response.json()
+        const status = await response.json() as {
+          version?: string
+          connections?: number
+          uptime?: string
+          activeSubdomains?: string[]
+        }
         console.log('')
         console.log('Server Status: ONLINE')
         console.log(`Version: ${status.version || 'unknown'}`)
@@ -212,6 +356,9 @@ cli
         }
         if (status.uptime) {
           console.log(`Uptime: ${status.uptime}`)
+        }
+        if (status.activeSubdomains?.length) {
+          console.log(`Active subdomains: ${status.activeSubdomains.join(', ')}`)
         }
       }
       else {
@@ -243,6 +390,14 @@ USAGE:
   localtunnels start --port 3000
   localtunnels server --port 8080
 
+COMMANDS:
+  start              Start a tunnel client (default)
+  server             Start a self-hosted tunnel server
+  deploy             Deploy to AWS using ts-cloud
+  destroy            Remove AWS infrastructure
+  status             Check tunnel server status
+  info               Show this information
+
 EXAMPLES:
   # Expose local port 3000 (default)
   localtunnels
@@ -258,6 +413,9 @@ EXAMPLES:
 
   # Start your own tunnel server
   localtunnels server --port 8080 --domain mytunnel.example.com
+
+  # Deploy to AWS
+  localtunnels deploy --region us-east-1 --prefix mytunnel
 
 ENVIRONMENT VARIABLES:
   TUNNEL_SERVER     - Default tunnel server URL
