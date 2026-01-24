@@ -5,8 +5,18 @@ export const defaultConfig: TunnelOptions = {
   verbose: true,
 }
 
-// eslint-disable-next-line antfu/no-top-level-await
-export const config: TunnelOptions = await loadConfig({
+// Lazy-loaded config to avoid top-level await (enables bun --compile)
+let _config: TunnelOptions | null = null
+
+export async function getConfig(): Promise<TunnelOptions> {
+  if (!_config) {
+    _config = await loadConfig({
   name: 'tunnel',
   defaultConfig,
 })
+  }
+  return _config
+}
+
+// For backwards compatibility - synchronous access with default fallback
+export const config: TunnelOptions = defaultConfig
