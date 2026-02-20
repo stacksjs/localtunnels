@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
@@ -29,12 +29,12 @@ jobs:
         run: bun install
 
       - name: Publish
-        run: pantry npm:publish --access public
+        run: pantry publish --npm --access public
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
-        uses: stacksjs/action-releaser@v1.2.6
+        uses: stacksjs/action-releaser@v1.2.9
         with:
           files: |
             bin/localtunnels-linux-x64.zip
