@@ -57,8 +57,8 @@
     "compile:windows-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-windows-x64 --outfile bin/localtunnels-windows-x64.exe",
     "compile:darwin-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-darwin-x64 --outfile bin/localtunnels-darwin-x64",
     "compile:darwin-arm64": "bun build ./bin/cli.ts --compile --minify --target=bun-darwin-arm64 --outfile bin/localtunnels-darwin-arm64",
-    "lint": "bunx --bun eslint .",
-    "lint:fix": "bunx --bun eslint . --fix",
+    "lint": "bunx --bun pickier lint .",
+    "lint:fix": "bunx --bun pickier lint . --fix",
     "fresh": "bunx rimraf node_modules/ bun.lock && bun i",
     "changelog": "bunx changelogen --output CHANGELOG.md",
     "prepublishOnly": "bun --bun run build && bun run compile:all && bun run zip",
@@ -78,7 +78,9 @@
     "deploy": "bun run bin/cli.ts deploy",
     "destroy": "bun run bin/cli.ts destroy",
     "server": "bun run bin/cli.ts server",
-    "client": "bun run bin/cli.ts start"
+    "client": "bun run bin/cli.ts start",
+    "format": "bunx --bun pickier format .",
+    "format:fix": "bunx --bun pickier format . --write"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
@@ -94,7 +96,6 @@
   "devDependencies": {
     "@stacksjs/cli": "^0.70.23",
     "@stacksjs/docs": "^0.70.23",
-    "@stacksjs/eslint-config": "^4.14.0-beta.3",
     "@types/aws-lambda": "^8.10.157",
     "@types/bun": "^1.2.3",
     "better-dx": "^0.2.3",
@@ -106,7 +107,7 @@
   "git-hooks": {
     "pre-commit": {
       "staged-lint": {
-        "*.{js,ts,json,yaml,yml,md}": "bunx --bun eslint . --fix"
+        "*.{js,ts,json,yaml,yml,md}": "bunx --bun pickier lint --fix"
       }
     },
     "commit-msg": "bunx gitlint .git/COMMIT_EDITMSG"
