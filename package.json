@@ -97,8 +97,7 @@
     "@stacksjs/cli": "^0.70.23",
     "@stacksjs/docs": "^0.70.23",
     "@types/aws-lambda": "^8.10.157",
-    "@types/bun": "^1.2.3",
-    "better-dx": "^0.2.3",
+    "better-dx": "^0.2.5",
     "unocss": "^66.5.5"
   },
   "overrides": {
