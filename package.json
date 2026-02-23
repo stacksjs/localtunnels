@@ -62,7 +62,7 @@
     "fresh": "bunx rimraf node_modules/ bun.lock && bun i",
     "changelog": "bunx changelogen --output CHANGELOG.md",
     "prepublishOnly": "bun --bun run build && bun run compile:all && bun run zip",
-    "release": "bun run changelog && bunx bumpp package.json --all",
+    "release": "bun --bun run changelog && bunx --bun bumpp package.json --all",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit --project tsconfig.json",
     "dev:docs": "bun --bun vitepress dev docs",
