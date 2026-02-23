@@ -129,6 +129,7 @@ export function isWebSocketSupported(): boolean {
  * @param options.protocol - The protocol (default: 'http')
  * @returns The formatted URL
  */
+// eslint-disable-next-line pickier/no-unused-vars
 export function formatUrl({
   protocol = 'http',
   host,

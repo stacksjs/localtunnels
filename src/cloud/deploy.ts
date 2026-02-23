@@ -306,7 +306,7 @@ export async function deployTunnelInfrastructure(
   const handlerCode = generateHandlerCode(connectionsTableName, responsesTableName)
 
   // HTTP Handler Function
-  const httpFunction = await createOrUpdateFunction(lambda, {
+  const _httpFunction = await createOrUpdateFunction(lambda, {
     FunctionName: httpFunctionName,
     Runtime: 'nodejs20.x',
     Role: lambdaRoleArn,
@@ -355,7 +355,7 @@ export async function deployTunnelInfrastructure(
   // WebSocket-like Handler (using Lambda Function URL with streaming)
   // Note: For true WebSocket support, you'd use API Gateway WebSocket API
   // This is a simplified HTTP-based approach
-  const wsFunction = await createOrUpdateFunction(lambda, {
+  const _wsFunction = await createOrUpdateFunction(lambda, {
     FunctionName: messageFunctionName,
     Runtime: 'nodejs20.x',
     Role: lambdaRoleArn,
@@ -596,8 +596,8 @@ async function createOrUpdateFunction(
  * Generate Lambda handler code
  */
 function generateHandlerCode(
-  connectionsTable: string,
-  responsesTable: string,
+  _connectionsTable: string,
+  _responsesTable: string,
 ): { http: string, message: string } {
   const httpCode = `
 const { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand } = require('@aws-sdk/client-dynamodb');
