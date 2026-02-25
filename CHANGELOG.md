@@ -8,6 +8,19 @@
 ### 🏡 Chore
 
 - Wip ([cf6ee5c](https://github.com/stacksjs/localtunnels/commit/cf6ee5c))
+- Wip ([5f971c9](https://github.com/stacksjs/localtunnels/commit/5f971c9))
+
+### ❤️ Contributors
+
+- Chris ([@chrisbbreuer](https://github.com/chrisbbreuer))
+
+## v0.2.1...main
+
+[compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.1...main)
+
+### 🏡 Chore
+
+- Wip ([cf6ee5c](https://github.com/stacksjs/localtunnels/commit/cf6ee5c))
 
 ### ❤️ Contributors
 
