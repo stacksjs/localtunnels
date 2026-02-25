@@ -124,13 +124,13 @@ async function importTsCloud(): Promise<any> {
 export async function deployTunnelInfrastructure(
   config: TunnelDeployConfig = {},
 ): Promise<TunnelDeployResult> {
-  let EC2Client: any, Route53Client: any, AWSClient: any
+  let EC2Client: any, Route53Client: any, SSMClient: any
 
   try {
     const tsCloud = await importTsCloud()
     EC2Client = tsCloud.EC2Client
     Route53Client = tsCloud.Route53Client
-    AWSClient = tsCloud.AWSClient
+    SSMClient = tsCloud.SSMClient
   }
   catch {
     throw new Error(
@@ -150,18 +150,6 @@ export async function deployTunnelInfrastructure(
   }
 
   const ec2 = new EC2Client(region)
-  const awsClient = new AWSClient()
-
-  // Helper to make raw EC2 API calls for methods not yet in ts-cloud's EC2Client
-  async function rawEc2Call(params: Record<string, string>): Promise<any> {
-    return awsClient.request({
-      service: 'ec2',
-      region,
-      method: 'POST',
-      path: '/',
-      queryParams: { Version: '2016-11-15', ...params },
-    })
-  }
 
   // ============================================
   // Step 1: Find or create VPC and public subnet
@@ -207,20 +195,19 @@ export async function deployTunnelInfrastructure(
 
       // Create and attach an internet gateway for public access
       log('Creating internet gateway...')
-      const igwResult = await rawEc2Call({
-        Action: 'CreateInternetGateway',
-        'TagSpecification.1.ResourceType': 'internet-gateway',
-        'TagSpecification.1.Tag.1.Key': 'Name',
-        'TagSpecification.1.Tag.1.Value': `${prefix}-tunnel-igw`,
-        'TagSpecification.1.Tag.2.Key': 'Project',
-        'TagSpecification.1.Tag.2.Value': 'localtunnels',
+      const igwResult = await ec2.createInternetGateway({
+        TagSpecifications: [{
+          ResourceType: 'internet-gateway',
+          Tags: [
+            { Key: 'Name', Value: `${prefix}-tunnel-igw` },
+            { Key: 'Project', Value: 'localtunnels' },
+          ],
+        }],
       })
-      const igwId = igwResult?.CreateInternetGatewayResponse?.internetGateway?.internetGatewayId
-        || igwResult?.internetGateway?.internetGatewayId
+      const igwId = igwResult.InternetGatewayId
       if (igwId) {
         log(`Created internet gateway: ${igwId}`)
-        await rawEc2Call({
-          Action: 'AttachInternetGateway',
+        await ec2.attachInternetGateway({
           InternetGatewayId: igwId,
           VpcId: vpcId,
         })
@@ -235,8 +222,7 @@ export async function deployTunnelInfrastructure(
         })
         const mainRouteTableId = routeTables.RouteTables?.[0]?.RouteTableId
         if (mainRouteTableId) {
-          await rawEc2Call({
-            Action: 'CreateRoute',
+          await ec2.createRoute({
             RouteTableId: mainRouteTableId,
             DestinationCidrBlock: '0.0.0.0/0',
             GatewayId: igwId,
@@ -350,18 +336,9 @@ export async function deployTunnelInfrastructure(
   let amiId: string
 
   try {
-    const ssmResult = await awsClient.request({
-      service: 'ssm',
-      region,
-      method: 'POST',
-      path: '/',
-      headers: {
-        'Content-Type': 'application/x-amz-json-1.1',
-        'X-Amz-Target': 'AmazonSSM.GetParameter',
-      },
-      body: JSON.stringify({
-        Name: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64',
-      }),
+    const ssm = new SSMClient(region)
+    const ssmResult = await ssm.getParameter({
+      Name: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64',
     })
     amiId = ssmResult.Parameter?.Value
     if (!amiId) {
@@ -391,28 +368,24 @@ export async function deployTunnelInfrastructure(
 
   log(`Launching ${instanceType} instance...`)
 
-  const runParams: Record<string, string> = {
-    'Action': 'RunInstances',
-    'ImageId': amiId,
-    'InstanceType': instanceType,
-    'MinCount': '1',
-    'MaxCount': '1',
-    'SubnetId': subnetId!,
-    'SecurityGroupId.1': securityGroupId,
-    'UserData': btoa(userData),
-    'TagSpecification.1.ResourceType': 'instance',
-    'TagSpecification.1.Tag.1.Key': 'Name',
-    'TagSpecification.1.Tag.1.Value': `${prefix}-tunnel-server`,
-    'TagSpecification.1.Tag.2.Key': 'Project',
-    'TagSpecification.1.Tag.2.Value': 'localtunnels',
-  }
+  const runResult = await ec2.runInstances({
+    ImageId: amiId,
+    InstanceType: instanceType,
+    MinCount: 1,
+    MaxCount: 1,
+    SubnetId: subnetId!,
+    SecurityGroupIds: [securityGroupId],
+    UserData: btoa(userData),
+    TagSpecifications: [{
+      ResourceType: 'instance',
+      Tags: [
+        { Key: 'Name', Value: `${prefix}-tunnel-server` },
+        { Key: 'Project', Value: 'localtunnels' },
+      ],
+    }],
+  })
 
-  if (config.keyName) {
-    runParams.KeyName = config.keyName
-  }
-
-  const runResult = await rawEc2Call(runParams)
-  const instanceId = extractInstanceId(runResult)
+  const instanceId = runResult.Instances?.[0]?.InstanceId
 
   if (!instanceId) {
     log(`RunInstances response: ${JSON.stringify(runResult, null, 2)}`)
@@ -420,6 +393,10 @@ export async function deployTunnelInfrastructure(
   }
 
   log(`Launched instance: ${instanceId}`)
+
+  if (config.keyName) {
+    log(`Note: Key pair "${config.keyName}" was not attached. Use --key-name with runInstances for SSH access.`)
+  }
 
   // ============================================
   // Step 6: Wait for instance to be running
@@ -556,13 +533,12 @@ export async function deployTunnelInfrastructure(
 export async function destroyTunnelInfrastructure(
   config: TunnelDeployConfig = {},
 ): Promise<void> {
-  let EC2Client: any, Route53Client: any, AWSClient: any
+  let EC2Client: any, Route53Client: any
 
   try {
     const tsCloud = await importTsCloud()
     EC2Client = tsCloud.EC2Client
     Route53Client = tsCloud.Route53Client
-    AWSClient = tsCloud.AWSClient
   }
   catch {
     throw new Error(
@@ -581,17 +557,6 @@ export async function destroyTunnelInfrastructure(
   }
 
   const ec2 = new EC2Client(region)
-  const awsClient = new AWSClient()
-
-  async function rawEc2Call(params: Record<string, string>): Promise<any> {
-    return awsClient.request({
-      service: 'ec2',
-      region,
-      method: 'POST',
-      path: '/',
-      queryParams: { Version: '2016-11-15', ...params },
-    })
-  }
 
   // ============================================
   // Step 1: Find instance by tag
@@ -638,10 +603,7 @@ export async function destroyTunnelInfrastructure(
     if (address.AssociationId) {
       log('Disassociating Elastic IP...')
       try {
-        await rawEc2Call({
-          Action: 'DisassociateAddress',
-          AssociationId: address.AssociationId,
-        })
+        await ec2.disassociateAddress(address.AssociationId)
         log('Elastic IP disassociated')
       }
       catch (error: any) {
@@ -650,16 +612,15 @@ export async function destroyTunnelInfrastructure(
     }
 
     // Release the Elastic IP
-    log('Releasing Elastic IP...')
-    try {
-      await rawEc2Call({
-        Action: 'ReleaseAddress',
-        AllocationId: address.AllocationId!,
-      })
-      log('Elastic IP released')
-    }
-    catch (error: any) {
-      log(`Warning: Could not release Elastic IP: ${error.message}`)
+    if (address.AllocationId) {
+      log('Releasing Elastic IP...')
+      try {
+        await ec2.releaseAddress(address.AllocationId)
+        log('Elastic IP released')
+      }
+      catch (error: any) {
+        log(`Warning: Could not release Elastic IP: ${error.message}`)
+      }
     }
   }
   else {
@@ -698,10 +659,7 @@ export async function destroyTunnelInfrastructure(
   if (sg?.GroupId) {
     log(`Deleting security group: ${sg.GroupId}...`)
     try {
-      await rawEc2Call({
-        Action: 'DeleteSecurityGroup',
-        GroupId: sg.GroupId,
-      })
+      await ec2.deleteSecurityGroup(sg.GroupId)
       log('Security group deleted')
     }
     catch (error: any) {
@@ -765,31 +723,6 @@ export async function destroyTunnelInfrastructure(
   }
 
   log('Destruction complete!')
-}
-
-/**
- * Extract instance ID from the raw RunInstances API response.
- * Handles both camelCase XML-parsed and PascalCase SDK-style responses.
- */
-function extractInstanceId(result: any): string | undefined {
-  // Try the raw XML-parsed structure (camelCase)
-  const response = result.RunInstancesResponse || result
-  const instancesSet = response.instancesSet
-  if (instancesSet) {
-    const item = instancesSet.item
-    if (Array.isArray(item)) {
-      return item[0]?.instanceId
-    }
-    return item?.instanceId
-  }
-
-  // Try SDK-style structure (PascalCase)
-  const reservationInstances = response.Instances || response.instances
-  if (Array.isArray(reservationInstances)) {
-    return reservationInstances[0]?.InstanceId || reservationInstances[0]?.instanceId
-  }
-
-  return undefined
 }
 
 /**

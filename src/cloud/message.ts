@@ -1,12 +1,15 @@
 /**
  * Lambda handler for WebSocket messages
- * This is deployed to AWS Lambda and uses the AWS SDK v3
+ * Uses ts-cloud DynamoDBClient instead of @aws-sdk
+ *
+ * Note: These Lambda handlers are part of the legacy Lambda+DynamoDB architecture.
+ * The primary deployment now uses EC2 with TunnelServer directly.
  */
 
 export async function handler(event: any): Promise<any> {
-  const { DynamoDBClient } = await import('@aws-sdk/client-dynamodb')
+  const { DynamoDBClient } = await import('@stacksjs/ts-cloud')
 
-  const dynamodb = new DynamoDBClient({})
+  const dynamodb = new DynamoDBClient(process.env.AWS_REGION || 'us-east-1')
   const TABLE_NAME = process.env.TABLE_NAME!
   const RESPONSE_TABLE_NAME = process.env.RESPONSE_TABLE_NAME!
 
@@ -54,9 +57,6 @@ async function handleReady(
   event: any,
   tableName: string,
 ): Promise<{ statusCode: number, body: string }> {
-  const { UpdateItemCommand } = await import('@aws-sdk/client-dynamodb')
-  const { ApiGatewayManagementApiClient, PostToConnectionCommand } = await import('@aws-sdk/client-apigatewaymanagementapi')
-
   const subdomain = message.subdomain
 
   if (!subdomain) {
@@ -70,7 +70,7 @@ async function handleReady(
 
   try {
     // Update the connection with the subdomain
-    await dynamodb.send(new UpdateItemCommand({
+    await dynamodb.updateItem({
       TableName: tableName,
       Key: {
         connectionId: { S: connectionId },
@@ -80,20 +80,29 @@ async function handleReady(
         ':subdomain': { S: subdomain },
         ':readyAt': { N: Date.now().toString() },
       },
-    }))
+    })
 
-    // Send confirmation back to client
+    // Send confirmation back to client via API Gateway Management API
+    // Note: This uses the raw AWS API since ts-cloud doesn't have an API Gateway Management client yet
+    const { AWSClient } = await import('@stacksjs/ts-cloud')
+    const aws = new AWSClient({ region: process.env.AWS_REGION || 'us-east-1' })
+
     const endpoint = `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-    const apiGateway = new ApiGatewayManagementApiClient({ endpoint })
 
-    await apiGateway.send(new PostToConnectionCommand({
-      ConnectionId: connectionId,
-      Data: Buffer.from(JSON.stringify({
+    await aws.request({
+      service: 'execute-api',
+      region: process.env.AWS_REGION || 'us-east-1',
+      method: 'POST',
+      path: `/@connections/${connectionId}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         type: 'registered',
         subdomain,
         url: `https://${subdomain}.localtunnel.dev`,
-      })),
-    }))
+      }),
+    })
 
     return { statusCode: 200, body: 'Registered' }
   }
@@ -117,8 +126,6 @@ async function handleResponse(
   },
   tableName: string,
 ): Promise<{ statusCode: number, body: string }> {
-  const { PutItemCommand } = await import('@aws-sdk/client-dynamodb')
-
   const { id: requestId, status, headers = {}, body = '', isBase64Encoded = false } = message
 
   if (!requestId) {
@@ -127,7 +134,7 @@ async function handleResponse(
 
   try {
     // Store response in DynamoDB for the HTTP handler to pick up
-    await dynamodb.send(new PutItemCommand({
+    await dynamodb.putItem({
       TableName: tableName,
       Item: {
         requestId: { S: requestId },
@@ -138,7 +145,7 @@ async function handleResponse(
         createdAt: { N: Date.now().toString() },
         ttl: { N: Math.floor(Date.now() / 1000 + 60).toString() }, // 60 second TTL
       },
-    }))
+    })
 
     return { statusCode: 200, body: JSON.stringify({ type: 'response_stored', id: requestId }) }
   }
@@ -157,20 +164,24 @@ async function handlePing(
   event: any,
   tableName: string,
 ): Promise<{ statusCode: number, body: string }> {
-  const { UpdateItemCommand } = await import('@aws-sdk/client-dynamodb')
-  const { ApiGatewayManagementApiClient, PostToConnectionCommand } = await import('@aws-sdk/client-apigatewaymanagementapi')
-
   try {
-    const endpoint = `https://${event.requestContext.domainName}/${event.requestContext.stage}`
-    const apiGateway = new ApiGatewayManagementApiClient({ endpoint })
+    // Send pong back via API Gateway Management API
+    const { AWSClient } = await import('@stacksjs/ts-cloud')
+    const aws = new AWSClient({ region: process.env.AWS_REGION || 'us-east-1' })
 
-    await apiGateway.send(new PostToConnectionCommand({
-      ConnectionId: connectionId,
-      Data: Buffer.from(JSON.stringify({ type: 'pong' })),
-    }))
+    await aws.request({
+      service: 'execute-api',
+      region: process.env.AWS_REGION || 'us-east-1',
+      method: 'POST',
+      path: `/@connections/${connectionId}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'pong' }),
+    })
 
     // Update last seen timestamp
-    await dynamodb.send(new UpdateItemCommand({
+    await dynamodb.updateItem({
       TableName: tableName,
       Key: {
         connectionId: { S: connectionId },
@@ -179,7 +190,7 @@ async function handlePing(
       ExpressionAttributeValues: {
         ':lastSeen': { N: Date.now().toString() },
       },
-    }))
+    })
 
     return { statusCode: 200, body: 'Pong' }
   }

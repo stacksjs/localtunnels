@@ -1,6 +1,9 @@
 /**
  * Lambda handler for HTTP requests
- * This is deployed to AWS Lambda and uses the AWS SDK v3
+ * Uses ts-cloud DynamoDBClient and AWSClient instead of @aws-sdk
+ *
+ * Note: These Lambda handlers are part of the legacy Lambda+DynamoDB architecture.
+ * The primary deployment now uses EC2 with TunnelServer directly.
  */
 
 import { randomBytes } from 'node:crypto'
@@ -17,10 +20,11 @@ interface TunnelResponse {
 }
 
 export async function handler(event: any): Promise<any> {
-  const { DynamoDBClient, DeleteItemCommand, GetItemCommand, QueryCommand } = await import('@aws-sdk/client-dynamodb')
-  const { ApiGatewayManagementApiClient, PostToConnectionCommand } = await import('@aws-sdk/client-apigatewaymanagementapi')
+  const { AWSClient, DynamoDBClient } = await import('@stacksjs/ts-cloud')
 
-  const dynamodb = new DynamoDBClient({})
+  const region = process.env.AWS_REGION || 'us-east-1'
+  const dynamodb = new DynamoDBClient(region)
+  const aws = new AWSClient({ region })
   const TABLE_NAME = process.env.TABLE_NAME!
   const RESPONSE_TABLE_NAME = process.env.RESPONSE_TABLE_NAME!
   const WEBSOCKET_ENDPOINT = process.env.WEBSOCKET_ENDPOINT!
@@ -60,14 +64,14 @@ export async function handler(event: any): Promise<any> {
 
   try {
     // Find connection for the subdomain
-    const connections = await dynamodb.send(new QueryCommand({
+    const connections = await dynamodb.query({
       TableName: TABLE_NAME,
       IndexName: 'subdomain-index',
       KeyConditionExpression: 'subdomain = :subdomain',
       ExpressionAttributeValues: {
         ':subdomain': { S: subdomain },
       },
-    }))
+    })
 
     if (!connections.Items || connections.Items.length === 0) {
       return {
@@ -83,12 +87,6 @@ export async function handler(event: any): Promise<any> {
 
     const connection = connections.Items[0]
     const connectionId = connection.connectionId.S!
-
-    // Create API Gateway Management API client
-    const endpoint = new URL(WEBSOCKET_ENDPOINT)
-    const apiGateway = new ApiGatewayManagementApiClient({
-      endpoint: `https://${endpoint.host}/${endpoint.pathname.split('/')[1] || 'prod'}`,
-    })
 
     // Generate unique request ID
     const requestId = `req_${randomBytes(16).toString('hex')}`
@@ -106,14 +104,21 @@ export async function handler(event: any): Promise<any> {
     }
 
     try {
-      // Send request to WebSocket client
-      await apiGateway.send(new PostToConnectionCommand({
-        ConnectionId: connectionId,
-        Data: Buffer.from(JSON.stringify(message)),
-      }))
+      // Send request to WebSocket client via API Gateway Management API
+      const endpoint = new URL(WEBSOCKET_ENDPOINT)
+      await aws.request({
+        service: 'execute-api',
+        region,
+        method: 'POST',
+        path: `/@connections/${connectionId}`,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+      })
 
       // Wait for response from the tunnel client
-      const response = await waitForResponse(dynamodb, RESPONSE_TABLE_NAME, requestId, GetItemCommand, DeleteItemCommand)
+      const response = await waitForResponse(dynamodb, RESPONSE_TABLE_NAME, requestId)
 
       if (response) {
         return {
@@ -138,12 +143,12 @@ export async function handler(event: any): Promise<any> {
       // Check if the connection is stale
       if (error.name === 'GoneException') {
         // Remove stale connection
-        await dynamodb.send(new DeleteItemCommand({
+        await dynamodb.deleteItem({
           TableName: TABLE_NAME,
           Key: {
             connectionId: { S: connectionId },
           },
-        }))
+        })
 
         return {
           statusCode: 502,
@@ -186,28 +191,26 @@ async function waitForResponse(
   dynamodb: any,
   tableName: string,
   requestId: string,
-  GetItemCommand: any,
-  DeleteItemCommand: any,
 ): Promise<TunnelResponse | null> {
   const startTime = Date.now()
 
   while (Date.now() - startTime < MAX_WAIT_MS) {
     try {
-      const result = await dynamodb.send(new GetItemCommand({
+      const result = await dynamodb.getItem({
         TableName: tableName,
         Key: {
           requestId: { S: requestId },
         },
-      }))
+      })
 
       if (result.Item) {
         // Delete the response record after reading
-        await dynamodb.send(new DeleteItemCommand({
+        await dynamodb.deleteItem({
           TableName: tableName,
           Key: {
             requestId: { S: requestId },
           },
-        }))
+        })
 
         return {
           status: Number.parseInt(result.Item.status?.N || '200', 10),

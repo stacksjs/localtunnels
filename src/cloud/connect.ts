@@ -1,16 +1,15 @@
 /**
  * Lambda handler for WebSocket $connect route
- * This is deployed to AWS Lambda and uses the AWS SDK v3
+ * Uses ts-cloud DynamoDBClient instead of @aws-sdk
+ *
+ * Note: These Lambda handlers are part of the legacy Lambda+DynamoDB architecture.
+ * The primary deployment now uses EC2 with TunnelServer directly.
  */
 
-// Note: When deployed to Lambda, @aws-sdk is available in the runtime
-// For local development/testing, it needs to be installed
-
 export async function handler(event: any): Promise<any> {
-  // Dynamic import to handle both Lambda runtime and local environments
-  const { DynamoDBClient, PutItemCommand, QueryCommand } = await import('@aws-sdk/client-dynamodb')
+  const { DynamoDBClient } = await import('@stacksjs/ts-cloud')
 
-  const dynamodb = new DynamoDBClient({})
+  const dynamodb = new DynamoDBClient(process.env.AWS_REGION || 'us-east-1')
   const TABLE_NAME = process.env.TABLE_NAME!
 
   const connectionId = event.requestContext?.connectionId
@@ -35,14 +34,14 @@ export async function handler(event: any): Promise<any> {
 
     // Check if subdomain is already in use
     try {
-      const existing = await dynamodb.send(new QueryCommand({
+      const existing = await dynamodb.query({
         TableName: TABLE_NAME,
         IndexName: 'subdomain-index',
         KeyConditionExpression: 'subdomain = :subdomain',
         ExpressionAttributeValues: {
           ':subdomain': { S: subdomain },
         },
-      }))
+      })
 
       if (existing.Items && existing.Items.length > 0) {
         console.warn(`Subdomain already in use: ${subdomain}`)
@@ -83,10 +82,10 @@ export async function handler(event: any): Promise<any> {
     // Add TTL for connection cleanup (24 hours)
     item.ttl = { N: Math.floor(Date.now() / 1000 + 86400).toString() }
 
-    await dynamodb.send(new PutItemCommand({
+    await dynamodb.putItem({
       TableName: TABLE_NAME,
       Item: item,
-    }))
+    })
 
     console.log(`Connection established: ${connectionId}${subdomain ? ` for subdomain: ${subdomain}` : ''}`)
 

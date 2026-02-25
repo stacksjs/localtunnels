@@ -1,34 +1,37 @@
 /**
  * Lambda handler for WebSocket $disconnect route
- * This is deployed to AWS Lambda and uses the AWS SDK v3
+ * Uses ts-cloud DynamoDBClient instead of @aws-sdk
+ *
+ * Note: These Lambda handlers are part of the legacy Lambda+DynamoDB architecture.
+ * The primary deployment now uses EC2 with TunnelServer directly.
  */
 
 export async function handler(event: any): Promise<any> {
-  const { DynamoDBClient, DeleteItemCommand, GetItemCommand } = await import('@aws-sdk/client-dynamodb')
+  const { DynamoDBClient } = await import('@stacksjs/ts-cloud')
 
-  const dynamodb = new DynamoDBClient({})
+  const dynamodb = new DynamoDBClient(process.env.AWS_REGION || 'us-east-1')
   const TABLE_NAME = process.env.TABLE_NAME!
 
   const connectionId = event.requestContext?.connectionId
 
   try {
     // First, get the connection to log what subdomain is being released
-    const existing = await dynamodb.send(new GetItemCommand({
+    const existing = await dynamodb.getItem({
       TableName: TABLE_NAME,
       Key: {
         connectionId: { S: connectionId },
       },
-    }))
+    })
 
     const subdomain = existing.Item?.subdomain?.S
 
     // Delete the connection record
-    await dynamodb.send(new DeleteItemCommand({
+    await dynamodb.deleteItem({
       TableName: TABLE_NAME,
       Key: {
         connectionId: { S: connectionId },
       },
-    }))
+    })
 
     console.log(`Connection closed: ${connectionId}${subdomain ? ` (subdomain: ${subdomain})` : ''}`)
 
@@ -46,13 +49,12 @@ export async function handler(event: any): Promise<any> {
 
     // Still try to delete even if getting the record failed
     try {
-      const { DeleteItemCommand: DeleteCmd } = await import('@aws-sdk/client-dynamodb')
-      await dynamodb.send(new DeleteCmd({
+      await dynamodb.deleteItem({
         TableName: TABLE_NAME,
         Key: {
           connectionId: { S: connectionId },
         },
-      }))
+      })
     }
     catch {
       // Ignore secondary errors
