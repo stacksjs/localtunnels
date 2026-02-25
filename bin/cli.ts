@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 /* eslint-disable node/prefer-global/process */
-import { CAC } from '@stacksjs/cli'
+import { CLI } from '@stacksjs/clapp'
 import { version } from '../package.json'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
 import { generateId, isValidPort, isValidSubdomain } from '../src/utils'
 
-const cli = new CAC('localtunnels')
+const cli = new CLI('localtunnels')
 
 interface TunnelOptions {
   port: string
