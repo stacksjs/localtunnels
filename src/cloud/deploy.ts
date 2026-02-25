@@ -2,10 +2,11 @@
  * LocalTunnels Cloud Deployment
  * Uses ts-cloud for AWS infrastructure deployment
  *
- * This module deploys:
- * - DynamoDB tables for connection tracking and responses
- * - Lambda functions for WebSocket and HTTP handling
- * - Lambda Function URLs for public access
+ * Deploys a TunnelServer directly on EC2 with:
+ * - EC2 instance running Bun + localtunnels
+ * - Security group for HTTP/HTTPS/SSH
+ * - Elastic IP for stable addressing
+ * - Optional Route53 wildcard DNS
  */
 
 export interface TunnelDeployConfig {
@@ -22,10 +23,26 @@ export interface TunnelDeployConfig {
   prefix?: string
 
   /**
-   * Domain name for the tunnel service
-   * @default 'localtunnel.dev'
+   * Domain name for the tunnel service (e.g. 'localtunnel.dev')
+   * When provided, Route53 DNS records will be created
    */
   domain?: string
+
+  /**
+   * Route53 hosted zone ID (auto-detected from domain if not provided)
+   */
+  hostedZoneId?: string
+
+  /**
+   * EC2 instance type
+   * @default 't3.micro'
+   */
+  instanceType?: string
+
+  /**
+   * EC2 key pair name for SSH access
+   */
+  keyName?: string
 
   /**
    * Enable verbose logging during deployment
@@ -34,42 +51,47 @@ export interface TunnelDeployConfig {
   verbose?: boolean
 
   /**
-   * IAM role ARN for Lambda functions
-   * If not provided, will attempt to create one
+   * Enable SSL (use HTTPS/WSS)
+   * @default false
    */
-  lambdaRoleArn?: string
+  enableSsl?: boolean
 }
 
 export interface TunnelDeployResult {
   /**
-   * URL for the HTTP endpoint (Lambda Function URL)
+   * Public IP address (Elastic IP)
    */
-  httpUrl: string
+  publicIp: string
 
   /**
-   * URL for the WebSocket endpoint (Lambda Function URL)
+   * EC2 instance ID
+   */
+  instanceId: string
+
+  /**
+   * Security group ID
+   */
+  securityGroupId: string
+
+  /**
+   * Elastic IP allocation ID
+   */
+  allocationId: string
+
+  /**
+   * HTTP(S) URL for the tunnel server
+   */
+  serverUrl: string
+
+  /**
+   * WebSocket URL for the tunnel server
    */
   wsUrl: string
 
   /**
-   * DynamoDB connections table name
+   * Domain name (if configured)
    */
-  connectionsTable: string
-
-  /**
-   * DynamoDB responses table name
-   */
-  responsesTable: string
-
-  /**
-   * Lambda function names
-   */
-  functions: {
-    connect: string
-    disconnect: string
-    message: string
-    http: string
-  }
+  domain?: string
 
   /**
    * AWS region
@@ -78,30 +100,48 @@ export interface TunnelDeployResult {
 }
 
 /**
+ * Import ts-cloud, handling the case where package.json exports
+ * point to src/ (development) but only dist/ exists (published).
+ */
+async function importTsCloud(): Promise<any> {
+  try {
+    return await import('@stacksjs/ts-cloud')
+  }
+  catch {
+    // Fallback: resolve package.json location and import from dist/
+    const path = await import('node:path')
+    const pkgDir = path.dirname(require.resolve('@stacksjs/ts-cloud/package.json'))
+    return import(path.join(pkgDir, 'dist/index.js'))
+  }
+}
+
+/**
  * Deploy the tunnel infrastructure to AWS
+ *
+ * Launches an EC2 instance running the localtunnels TunnelServer via Bun,
+ * assigns an Elastic IP, and optionally sets up Route53 wildcard DNS.
  */
 export async function deployTunnelInfrastructure(
   config: TunnelDeployConfig = {},
 ): Promise<TunnelDeployResult> {
-  // Dynamic import ts-cloud to avoid bundling issues
-  let DynamoDBClient: any, LambdaClient: any, IAMClient: any
+  let EC2Client: any, Route53Client: any, AWSClient: any
 
   try {
-    const tsCloud = await import('ts-cloud')
-    DynamoDBClient = tsCloud.DynamoDBClient
-    LambdaClient = tsCloud.LambdaClient
-    IAMClient = tsCloud.IAMClient
+    const tsCloud = await importTsCloud()
+    EC2Client = tsCloud.EC2Client
+    Route53Client = tsCloud.Route53Client
+    AWSClient = tsCloud.AWSClient
   }
   catch {
     throw new Error(
-      'ts-cloud package is required for AWS deployment.\n'
-      + 'Install it with: bun add ts-cloud\n'
-      + 'Or from source: bun add ts-cloud@link:../path/to/ts-cloud',
+      '@stacksjs/ts-cloud package is required for AWS deployment.\n'
+      + 'Install it with: bun add @stacksjs/ts-cloud',
     )
   }
 
   const region = config.region || 'us-east-1'
   const prefix = config.prefix || 'localtunnel'
+  const instanceType = config.instanceType || 't3.micro'
   const verbose = config.verbose || false
 
   const log = (msg: string) => {
@@ -109,309 +149,403 @@ export async function deployTunnelInfrastructure(
       console.log(`[deploy] ${msg}`)
   }
 
-  const dynamodb = new DynamoDBClient(region)
-  const lambda = new LambdaClient(region)
-  const iam = new IAMClient(region)
+  const ec2 = new EC2Client(region)
+  const awsClient = new AWSClient()
 
-  // Resource names
-  const connectionsTableName = `${prefix}-connections`
-  const responsesTableName = `${prefix}-responses`
-  const connectFunctionName = `${prefix}-connect`
-  const disconnectFunctionName = `${prefix}-disconnect`
-  const messageFunctionName = `${prefix}-message`
-  const httpFunctionName = `${prefix}-http`
-
-  // ============================================
-  // Step 1: Create DynamoDB Tables
-  // ============================================
-
-  log('Creating DynamoDB tables...')
-
-  // Connections table
-  try {
-    await dynamodb.createTable({
-      TableName: connectionsTableName,
-      KeySchema: [
-        { AttributeName: 'connectionId', KeyType: 'HASH' },
-      ],
-      AttributeDefinitions: [
-        { AttributeName: 'connectionId', AttributeType: 'S' },
-        { AttributeName: 'subdomain', AttributeType: 'S' },
-      ],
-      BillingMode: 'PAY_PER_REQUEST',
-      GlobalSecondaryIndexes: [
-        {
-          IndexName: 'subdomain-index',
-          KeySchema: [
-            { AttributeName: 'subdomain', KeyType: 'HASH' },
-          ],
-          Projection: { ProjectionType: 'ALL' },
-        },
-      ],
-      Tags: [
-        { Key: 'Project', Value: 'localtunnels' },
-      ],
+  // Helper to make raw EC2 API calls for methods not yet in ts-cloud's EC2Client
+  async function rawEc2Call(params: Record<string, string>): Promise<any> {
+    return awsClient.request({
+      service: 'ec2',
+      region,
+      method: 'POST',
+      path: '/',
+      queryParams: { Version: '2016-11-15', ...params },
     })
-    log(`Created table: ${connectionsTableName}`)
-
-    // Enable TTL
-    await dynamodb.updateTimeToLive({
-      TableName: connectionsTableName,
-      TimeToLiveSpecification: {
-        AttributeName: 'ttl',
-        Enabled: true,
-      },
-    })
-    log(`Enabled TTL on: ${connectionsTableName}`)
   }
-  catch (error: any) {
-    if (error.message?.includes('Table already exists') || error.__type?.includes('ResourceInUseException')) {
-      log(`Table ${connectionsTableName} already exists`)
+
+  // ============================================
+  // Step 1: Find or create VPC and public subnet
+  // ============================================
+
+  log('Finding VPC and public subnet...')
+
+  // Try to find an existing VPC (prefer default, then any)
+  let vpcId: string | undefined
+
+  const defaultVpcs = await ec2.describeVpcs({
+    Filters: [{ Name: 'isDefault', Values: ['true'] }],
+  })
+  if (defaultVpcs.Vpcs?.[0]?.VpcId) {
+    vpcId = defaultVpcs.Vpcs[0].VpcId
+    log(`Found default VPC: ${vpcId}`)
+  }
+  else {
+    // Check for any existing VPC
+    const allVpcs = await ec2.describeVpcs()
+    if (allVpcs.Vpcs?.[0]?.VpcId) {
+      vpcId = allVpcs.Vpcs[0].VpcId
+      log(`Found existing VPC: ${vpcId}`)
     }
     else {
-      throw error
-    }
-  }
-
-  // Responses table
-  try {
-    await dynamodb.createTable({
-      TableName: responsesTableName,
-      KeySchema: [
-        { AttributeName: 'requestId', KeyType: 'HASH' },
-      ],
-      AttributeDefinitions: [
-        { AttributeName: 'requestId', AttributeType: 'S' },
-      ],
-      BillingMode: 'PAY_PER_REQUEST',
-      Tags: [
-        { Key: 'Project', Value: 'localtunnels' },
-      ],
-    })
-    log(`Created table: ${responsesTableName}`)
-
-    // Enable TTL
-    await dynamodb.updateTimeToLive({
-      TableName: responsesTableName,
-      TimeToLiveSpecification: {
-        AttributeName: 'ttl',
-        Enabled: true,
-      },
-    })
-    log(`Enabled TTL on: ${responsesTableName}`)
-  }
-  catch (error: any) {
-    if (error.message?.includes('Table already exists') || error.__type?.includes('ResourceInUseException')) {
-      log(`Table ${responsesTableName} already exists`)
-    }
-    else {
-      throw error
-    }
-  }
-
-  // Wait for tables to be active
-  log('Waiting for tables to be active...')
-  await waitForTableActive(dynamodb, connectionsTableName)
-  await waitForTableActive(dynamodb, responsesTableName)
-
-  // ============================================
-  // Step 2: Create or Get IAM Role
-  // ============================================
-
-  let lambdaRoleArn = config.lambdaRoleArn
-
-  if (!lambdaRoleArn) {
-    log('Creating IAM role for Lambda...')
-    const roleName = `${prefix}-lambda-role`
-
-    try {
-      const createRoleResult = await iam.createRole({
-        RoleName: roleName,
-        AssumeRolePolicyDocument: JSON.stringify({
-          Version: '2012-10-17',
-          Statement: [
-            {
-              Effect: 'Allow',
-              Principal: { Service: 'lambda.amazonaws.com' },
-              Action: 'sts:AssumeRole',
-            },
+      // Create a new VPC
+      log('No VPC found, creating one...')
+      const vpcResult = await ec2.createVpc({
+        CidrBlock: '10.0.0.0/16',
+        TagSpecifications: [{
+          ResourceType: 'vpc',
+          Tags: [
+            { Key: 'Name', Value: `${prefix}-tunnel-vpc` },
+            { Key: 'Project', Value: 'localtunnels' },
           ],
-        }),
-        Description: 'IAM role for LocalTunnels Lambda functions',
+        }],
       })
-      lambdaRoleArn = createRoleResult.Role?.Arn
-
-      // Attach policies
-      await iam.attachRolePolicy({
-        RoleName: roleName,
-        PolicyArn: 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
-      })
-
-      // Create custom policy for DynamoDB access
-      const policyDocument = {
-        Version: '2012-10-17',
-        Statement: [
-          {
-            Effect: 'Allow',
-            Action: [
-              'dynamodb:GetItem',
-              'dynamodb:PutItem',
-              'dynamodb:UpdateItem',
-              'dynamodb:DeleteItem',
-              'dynamodb:Query',
-              'dynamodb:Scan',
-            ],
-            Resource: [
-              `arn:aws:dynamodb:${region}:*:table/${connectionsTableName}`,
-              `arn:aws:dynamodb:${region}:*:table/${connectionsTableName}/index/*`,
-              `arn:aws:dynamodb:${region}:*:table/${responsesTableName}`,
-            ],
-          },
-        ],
+      vpcId = vpcResult.Vpc?.VpcId
+      if (!vpcId) {
+        throw new Error('Failed to create VPC')
       }
+      log(`Created VPC: ${vpcId}`)
 
-      await iam.putRolePolicy({
-        RoleName: roleName,
-        PolicyName: `${prefix}-dynamodb-policy`,
-        PolicyDocument: JSON.stringify(policyDocument),
+      // Create and attach an internet gateway for public access
+      log('Creating internet gateway...')
+      const igwResult = await rawEc2Call({
+        Action: 'CreateInternetGateway',
+        'TagSpecification.1.ResourceType': 'internet-gateway',
+        'TagSpecification.1.Tag.1.Key': 'Name',
+        'TagSpecification.1.Tag.1.Value': `${prefix}-tunnel-igw`,
+        'TagSpecification.1.Tag.2.Key': 'Project',
+        'TagSpecification.1.Tag.2.Value': 'localtunnels',
       })
+      const igwId = igwResult?.CreateInternetGatewayResponse?.internetGateway?.internetGatewayId
+        || igwResult?.internetGateway?.internetGatewayId
+      if (igwId) {
+        log(`Created internet gateway: ${igwId}`)
+        await rawEc2Call({
+          Action: 'AttachInternetGateway',
+          InternetGatewayId: igwId,
+          VpcId: vpcId,
+        })
+        log('Attached internet gateway to VPC')
 
-      log(`Created IAM role: ${roleName}`)
-
-      // Wait for role to propagate
-      await new Promise(resolve => setTimeout(resolve, 10000))
-    }
-    catch (error: any) {
-      if (error.message?.includes('EntityAlreadyExists')) {
-        const getRole = await iam.getRole({ RoleName: roleName })
-        lambdaRoleArn = getRole.Role?.Arn
-        log(`Using existing IAM role: ${roleName}`)
+        // Add a route to the internet gateway in the main route table
+        const routeTables = await ec2.describeRouteTables({
+          Filters: [
+            { Name: 'vpc-id', Values: [vpcId] },
+            { Name: 'association.main', Values: ['true'] },
+          ],
+        })
+        const mainRouteTableId = routeTables.RouteTables?.[0]?.RouteTableId
+        if (mainRouteTableId) {
+          await rawEc2Call({
+            Action: 'CreateRoute',
+            RouteTableId: mainRouteTableId,
+            DestinationCidrBlock: '0.0.0.0/0',
+            GatewayId: igwId,
+          })
+          log('Added default route to internet gateway')
+        }
       }
       else {
-        throw error
+        log('Warning: Could not create internet gateway — instance may not have internet access')
       }
     }
   }
 
-  if (!lambdaRoleArn) {
-    throw new Error('Failed to create or find Lambda IAM role')
+  // Find or create a public subnet
+  let subnetId: string | undefined
+
+  const existingSubnets = await ec2.describeSubnets({
+    Filters: [{ Name: 'vpc-id', Values: [vpcId!] }],
+  })
+  if (existingSubnets.Subnets?.[0]?.SubnetId) {
+    subnetId = existingSubnets.Subnets[0].SubnetId
+    log(`Found subnet: ${subnetId} (${existingSubnets.Subnets[0].AvailabilityZone})`)
+  }
+  else {
+    log('No subnet found, creating one...')
+    const subnetResult = await ec2.createSubnet({
+      VpcId: vpcId!,
+      CidrBlock: '10.0.1.0/24',
+      AvailabilityZone: `${region}a`,
+      TagSpecifications: [{
+        ResourceType: 'subnet',
+        Tags: [
+          { Key: 'Name', Value: `${prefix}-tunnel-subnet` },
+          { Key: 'Project', Value: 'localtunnels' },
+        ],
+      }],
+    })
+    subnetId = subnetResult.Subnet?.SubnetId
+    if (!subnetId) {
+      throw new Error('Failed to create subnet')
+    }
+    log(`Created subnet: ${subnetId}`)
+
+    // Enable auto-assign public IPs
+    await ec2.modifySubnetAttribute({
+      SubnetId: subnetId,
+      MapPublicIpOnLaunch: { Value: true },
+    })
+    log('Enabled auto-assign public IPs on subnet')
   }
 
   // ============================================
-  // Step 3: Create Lambda Functions
+  // Step 2: Create security group
   // ============================================
 
-  log('Creating Lambda functions...')
+  log('Creating security group...')
+  const sgName = `${prefix}-tunnel-sg`
+  let securityGroupId: string
 
-  const handlerCode = generateHandlerCode(connectionsTableName, responsesTableName)
-
-  // HTTP Handler Function
-  const _httpFunction = await createOrUpdateFunction(lambda, {
-    FunctionName: httpFunctionName,
-    Runtime: 'nodejs20.x',
-    Role: lambdaRoleArn,
-    Handler: 'index.handler',
-    Code: handlerCode.http,
-    Description: 'LocalTunnels HTTP request handler',
-    Timeout: 30,
-    MemorySize: 256,
-    Environment: {
-      Variables: {
-        TABLE_NAME: connectionsTableName,
-        RESPONSE_TABLE_NAME: responsesTableName,
-      },
-    },
-  })
-  log(`Created/updated function: ${httpFunctionName}`)
-
-  // Create Function URL for HTTP handler
-  let httpUrl = ''
   try {
-    const existingUrl = await lambda.getFunctionUrl(httpFunctionName)
-    if (existingUrl?.FunctionUrl) {
-      httpUrl = existingUrl.FunctionUrl
-    }
-    else {
-      const urlConfig = await lambda.createFunctionUrl({
-        FunctionName: httpFunctionName,
-        AuthType: 'NONE',
-        Cors: {
-          AllowOrigins: ['*'],
-          AllowMethods: ['*'],
-          AllowHeaders: ['*'],
-          MaxAge: 86400,
-        },
-      })
-      httpUrl = urlConfig.FunctionUrl || ''
+    const sgResult = await ec2.createSecurityGroup({
+      GroupName: sgName,
+      Description: 'Security group for LocalTunnel server',
+      VpcId: vpcId!,
+      TagSpecifications: [{
+        ResourceType: 'security-group',
+        Tags: [
+          { Key: 'Name', Value: sgName },
+          { Key: 'Project', Value: 'localtunnels' },
+        ],
+      }],
+    })
+    securityGroupId = sgResult.GroupId!
+    log(`Created security group: ${securityGroupId}`)
 
-      // Add permission for public access
-      await lambda.addFunctionUrlPermission(httpFunctionName)
-    }
+    // Add ingress rules for SSH, HTTP, HTTPS
+    await ec2.authorizeSecurityGroupIngress({
+      GroupId: securityGroupId,
+      IpPermissions: [
+        { IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'SSH' }] },
+        { IpProtocol: 'tcp', FromPort: 80, ToPort: 80, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTP' }] },
+        { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTPS' }] },
+      ],
+    })
+    log('Added ingress rules for SSH, HTTP, HTTPS')
   }
   catch (error: any) {
-    log(`Warning: Could not create function URL for HTTP handler: ${error.message}`)
-  }
-
-  // WebSocket-like Handler (using Lambda Function URL with streaming)
-  // Note: For true WebSocket support, you'd use API Gateway WebSocket API
-  // This is a simplified HTTP-based approach
-  const _wsFunction = await createOrUpdateFunction(lambda, {
-    FunctionName: messageFunctionName,
-    Runtime: 'nodejs20.x',
-    Role: lambdaRoleArn,
-    Handler: 'index.handler',
-    Code: handlerCode.message,
-    Description: 'LocalTunnels WebSocket message handler',
-    Timeout: 30,
-    MemorySize: 256,
-    Environment: {
-      Variables: {
-        TABLE_NAME: connectionsTableName,
-        RESPONSE_TABLE_NAME: responsesTableName,
-      },
-    },
-  })
-  log(`Created/updated function: ${messageFunctionName}`)
-
-  // Create Function URL for WebSocket handler
-  let wsUrl = ''
-  try {
-    const existingUrl = await lambda.getFunctionUrl(messageFunctionName)
-    if (existingUrl?.FunctionUrl) {
-      wsUrl = existingUrl.FunctionUrl
+    if (error.message?.includes('already exists') || error.code === 'InvalidGroup.Duplicate') {
+      const sgs = await ec2.describeSecurityGroups({
+        Filters: [
+          { Name: 'group-name', Values: [sgName] },
+          { Name: 'vpc-id', Values: [vpcId!] },
+        ],
+      })
+      securityGroupId = sgs.SecurityGroups?.[0]?.GroupId!
+      if (!securityGroupId) {
+        throw new Error(`Security group ${sgName} exists but could not be found`)
+      }
+      log(`Using existing security group: ${securityGroupId}`)
     }
     else {
-      const urlConfig = await lambda.createFunctionUrl({
-        FunctionName: messageFunctionName,
-        AuthType: 'NONE',
-        Cors: {
-          AllowOrigins: ['*'],
-          AllowMethods: ['*'],
-          AllowHeaders: ['*'],
-        },
-      })
-      wsUrl = urlConfig.FunctionUrl || ''
-
-      await lambda.addFunctionUrlPermission(messageFunctionName)
+      throw error
     }
   }
-  catch (error: any) {
-    log(`Warning: Could not create function URL for message handler: ${error.message}`)
+
+  // ============================================
+  // Step 3: Resolve AMI ID via SSM parameter
+  // ============================================
+
+  log('Resolving latest Amazon Linux 2023 AMI...')
+  let amiId: string
+
+  try {
+    const ssmResult = await awsClient.request({
+      service: 'ssm',
+      region,
+      method: 'POST',
+      path: '/',
+      headers: {
+        'Content-Type': 'application/x-amz-json-1.1',
+        'X-Amz-Target': 'AmazonSSM.GetParameter',
+      },
+      body: JSON.stringify({
+        Name: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64',
+      }),
+    })
+    amiId = ssmResult.Parameter?.Value
+    if (!amiId) {
+      throw new Error('SSM parameter returned no AMI value')
+    }
+    log(`Resolved AMI: ${amiId}`)
   }
+  catch (error: any) {
+    log(`Warning: Could not resolve AMI via SSM: ${error.message}`)
+    throw new Error(
+      'Could not resolve latest AMI ID via SSM. '
+      + 'Ensure AWS credentials have ssm:GetParameter permission.',
+    )
+  }
+
+  // ============================================
+  // Step 4: Generate user data script
+  // ============================================
+
+  const serverPort = config.enableSsl ? 443 : 80
+  const userData = generateUserData(serverPort)
+  log('Generated user data script')
+
+  // ============================================
+  // Step 5: Launch EC2 instance
+  // ============================================
+
+  log(`Launching ${instanceType} instance...`)
+
+  const runParams: Record<string, string> = {
+    'Action': 'RunInstances',
+    'ImageId': amiId,
+    'InstanceType': instanceType,
+    'MinCount': '1',
+    'MaxCount': '1',
+    'SubnetId': subnetId!,
+    'SecurityGroupId.1': securityGroupId,
+    'UserData': btoa(userData),
+    'TagSpecification.1.ResourceType': 'instance',
+    'TagSpecification.1.Tag.1.Key': 'Name',
+    'TagSpecification.1.Tag.1.Value': `${prefix}-tunnel-server`,
+    'TagSpecification.1.Tag.2.Key': 'Project',
+    'TagSpecification.1.Tag.2.Value': 'localtunnels',
+  }
+
+  if (config.keyName) {
+    runParams.KeyName = config.keyName
+  }
+
+  const runResult = await rawEc2Call(runParams)
+  const instanceId = extractInstanceId(runResult)
+
+  if (!instanceId) {
+    log(`RunInstances response: ${JSON.stringify(runResult, null, 2)}`)
+    throw new Error('Failed to launch EC2 instance — could not extract instance ID from response')
+  }
+
+  log(`Launched instance: ${instanceId}`)
+
+  // ============================================
+  // Step 6: Wait for instance to be running
+  // ============================================
+
+  // Brief delay for AWS eventual consistency — instance ID may not be
+  // immediately findable via DescribeInstances after RunInstances returns
+  log('Waiting for instance to be discoverable...')
+  await new Promise(resolve => setTimeout(resolve, 5000))
+
+  log('Waiting for instance to reach running state...')
+  await ec2.waitForInstanceState(instanceId, 'running', {
+    maxWaitMs: 180000,
+    pollIntervalMs: 5000,
+  })
+  log('Instance is running')
+
+  // ============================================
+  // Step 7: Allocate and associate Elastic IP
+  // ============================================
+
+  let publicIp: string
+  let allocationId: string | undefined
+
+  try {
+    log('Allocating Elastic IP...')
+    const eipResult = await ec2.allocateAddress({
+      Domain: 'vpc',
+      TagSpecifications: [{
+        ResourceType: 'elastic-ip',
+        Tags: [
+          { Key: 'Name', Value: `${prefix}-tunnel-eip` },
+          { Key: 'Project', Value: 'localtunnels' },
+        ],
+      }],
+    })
+    allocationId = eipResult.AllocationId!
+    publicIp = eipResult.PublicIp!
+    log(`Allocated Elastic IP: ${publicIp} (${allocationId})`)
+
+    log('Associating Elastic IP with instance...')
+    await ec2.associateAddress({
+      AllocationId: allocationId,
+      InstanceId: instanceId,
+    })
+    log('Elastic IP associated')
+  }
+  catch (error: any) {
+    // EIP limit reached — fall back to auto-assigned public IP
+    log(`Warning: Could not allocate Elastic IP: ${error.message?.split('<Message>')?.[1]?.split('</Message>')?.[0] || error.message}`)
+    log('Falling back to instance auto-assigned public IP...')
+
+    const instanceInfo = await ec2.getInstance(instanceId)
+    publicIp = instanceInfo?.PublicIpAddress || ''
+
+    if (!publicIp) {
+      throw new Error('Instance has no public IP. Ensure the subnet has MapPublicIpOnLaunch enabled.')
+    }
+    log(`Using instance public IP: ${publicIp} (note: this IP may change if instance is stopped)`)
+  }
+
+  // ============================================
+  // Step 8: Optional Route53 DNS setup
+  // ============================================
+
+  if (config.domain) {
+    log(`Setting up Route53 DNS for ${config.domain}...`)
+    try {
+      const route53 = new Route53Client(region)
+
+      let hostedZoneId = config.hostedZoneId
+      if (!hostedZoneId) {
+        const zone = await route53.findHostedZoneForDomain(config.domain)
+        hostedZoneId = zone?.Id?.replace('/hostedzone/', '')
+      }
+
+      if (hostedZoneId) {
+        // Create A record for the domain
+        await route53.createARecord({
+          HostedZoneId: hostedZoneId,
+          Name: config.domain,
+          Value: publicIp,
+          TTL: 300,
+        })
+        log(`Created A record: ${config.domain} -> ${publicIp}`)
+
+        // Create wildcard A record for subdomains
+        await route53.createARecord({
+          HostedZoneId: hostedZoneId,
+          Name: `*.${config.domain}`,
+          Value: publicIp,
+          TTL: 300,
+        })
+        log(`Created A record: *.${config.domain} -> ${publicIp}`)
+      }
+      else {
+        log(`Warning: Could not find Route53 hosted zone for ${config.domain}`)
+        log('DNS records were not created. Set up DNS manually or provide --hosted-zone-id.')
+      }
+    }
+    catch (error: any) {
+      log(`Warning: DNS setup failed: ${error.message}`)
+      log('The server is deployed but DNS is not configured.')
+    }
+  }
+
+  // ============================================
+  // Done
+  // ============================================
+
+  const protocol = config.enableSsl ? 'https' : 'http'
+  const wsProtocol = config.enableSsl ? 'wss' : 'ws'
+  const serverHost = config.domain || publicIp
+  const serverUrl = `${protocol}://${serverHost}`
+  const wsUrl = `${wsProtocol}://${serverHost}`
 
   log('Deployment complete!')
 
   return {
-    httpUrl,
+    publicIp,
+    instanceId,
+    securityGroupId,
+    allocationId: allocationId || '',
+    serverUrl,
     wsUrl,
-    connectionsTable: connectionsTableName,
-    responsesTable: responsesTableName,
-    functions: {
-      connect: connectFunctionName,
-      disconnect: disconnectFunctionName,
-      message: messageFunctionName,
-      http: httpFunctionName,
-    },
+    domain: config.domain,
     region,
   }
 }
@@ -422,19 +556,18 @@ export async function deployTunnelInfrastructure(
 export async function destroyTunnelInfrastructure(
   config: TunnelDeployConfig = {},
 ): Promise<void> {
-  let DynamoDBClient: any, LambdaClient: any, IAMClient: any
+  let EC2Client: any, Route53Client: any, AWSClient: any
 
   try {
-    const tsCloud = await import('ts-cloud')
-    DynamoDBClient = tsCloud.DynamoDBClient
-    LambdaClient = tsCloud.LambdaClient
-    IAMClient = tsCloud.IAMClient
+    const tsCloud = await importTsCloud()
+    EC2Client = tsCloud.EC2Client
+    Route53Client = tsCloud.Route53Client
+    AWSClient = tsCloud.AWSClient
   }
   catch {
     throw new Error(
-      'ts-cloud package is required for AWS deployment.\n'
-      + 'Install it with: bun add ts-cloud\n'
-      + 'Or from source: bun add ts-cloud@link:../path/to/ts-cloud',
+      '@stacksjs/ts-cloud package is required for AWS deployment.\n'
+      + 'Install it with: bun add @stacksjs/ts-cloud',
     )
   }
 
@@ -447,70 +580,187 @@ export async function destroyTunnelInfrastructure(
       console.log(`[destroy] ${msg}`)
   }
 
-  const dynamodb = new DynamoDBClient(region)
-  const lambda = new LambdaClient(region)
-  const iam = new IAMClient(region)
+  const ec2 = new EC2Client(region)
+  const awsClient = new AWSClient()
 
-  // Resource names
-  const connectionsTableName = `${prefix}-connections`
-  const responsesTableName = `${prefix}-responses`
-  const messageFunctionName = `${prefix}-message`
-  const httpFunctionName = `${prefix}-http`
-  const roleName = `${prefix}-lambda-role`
-
-  // Delete Lambda functions
-  log('Deleting Lambda functions...')
-  for (const fnName of [messageFunctionName, httpFunctionName]) {
-    try {
-      await lambda.deleteFunctionUrl(fnName)
-      log(`Deleted function URL: ${fnName}`)
-    }
-    catch {
-      // Ignore
-    }
-    try {
-      await lambda.deleteFunction(fnName)
-      log(`Deleted function: ${fnName}`)
-    }
-    catch (error: any) {
-      if (!error.message?.includes('ResourceNotFoundException')) {
-        log(`Warning: Could not delete function ${fnName}: ${error.message}`)
-      }
-    }
+  async function rawEc2Call(params: Record<string, string>): Promise<any> {
+    return awsClient.request({
+      service: 'ec2',
+      region,
+      method: 'POST',
+      path: '/',
+      queryParams: { Version: '2016-11-15', ...params },
+    })
   }
 
-  // Delete DynamoDB tables
-  log('Deleting DynamoDB tables...')
-  for (const tableName of [connectionsTableName, responsesTableName]) {
-    try {
-      await dynamodb.deleteTable({ TableName: tableName })
-      log(`Deleted table: ${tableName}`)
-    }
-    catch (error: any) {
-      if (!error.message?.includes('ResourceNotFoundException')) {
-        log(`Warning: Could not delete table ${tableName}: ${error.message}`)
-      }
-    }
+  // ============================================
+  // Step 1: Find instance by tag
+  // ============================================
+
+  log('Finding tunnel server instance...')
+
+  const instances = await ec2.describeInstances({
+    Filters: [
+      { Name: 'tag:Project', Values: ['localtunnels'] },
+      { Name: 'tag:Name', Values: [`${prefix}-tunnel-server`] },
+      { Name: 'instance-state-name', Values: ['running', 'stopped', 'pending'] },
+    ],
+  })
+
+  const instance = instances.Reservations?.[0]?.Instances?.[0]
+  const instanceId = instance?.InstanceId
+
+  if (!instanceId) {
+    log('No tunnel server instance found')
+  }
+  else {
+    log(`Found instance: ${instanceId}`)
   }
 
-  // Delete IAM role (if we created it)
-  if (!config.lambdaRoleArn) {
-    log('Deleting IAM role...')
+  // ============================================
+  // Step 2: Find and release Elastic IP
+  // ============================================
+
+  log('Finding Elastic IP...')
+
+  const addresses = await ec2.describeAddresses({
+    Filters: [
+      { Name: 'tag:Project', Values: ['localtunnels'] },
+      { Name: 'tag:Name', Values: [`${prefix}-tunnel-eip`] },
+    ],
+  })
+
+  const address = addresses.Addresses?.[0]
+  if (address) {
+    log(`Found Elastic IP: ${address.PublicIp} (${address.AllocationId})`)
+
+    // Disassociate if associated
+    if (address.AssociationId) {
+      log('Disassociating Elastic IP...')
+      try {
+        await rawEc2Call({
+          Action: 'DisassociateAddress',
+          AssociationId: address.AssociationId,
+        })
+        log('Elastic IP disassociated')
+      }
+      catch (error: any) {
+        log(`Warning: Could not disassociate Elastic IP: ${error.message}`)
+      }
+    }
+
+    // Release the Elastic IP
+    log('Releasing Elastic IP...')
     try {
-      // Detach policies first
-      await iam.detachRolePolicy({
-        RoleName: roleName,
-        PolicyArn: 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
+      await rawEc2Call({
+        Action: 'ReleaseAddress',
+        AllocationId: address.AllocationId!,
       })
-      await iam.deleteRolePolicy({
-        RoleName: roleName,
-        PolicyName: `${prefix}-dynamodb-policy`,
-      })
-      await iam.deleteRole({ RoleName: roleName })
-      log(`Deleted IAM role: ${roleName}`)
+      log('Elastic IP released')
     }
     catch (error: any) {
-      log(`Warning: Could not delete IAM role: ${error.message}`)
+      log(`Warning: Could not release Elastic IP: ${error.message}`)
+    }
+  }
+  else {
+    log('No Elastic IP found')
+  }
+
+  // ============================================
+  // Step 3: Terminate instance
+  // ============================================
+
+  if (instanceId) {
+    log('Terminating instance...')
+    await ec2.terminateInstances([instanceId])
+    log('Waiting for instance to terminate...')
+    await ec2.waitForInstanceState(instanceId, 'terminated', {
+      maxWaitMs: 120000,
+      pollIntervalMs: 5000,
+    })
+    log('Instance terminated')
+  }
+
+  // ============================================
+  // Step 4: Delete security group
+  // ============================================
+
+  const sgName = `${prefix}-tunnel-sg`
+  log(`Finding security group: ${sgName}...`)
+
+  const sgs = await ec2.describeSecurityGroups({
+    Filters: [
+      { Name: 'group-name', Values: [sgName] },
+    ],
+  })
+
+  const sg = sgs.SecurityGroups?.[0]
+  if (sg?.GroupId) {
+    log(`Deleting security group: ${sg.GroupId}...`)
+    try {
+      await rawEc2Call({
+        Action: 'DeleteSecurityGroup',
+        GroupId: sg.GroupId,
+      })
+      log('Security group deleted')
+    }
+    catch (error: any) {
+      log(`Warning: Could not delete security group: ${error.message}`)
+      log('It may still be in use. Try again in a few minutes after the instance is fully terminated.')
+    }
+  }
+  else {
+    log('No security group found')
+  }
+
+  // ============================================
+  // Step 5: Clean up Route53 DNS records
+  // ============================================
+
+  if (config.domain) {
+    log(`Cleaning up Route53 DNS records for ${config.domain}...`)
+    try {
+      const route53 = new Route53Client(region)
+
+      let hostedZoneId = config.hostedZoneId
+      if (!hostedZoneId) {
+        const zone = await route53.findHostedZoneForDomain(config.domain)
+        hostedZoneId = zone?.Id?.replace('/hostedzone/', '')
+      }
+
+      if (hostedZoneId) {
+        // Delete the A record for the domain
+        try {
+          await route53.deleteRecord({
+            HostedZoneId: hostedZoneId,
+            Name: config.domain,
+            Type: 'A',
+          })
+          log(`Deleted A record: ${config.domain}`)
+        }
+        catch (error: any) {
+          log(`Warning: Could not delete A record for ${config.domain}: ${error.message}`)
+        }
+
+        // Delete the wildcard A record
+        try {
+          await route53.deleteRecord({
+            HostedZoneId: hostedZoneId,
+            Name: `*.${config.domain}`,
+            Type: 'A',
+          })
+          log(`Deleted A record: *.${config.domain}`)
+        }
+        catch (error: any) {
+          log(`Warning: Could not delete wildcard A record: ${error.message}`)
+        }
+      }
+      else {
+        log(`Warning: Could not find Route53 hosted zone for ${config.domain}`)
+      }
+    }
+    catch (error: any) {
+      log(`Warning: DNS cleanup failed: ${error.message}`)
     }
   }
 
@@ -518,263 +768,105 @@ export async function destroyTunnelInfrastructure(
 }
 
 /**
- * Wait for a DynamoDB table to become active
+ * Extract instance ID from the raw RunInstances API response.
+ * Handles both camelCase XML-parsed and PascalCase SDK-style responses.
  */
-async function waitForTableActive(
-  dynamodb: any,
-  tableName: string,
-  maxWaitMs: number = 60000,
-): Promise<void> {
-  const startTime = Date.now()
-
-  while (Date.now() - startTime < maxWaitMs) {
-    try {
-      const result = await dynamodb.describeTable({ TableName: tableName })
-      if (result.Table?.TableStatus === 'ACTIVE') {
-        return
-      }
+function extractInstanceId(result: any): string | undefined {
+  // Try the raw XML-parsed structure (camelCase)
+  const response = result.RunInstancesResponse || result
+  const instancesSet = response.instancesSet
+  if (instancesSet) {
+    const item = instancesSet.item
+    if (Array.isArray(item)) {
+      return item[0]?.instanceId
     }
-    catch {
-      // Table might not exist yet
-    }
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    return item?.instanceId
   }
 
-  throw new Error(`Timeout waiting for table ${tableName} to become active`)
+  // Try SDK-style structure (PascalCase)
+  const reservationInstances = response.Instances || response.instances
+  if (Array.isArray(reservationInstances)) {
+    return reservationInstances[0]?.InstanceId || reservationInstances[0]?.instanceId
+  }
+
+  return undefined
 }
 
 /**
- * Create or update a Lambda function
+ * Generate the EC2 user data script that installs Bun, localtunnels,
+ * and sets up a systemd service running the TunnelServer.
  */
-async function createOrUpdateFunction(
-  lambda: any,
-  params: {
-    FunctionName: string
-    Runtime: string
-    Role: string
-    Handler: string
-    Code: string
-    Description?: string
-    Timeout?: number
-    MemorySize?: number
-    Environment?: { Variables: Record<string, string> }
-  },
-): Promise<any> {
-  const exists = await lambda.functionExists(params.FunctionName)
+function generateUserData(port: number): string {
+  const serverScript = [
+    'import { TunnelServer } from \'localtunnels\'',
+    '',
+    'const server = new TunnelServer({',
+    `  port: ${port},`,
+    '  host: \'0.0.0.0\',',
+    '  verbose: true,',
+    '})',
+    '',
+    'server.on(\'connection\', (info) => {',
+    '  console.log(\'+ Client connected: \' + info.subdomain)',
+    '})',
+    '',
+    'server.on(\'disconnection\', (info) => {',
+    '  console.log(\'- Client disconnected: \' + info.subdomain)',
+    '})',
+    '',
+    'await server.start()',
+    `console.log('LocalTunnel server is running on port ${port}')`,
+  ].join('\n')
 
-  if (exists) {
-    // Update existing function
-    await lambda.updateFunctionCodeInline(params.FunctionName, params.Code, 'index.js')
-    await lambda.updateFunctionConfiguration({
-      FunctionName: params.FunctionName,
-      Runtime: params.Runtime,
-      Handler: params.Handler,
-      Description: params.Description,
-      Timeout: params.Timeout,
-      MemorySize: params.MemorySize,
-      Environment: params.Environment,
-    })
-    return lambda.getFunction(params.FunctionName)
-  }
-  else {
-    // Create new function
-    return lambda.createFunctionWithCode({
-      FunctionName: params.FunctionName,
-      Runtime: params.Runtime,
-      Role: params.Role,
-      Handler: params.Handler,
-      Code: params.Code,
-      Description: params.Description,
-      Timeout: params.Timeout,
-      MemorySize: params.MemorySize,
-      Environment: params.Environment,
-    })
-  }
-}
-
-/**
- * Generate Lambda handler code
- */
-function generateHandlerCode(
-  _connectionsTable: string,
-  _responsesTable: string,
-): { http: string, message: string } {
-  const httpCode = `
-const { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand } = require('@aws-sdk/client-dynamodb');
-
-const dynamodb = new DynamoDBClient({});
-const TABLE_NAME = process.env.TABLE_NAME;
-const RESPONSE_TABLE_NAME = process.env.RESPONSE_TABLE_NAME;
-
-exports.handler = async (event) => {
-  const host = event.headers?.host || '';
-  const subdomain = host.split('.')[0];
-  const path = event.rawPath || '/';
-  const method = event.requestContext?.http?.method || 'GET';
-
-  // Health check
-  if (path === '/health' || path === '/_health') {
-    return { statusCode: 200, body: 'OK' };
-  }
-
-  // Status endpoint
-  if (path === '/status' || path === '/_status') {
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'ok', version: '0.2.0' }),
-    };
-  }
-
-  if (!subdomain) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid subdomain' }) };
-  }
-
-  try {
-    // Find connection for subdomain
-    const connections = await dynamodb.send(new QueryCommand({
-      TableName: TABLE_NAME,
-      IndexName: 'subdomain-index',
-      KeyConditionExpression: 'subdomain = :subdomain',
-      ExpressionAttributeValues: { ':subdomain': { S: subdomain } },
-    }));
-
-    if (!connections.Items?.length) {
-      return {
-        statusCode: 404,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'Tunnel not found', subdomain }),
-      };
-    }
-
-    // For now, return a message indicating the tunnel exists
-    // Full implementation would forward to the connected client
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Tunnel active',
-        subdomain,
-        note: 'Connect using WebSocket client for full functionality',
-      }),
-    };
-  } catch (error) {
-    console.error('Error:', error);
-    return {
-      statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Internal server error' }),
-    };
-  }
-};
-`
-
-  const messageCode = `
-const { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
-
-const dynamodb = new DynamoDBClient({});
-const TABLE_NAME = process.env.TABLE_NAME;
-const RESPONSE_TABLE_NAME = process.env.RESPONSE_TABLE_NAME;
-
-exports.handler = async (event) => {
-  const body = event.body ? JSON.parse(event.body) : {};
-  const { type, subdomain, id, status, headers, responseBody } = body;
-
-  try {
-    switch (type) {
-      case 'register': {
-        // Register a new tunnel client
-        const connectionId = \`conn_\${Date.now()}_\${Math.random().toString(36).substr(2, 9)}\`;
-
-        await dynamodb.send(new PutItemCommand({
-          TableName: TABLE_NAME,
-          Item: {
-            connectionId: { S: connectionId },
-            subdomain: { S: subdomain },
-            connectedAt: { N: Date.now().toString() },
-            lastSeen: { N: Date.now().toString() },
-            ttl: { N: Math.floor(Date.now() / 1000 + 86400).toString() },
-          },
-        }));
-
-        return {
-          statusCode: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'registered',
-            connectionId,
-            subdomain,
-            url: \`https://\${subdomain}.localtunnel.dev\`,
-          }),
-        };
-      }
-
-      case 'response': {
-        // Store a response from the tunnel client
-        await dynamodb.send(new PutItemCommand({
-          TableName: RESPONSE_TABLE_NAME,
-          Item: {
-            requestId: { S: id },
-            status: { N: (status || 200).toString() },
-            headers: { S: JSON.stringify(headers || {}) },
-            body: { S: responseBody || '' },
-            ttl: { N: Math.floor(Date.now() / 1000 + 60).toString() },
-          },
-        }));
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ type: 'response_stored', id }),
-        };
-      }
-
-      case 'ping': {
-        // Update last seen timestamp
-        if (body.connectionId) {
-          await dynamodb.send(new UpdateItemCommand({
-            TableName: TABLE_NAME,
-            Key: { connectionId: { S: body.connectionId } },
-            UpdateExpression: 'SET lastSeen = :now',
-            ExpressionAttributeValues: { ':now': { N: Date.now().toString() } },
-          }));
-        }
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ type: 'pong' }),
-        };
-      }
-
-      case 'disconnect': {
-        // Remove connection
-        if (body.connectionId) {
-          await dynamodb.send(new DeleteItemCommand({
-            TableName: TABLE_NAME,
-            Key: { connectionId: { S: body.connectionId } },
-          }));
-        }
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ type: 'disconnected' }),
-        };
-      }
-
-      default:
-        return {
-          statusCode: 400,
-          body: JSON.stringify({ error: 'Unknown message type', type }),
-        };
-    }
-  } catch (error) {
-    console.error('Error:', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Internal server error' }),
-    };
-  }
-};
-`
-
-  return { http: httpCode, message: messageCode }
+  return [
+    '#!/bin/bash',
+    'set -ex',
+    '',
+    '# Set HOME explicitly (cloud-init does not always set it)',
+    'export HOME=/root',
+    '',
+    '# Install Bun',
+    'export BUN_INSTALL="/root/.bun"',
+    'curl -fsSL https://bun.sh/install | bash',
+    'export PATH="$BUN_INSTALL/bin:$PATH"',
+    '',
+    '# Create app directory',
+    'mkdir -p /opt/localtunnel',
+    'cd /opt/localtunnel',
+    '',
+    '# Install localtunnels',
+    '/root/.bun/bin/bun init -y',
+    '/root/.bun/bin/bun add localtunnels',
+    '',
+    '# Create server script',
+    'cat > server.ts << \'SERVERSCRIPT\'',
+    serverScript,
+    'SERVERSCRIPT',
+    '',
+    '# Create systemd service',
+    'cat > /etc/systemd/system/localtunnel.service << \'SERVICEUNIT\'',
+    '[Unit]',
+    'Description=LocalTunnel Server',
+    'After=network.target',
+    '',
+    '[Service]',
+    'Type=simple',
+    'WorkingDirectory=/opt/localtunnel',
+    'Environment=BUN_INSTALL=/root/.bun',
+    'Environment=PATH=/root/.bun/bin:/usr/local/bin:/usr/bin:/bin',
+    'ExecStart=/root/.bun/bin/bun run server.ts',
+    'Restart=always',
+    'RestartSec=5',
+    'StandardOutput=journal',
+    'StandardError=journal',
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+    'SERVICEUNIT',
+    '',
+    'systemctl daemon-reload',
+    'systemctl enable localtunnel',
+    'systemctl start localtunnel',
+    '',
+  ].join('\n')
 }

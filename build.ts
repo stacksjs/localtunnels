@@ -10,7 +10,7 @@ await Bun.build({
   target: 'bun',
   minify: true,
   splitting: true,
-  external: ['ts-cloud', '@aws-sdk/*'],
+  external: ['ts-cloud', '@stacksjs/ts-cloud', '@stacksjs/ts-cloud/*'],
   plugins: [dts()],
 })
 

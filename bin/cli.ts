@@ -26,6 +26,17 @@ interface ServerOptions {
 interface DeployOptions {
   region?: string
   prefix?: string
+  domain?: string
+  instanceType?: string
+  keyName?: string
+  enableSsl?: boolean
+  verbose?: boolean
+}
+
+interface DestroyOptions {
+  region?: string
+  prefix?: string
+  domain?: string
   verbose?: boolean
 }
 
@@ -223,9 +234,13 @@ cli
   })
 
 cli
-  .command('deploy', 'Deploy tunnel infrastructure to AWS using ts-cloud')
+  .command('deploy', 'Deploy tunnel server to AWS EC2 using ts-cloud')
   .option('--region <region>', 'AWS region', { default: 'us-east-1' })
   .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
+  .option('--domain <domain>', 'Domain for tunnel URLs (sets up Route53 DNS)')
+  .option('--instance-type <type>', 'EC2 instance type', { default: 't3.micro' })
+  .option('--key-name <name>', 'EC2 key pair name for SSH access')
+  .option('--enable-ssl', 'Enable SSL (HTTPS/WSS)')
   .option('--verbose', 'Enable verbose logging')
   .action(async (options: DeployOptions) => {
     console.log(`
@@ -236,8 +251,12 @@ cli
 
     console.log(`Region:          ${options.region}`)
     console.log(`Prefix:          ${options.prefix}`)
+    console.log(`Instance Type:   ${options.instanceType}`)
+    if (options.domain) {
+      console.log(`Domain:          ${options.domain}`)
+    }
     console.log('')
-    console.log('Deploying infrastructure...')
+    console.log('Deploying EC2 tunnel server...')
     console.log('')
 
     try {
@@ -247,6 +266,10 @@ cli
       const result = await deployTunnelInfrastructure({
         region: options.region,
         prefix: options.prefix,
+        domain: options.domain,
+        instanceType: options.instanceType,
+        keyName: options.keyName,
+        enableSsl: options.enableSsl,
         verbose: options.verbose,
       })
 
@@ -255,22 +278,22 @@ cli
       console.log('║                   DEPLOYMENT COMPLETE                        ║')
       console.log('╚══════════════════════════════════════════════════════════════╝')
       console.log('')
-      console.log('Resources created:')
-      console.log(`  DynamoDB Tables:`)
-      console.log(`    - ${result.connectionsTable}`)
-      console.log(`    - ${result.responsesTable}`)
-      console.log('')
-      console.log(`  Lambda Functions:`)
-      console.log(`    - ${result.functions.http}`)
-      console.log(`    - ${result.functions.message}`)
+      console.log('Resources:')
+      console.log(`  Instance ID:     ${result.instanceId}`)
+      console.log(`  Public IP:       ${result.publicIp}`)
+      console.log(`  Security Group:  ${result.securityGroupId}`)
+      console.log(`  Elastic IP:      ${result.allocationId}`)
+      console.log(`  Region:          ${result.region}`)
       console.log('')
       console.log('Endpoints:')
-      if (result.httpUrl) {
-        console.log(`  HTTP URL:      ${result.httpUrl}`)
+      console.log(`  Server URL:      ${result.serverUrl}`)
+      console.log(`  WebSocket URL:   ${result.wsUrl}`)
+      if (result.domain) {
+        console.log(`  Domain:          ${result.domain}`)
       }
-      if (result.wsUrl) {
-        console.log(`  Message URL:   ${result.wsUrl}`)
-      }
+      console.log('')
+      console.log('Connect with:')
+      console.log(`  localtunnels start --port 3000 --server ${result.domain || result.publicIp}`)
       console.log('')
     }
     catch (error: any) {
@@ -286,8 +309,9 @@ cli
   .command('destroy', 'Destroy tunnel infrastructure from AWS')
   .option('--region <region>', 'AWS region', { default: 'us-east-1' })
   .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
+  .option('--domain <domain>', 'Domain to clean up DNS records for')
   .option('--verbose', 'Enable verbose logging')
-  .action(async (options: DeployOptions) => {
+  .action(async (options: DestroyOptions) => {
     console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║              localtunnels cloud destruction                  ║
@@ -296,6 +320,9 @@ cli
 
     console.log(`Region:          ${options.region}`)
     console.log(`Prefix:          ${options.prefix}`)
+    if (options.domain) {
+      console.log(`Domain:          ${options.domain}`)
+    }
     console.log('')
     console.log('Destroying infrastructure...')
     console.log('')
@@ -307,6 +334,7 @@ cli
       await destroyTunnelInfrastructure({
         region: options.region,
         prefix: options.prefix,
+        domain: options.domain,
         verbose: options.verbose,
       })
 
@@ -414,8 +442,14 @@ EXAMPLES:
   # Start your own tunnel server
   localtunnels server --port 8080 --domain mytunnel.example.com
 
-  # Deploy to AWS
-  localtunnels deploy --region us-east-1 --prefix mytunnel
+  # Deploy tunnel server to EC2
+  localtunnels deploy --region us-east-1 --domain localtunnel.dev
+
+  # Deploy with SSH access
+  localtunnels deploy --domain localtunnel.dev --key-name my-keypair
+
+  # Destroy deployed infrastructure
+  localtunnels destroy --domain localtunnel.dev
 
 ENVIRONMENT VARIABLES:
   TUNNEL_SERVER     - Default tunnel server URL

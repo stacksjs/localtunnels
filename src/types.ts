@@ -292,9 +292,9 @@ export interface ServerConfig {
 }
 
 /**
- * AWS deployment configuration
+ * Cloud deployment configuration for EC2-based tunnel server
  */
-export interface AWSConfig {
+export interface CloudDeployConfig {
   /**
    * AWS region
    * @default 'us-east-1'
@@ -302,30 +302,42 @@ export interface AWSConfig {
   region?: string
 
   /**
-   * Domain name for the tunnel service
-   * @default 'localtunnel.dev'
+   * Prefix for all resource names
+   * @default 'localtunnel'
    */
-  domainName?: string
+  prefix?: string
 
   /**
-   * Route53 hosted zone ID
+   * Domain name for the tunnel service (e.g. 'localtunnel.dev')
+   * When provided, Route53 DNS records will be created
+   */
+  domain?: string
+
+  /**
+   * Route53 hosted zone ID (auto-detected from domain if not provided)
    */
   hostedZoneId?: string
 
   /**
-   * ACM certificate ARN
+   * EC2 instance type
+   * @default 't3.micro'
    */
-  certificateArn?: string
+  instanceType?: string
 
   /**
-   * Enable CloudWatch monitoring
-   * @default true
+   * EC2 key pair name for SSH access
    */
-  enableMonitoring?: boolean
+  keyName?: string
 
   /**
-   * Log retention in days
-   * @default 14
+   * Enable verbose logging during deployment
+   * @default false
    */
-  logRetentionDays?: number
+  verbose?: boolean
+
+  /**
+   * Enable SSL (use HTTPS/WSS)
+   * @default false
+   */
+  enableSsl?: boolean
 }
