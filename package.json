@@ -1,7 +1,7 @@
 {
   "name": "localtunnels",
   "type": "module",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A simple and smart tunneling solution. Expose your localhost to the world.",
   "author": "Chris Breuer <chris@stacksjs.com>",
   "license": "MIT",

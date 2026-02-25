@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.2.2...main
+
+[compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.2...main)
+
+### 🏡 Chore
+
+- Wip ([c8ac58c](https://github.com/stacksjs/localtunnels/commit/c8ac58c))
+
+### ❤️ Contributors
+
+- Chris ([@chrisbbreuer](https://github.com/chrisbbreuer))
+
 ## v0.2.1...main
 
 [compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.1...main)
