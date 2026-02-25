@@ -28,7 +28,7 @@
     "src/cloud/**",
     "dist/**",
     "node_modules/**",
-    "bunpress.config.ts",
+    "bunpress.ts",
     "docs/**"
   ]
 }

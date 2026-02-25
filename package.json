@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.2.0",
   "description": "A simple and smart tunneling solution. Expose your localhost to the world.",
-  "author": "Chris Breuer <chris@stacksjs.org>",
+  "author": "Chris Breuer <chris@stacksjs.com>",
   "license": "MIT",
   "homepage": "https://github.com/stacksjs/localtunnels",
   "repository": {
@@ -82,26 +82,13 @@
     "format": "bunx --bun pickier format .",
     "format:fix": "bunx --bun pickier format . --write"
   },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
-  },
-  "peerDependenciesMeta": {
-    "typescript": {
-      "optional": true
-    }
-  },
   "dependencies": {
     "bunfig": "^0.8.0"
   },
   "devDependencies": {
-    "@stacksjs/cli": "^0.70.23",
-    "@stacksjs/docs": "^0.70.23",
-    "@types/aws-lambda": "^8.10.157",
-    "better-dx": "^0.2.5",
-    "unocss": "^66.5.5"
-  },
-  "overrides": {
-    "unconfig": "0.3.10"
+    "@stacksjs/bunpress": "^0.1.1",
+    "@stacksjs/clapp": "^0.2.0",
+    "better-dx": "^0.2.5"
   },
   "git-hooks": {
     "pre-commit": {
