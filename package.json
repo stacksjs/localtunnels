@@ -65,9 +65,9 @@
     "release": "bun --bun run changelog && bunx --bun bumpp package.json --all",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit --project tsconfig.json",
-    "dev:docs": "bun --bun vitepress dev docs",
-    "build:docs": "bun --bun vitepress build docs",
-    "preview:docs": "bun --bun vitepress preview docs",
+    "dev:docs": "bun --bun bunpress dev docs",
+    "build:docs": "bun --bun bunpress build docs",
+    "preview:docs": "bun --bun bunpress preview docs",
     "zip": "bun run zip:all",
     "zip:all": "bun run zip:linux-x64 && bun run zip:linux-arm64 && bun run zip:windows-x64 && bun run zip:darwin-x64 && bun run zip:darwin-arm64",
     "zip:linux-x64": "zip -j bin/localtunnels-linux-x64.zip bin/localtunnels-linux-x64",
@@ -83,7 +83,7 @@
     "format:fix": "bunx --bun pickier format . --write"
   },
   "dependencies": {
-    "bunfig": "^0.8.0"
+    "bunfig": "^0.15.6"
   },
   "devDependencies": {
     "@stacksjs/bunpress": "^0.1.1",
