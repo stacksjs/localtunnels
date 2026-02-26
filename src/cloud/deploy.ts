@@ -136,13 +136,14 @@ async function importTsCloud(): Promise<any> {
 export async function deployTunnelInfrastructure(
   config: TunnelDeployConfig = {},
 ): Promise<TunnelDeployResult> {
-  let EC2Client: any, Route53Client: any, SSMClient: any
+  let EC2Client: any, Route53Client: any, SSMClient: any, PorkbunProvider: any
 
   try {
     const tsCloud = await importTsCloud()
     EC2Client = tsCloud.EC2Client
     Route53Client = tsCloud.Route53Client
     SSMClient = tsCloud.SSMClient
+    PorkbunProvider = tsCloud.PorkbunProvider
   }
   catch {
     throw new Error(
@@ -550,47 +551,89 @@ export async function deployTunnelInfrastructure(
   }
 
   // ============================================
-  // Step 8: Optional Route53 DNS setup
+  // Step 8: DNS setup (Porkbun API or Route53)
   // ============================================
 
   if (config.domain) {
-    log(`Setting up Route53 DNS for ${config.domain}...`)
-    try {
-      const route53 = new Route53Client(region)
+    const porkbunApiKey = config.porkbunApiKey || process.env.PORKBUN_API_KEY || ''
+    const porkbunSecretKey = config.porkbunSecretKey || process.env.PORKBUN_SECRET_KEY || process.env.PORKBUN_SECRET_API_KEY || ''
 
-      let hostedZoneId = config.hostedZoneId
-      if (!hostedZoneId) {
-        const zone = await route53.findHostedZoneForDomain(config.domain)
-        hostedZoneId = zone?.Id?.replace('/hostedzone/', '')
-      }
+    if (porkbunApiKey && porkbunSecretKey && PorkbunProvider) {
+      // Use ts-cloud PorkbunProvider for DNS management
+      log(`Setting up Porkbun DNS for ${config.domain}...`)
+      try {
+        const porkbun = new PorkbunProvider(porkbunApiKey, porkbunSecretKey)
 
-      if (hostedZoneId) {
-        // Create A record for the domain
-        await route53.createARecord({
-          HostedZoneId: hostedZoneId,
-          Name: config.domain,
-          Value: publicIp,
-          TTL: 300,
+        // Upsert root A record
+        const rootResult = await porkbun.upsertRecord(config.domain, {
+          name: '',
+          type: 'A',
+          content: publicIp,
+          ttl: 300,
         })
-        log(`Created A record: ${config.domain} -> ${publicIp}`)
+        if (rootResult.success) {
+          log(`Set A record: ${config.domain} -> ${publicIp}`)
+        }
+        else {
+          log(`Warning: Could not set root A record: ${rootResult.message}`)
+        }
 
-        // Create wildcard A record for subdomains
-        await route53.createARecord({
-          HostedZoneId: hostedZoneId,
-          Name: `*.${config.domain}`,
-          Value: publicIp,
-          TTL: 300,
+        // Upsert wildcard A record
+        const wildResult = await porkbun.upsertRecord(config.domain, {
+          name: '*',
+          type: 'A',
+          content: publicIp,
+          ttl: 300,
         })
-        log(`Created A record: *.${config.domain} -> ${publicIp}`)
+        if (wildResult.success) {
+          log(`Set A record: *.${config.domain} -> ${publicIp}`)
+        }
+        else {
+          log(`Warning: Could not set wildcard A record: ${wildResult.message}`)
+        }
       }
-      else {
-        log(`Warning: Could not find Route53 hosted zone for ${config.domain}`)
-        log('DNS records were not created. Set up DNS manually or provide --hosted-zone-id.')
+      catch (error: any) {
+        log(`Warning: Porkbun DNS setup failed: ${error.message}`)
       }
     }
-    catch (error: any) {
-      log(`Warning: DNS setup failed: ${error.message}`)
-      log('The server is deployed but DNS is not configured.')
+    else {
+      // Fallback to Route53
+      log(`Setting up Route53 DNS for ${config.domain}...`)
+      try {
+        const route53 = new Route53Client(region)
+
+        let hostedZoneId = config.hostedZoneId
+        if (!hostedZoneId) {
+          const zone = await route53.findHostedZoneForDomain(config.domain)
+          hostedZoneId = zone?.Id?.replace('/hostedzone/', '')
+        }
+
+        if (hostedZoneId) {
+          await route53.createARecord({
+            HostedZoneId: hostedZoneId,
+            Name: config.domain,
+            Value: publicIp,
+            TTL: 300,
+          })
+          log(`Created A record: ${config.domain} -> ${publicIp}`)
+
+          await route53.createARecord({
+            HostedZoneId: hostedZoneId,
+            Name: `*.${config.domain}`,
+            Value: publicIp,
+            TTL: 300,
+          })
+          log(`Created A record: *.${config.domain} -> ${publicIp}`)
+        }
+        else {
+          log(`Warning: Could not find Route53 hosted zone for ${config.domain}`)
+          log('DNS records were not created. Set up DNS manually or provide --hosted-zone-id.')
+        }
+      }
+      catch (error: any) {
+        log(`Warning: Route53 DNS setup failed: ${error.message}`)
+        log('The server is deployed but DNS is not configured.')
+      }
     }
   }
 
@@ -624,12 +667,13 @@ export async function deployTunnelInfrastructure(
 export async function destroyTunnelInfrastructure(
   config: TunnelDeployConfig = {},
 ): Promise<void> {
-  let EC2Client: any, Route53Client: any
+  let EC2Client: any, Route53Client: any, PorkbunProviderCls: any
 
   try {
     const tsCloud = await importTsCloud()
     EC2Client = tsCloud.EC2Client
     Route53Client = tsCloud.Route53Client
+    PorkbunProviderCls = tsCloud.PorkbunProvider
   }
   catch {
     throw new Error(
@@ -763,53 +807,60 @@ export async function destroyTunnelInfrastructure(
   }
 
   // ============================================
-  // Step 5: Clean up Route53 DNS records
+  // Step 5: Clean up DNS records (Porkbun or Route53)
   // ============================================
 
   if (config.domain) {
-    log(`Cleaning up Route53 DNS records for ${config.domain}...`)
-    try {
-      const route53 = new Route53Client(region)
+    const porkbunApiKey = config.porkbunApiKey || process.env.PORKBUN_API_KEY || ''
+    const porkbunSecretKey = config.porkbunSecretKey || process.env.PORKBUN_SECRET_KEY || process.env.PORKBUN_SECRET_API_KEY || ''
 
-      let hostedZoneId = config.hostedZoneId
-      if (!hostedZoneId) {
-        const zone = await route53.findHostedZoneForDomain(config.domain)
-        hostedZoneId = zone?.Id?.replace('/hostedzone/', '')
-      }
-
-      if (hostedZoneId) {
-        // Delete the A record for the domain
-        try {
-          await route53.deleteRecord({
-            HostedZoneId: hostedZoneId,
-            Name: config.domain,
-            Type: 'A',
-          })
-          log(`Deleted A record: ${config.domain}`)
-        }
-        catch (error: any) {
-          log(`Warning: Could not delete A record for ${config.domain}: ${error.message}`)
-        }
-
-        // Delete the wildcard A record
-        try {
-          await route53.deleteRecord({
-            HostedZoneId: hostedZoneId,
-            Name: `*.${config.domain}`,
-            Type: 'A',
-          })
-          log(`Deleted A record: *.${config.domain}`)
-        }
-        catch (error: any) {
-          log(`Warning: Could not delete wildcard A record: ${error.message}`)
-        }
-      }
-      else {
-        log(`Warning: Could not find Route53 hosted zone for ${config.domain}`)
-      }
+    if (porkbunApiKey && porkbunSecretKey) {
+      log(`Note: Porkbun DNS records for ${config.domain} were not deleted (they point to the now-destroyed instance).`)
+      log('Update them manually or they will be updated on next deploy.')
     }
-    catch (error: any) {
-      log(`Warning: DNS cleanup failed: ${error.message}`)
+    else {
+      log(`Cleaning up Route53 DNS records for ${config.domain}...`)
+      try {
+        const route53 = new Route53Client(region)
+
+        let hostedZoneId = config.hostedZoneId
+        if (!hostedZoneId) {
+          const zone = await route53.findHostedZoneForDomain(config.domain)
+          hostedZoneId = zone?.Id?.replace('/hostedzone/', '')
+        }
+
+        if (hostedZoneId) {
+          try {
+            await route53.deleteRecord({
+              HostedZoneId: hostedZoneId,
+              Name: config.domain,
+              Type: 'A',
+            })
+            log(`Deleted A record: ${config.domain}`)
+          }
+          catch (error: any) {
+            log(`Warning: Could not delete A record for ${config.domain}: ${error.message}`)
+          }
+
+          try {
+            await route53.deleteRecord({
+              HostedZoneId: hostedZoneId,
+              Name: `*.${config.domain}`,
+              Type: 'A',
+            })
+            log(`Deleted A record: *.${config.domain}`)
+          }
+          catch (error: any) {
+            log(`Warning: Could not delete wildcard A record: ${error.message}`)
+          }
+        }
+        else {
+          log(`Warning: Could not find Route53 hosted zone for ${config.domain}`)
+        }
+      }
+      catch (error: any) {
+        log(`Warning: DNS cleanup failed: ${error.message}`)
+      }
     }
   }
 
@@ -844,19 +895,6 @@ function generateUserData(opts: {
       ]
     : []
 
-  // Workaround: also set ssl directly on options after construction
-  // to handle older versions where the constructor doesn't pass ssl through
-  const sslWorkaround = enableSsl && domain
-    ? [
-        '',
-        '// Ensure ssl option is set (workaround for constructor)',
-        ';(server as any).options.ssl = {',
-        '  key: \'/etc/ssl/localtunnel/privkey.pem\',',
-        '  cert: \'/etc/ssl/localtunnel/fullchain.pem\',',
-        '}',
-      ]
-    : []
-
   const serverScript = [
     'import { TunnelServer } from \'localtunnels\'',
     '',
@@ -866,14 +904,13 @@ function generateUserData(opts: {
     '  verbose: true,',
     ...sslLines,
     '})',
-    ...sslWorkaround,
     '',
     'server.on(\'connection\', (info) => {',
-    '  console.log(\'+ Client connected: \' + info.subdomain)',
+    '  console.log(`+ Client connected: ${info.subdomain}`)',
     '})',
     '',
     'server.on(\'disconnection\', (info) => {',
-    '  console.log(\'- Client disconnected: \' + info.subdomain)',
+    '  console.log(`- Client disconnected: ${info.subdomain}`)',
     '})',
     '',
     'await server.start()',
@@ -912,7 +949,7 @@ function generateUserData(opts: {
     lines.push(
       '# Install acme.sh for Let\'s Encrypt certificate provisioning',
       'dnf install -y socat cronie',
-      'curl -fsSL https://get.acme.sh | sh -s email=admin@' + domain,
+      `curl -fsSL https://get.acme.sh | sh -s email=admin@${domain}`,
       '',
       'mkdir -p /etc/ssl/localtunnel',
       '',

@@ -677,9 +677,11 @@ export async function startLocalTunnel(options: {
   host?: string
   server?: string
   verbose?: boolean
+  timeout?: number
+  maxReconnectAttempts?: number
   onConnect?: (info: { url: string, subdomain: string }) => void
   onRequest?: (req: { method: string, url: string }) => void
-  onResponse?: (res: { status: number, size: number }) => void
+  onResponse?: (res: { status: number, size: number, duration?: number }) => void
   onError?: (error: Error) => void
   onReconnecting?: (info: { attempt: number, delay: number }) => void
 }): Promise<TunnelClient> {
@@ -696,6 +698,8 @@ export async function startLocalTunnel(options: {
     localPort: options.port,
     localHost: options.host || 'localhost',
     subdomain: options.subdomain,
+    ...(options.timeout ? { timeout: options.timeout } : {}),
+    ...(options.maxReconnectAttempts ? { maxReconnectAttempts: options.maxReconnectAttempts } : {}),
   })
 
   if (options.onConnect) {
