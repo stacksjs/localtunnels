@@ -72,6 +72,15 @@ export interface TunnelOptions {
    * API key for authentication (if required by server)
    */
   apiKey?: string
+
+  /**
+   * Auto-resolve DNS for tunnel server connectivity
+   * When enabled, if the system resolver cannot reach the tunnel server (common on macOS
+   * with .dev TLD), localtunnels will resolve the IP via alternate DNS (DoH/dig) and
+   * connect directly to it, bypassing broken system DNS.
+   * @default true
+   */
+  manageHosts?: boolean
 }
 
 /**
@@ -121,6 +130,7 @@ export type TunnelMessageType =
   | 'connected'
   | 'ready'
   | 'registered'
+  | 'subdomain_taken'
   | 'request'
   | 'response'
   | 'ping'

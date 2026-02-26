@@ -71,6 +71,83 @@ export function generateId(length = 7): string {
     .substring(2, 2 + length)
 }
 
+// Word lists for generating memorable subdomain names (adjective-noun combos)
+// ~200 adjectives x ~200 nouns = ~40,000 unique combinations
+const ADJECTIVES = [
+  'swift', 'bold', 'calm', 'cool', 'crisp', 'dark', 'deft', 'eager', 'fair', 'fast',
+  'fierce', 'fond', 'free', 'fresh', 'glad', 'grand', 'great', 'keen', 'kind', 'lush',
+  'neat', 'nice', 'noble', 'odd', 'pale', 'plain', 'proud', 'pure', 'rare', 'raw',
+  'real', 'rich', 'ripe', 'safe', 'shy', 'slim', 'sly', 'soft', 'sour', 'tall',
+  'tame', 'tidy', 'tiny', 'trim', 'true', 'vast', 'warm', 'wide', 'wild', 'wise',
+  'able', 'apt', 'avid', 'blue', 'busy', 'cozy', 'cute', 'damp', 'deep', 'dry',
+  'dull', 'epic', 'even', 'fine', 'firm', 'flat', 'full', 'gold', 'good', 'gray',
+  'grim', 'hale', 'hard', 'high', 'holy', 'huge', 'icy', 'idle', 'jade', 'just',
+  'late', 'lazy', 'lean', 'live', 'lone', 'long', 'lost', 'loud', 'low', 'mad',
+  'main', 'mega', 'mild', 'mint', 'mock', 'mute', 'new', 'next', 'numb', 'opal',
+  'open', 'oval', 'peak', 'pink', 'plum', 'posh', 'quad', 'rosy', 'ruby', 'rust',
+  'sage', 'salt', 'sane', 'silk', 'snug', 'solo', 'spry', 'star', 'sure', 'tart',
+  'thin', 'void', 'wary', 'wavy', 'weak', 'wee', 'wet', 'zany', 'zero', 'zinc',
+  'aged', 'arid', 'ashy', 'bare', 'base', 'bent', 'blunt', 'bone', 'brisk', 'buff',
+  'burnt', 'chief', 'civil', 'clean', 'clear', 'close', 'cold', 'coral', 'dapper', 'dense',
+  'dizzy', 'dual', 'dusty', 'early', 'extra', 'fancy', 'fiery', 'foggy', 'funky', 'fuzzy',
+  'giant', 'giddy', 'glossy', 'green', 'handy', 'happy', 'hasty', 'hefty', 'humble', 'husky',
+  'inner', 'ionic', 'iron', 'ivory', 'jolly', 'jumpy', 'lunar', 'magic', 'maple', 'merry',
+  'mighty', 'misty', 'moody', 'mossy', 'nifty', 'novel', 'olive', 'outer', 'perky', 'petty',
+  'pixel', 'polar', 'prime', 'quick', 'quiet', 'rapid', 'retro', 'rocky', 'royal', 'sandy',
+]
+
+const NOUNS = [
+  'fox', 'owl', 'bee', 'elk', 'emu', 'yak', 'bat', 'cod', 'jay', 'ram',
+  'ant', 'ape', 'cat', 'cow', 'dog', 'eel', 'fly', 'gnu', 'hen', 'hog',
+  'koi', 'lab', 'lynx', 'mole', 'moth', 'newt', 'oryx', 'pug', 'ray', 'seal',
+  'slug', 'swan', 'toad', 'wasp', 'wolf', 'wren', 'bear', 'boar', 'crab', 'crow',
+  'dart', 'deer', 'dove', 'duck', 'fawn', 'fish', 'frog', 'goat', 'hawk', 'hare',
+  'ibis', 'lark', 'lion', 'mink', 'mule', 'puma', 'rook', 'stag', 'tern', 'vole',
+  'acre', 'arch', 'atom', 'axle', 'bard', 'bark', 'bass', 'beam', 'bell', 'bolt',
+  'bone', 'brew', 'cape', 'cave', 'chip', 'clay', 'cliff', 'coil', 'cone', 'cork',
+  'cube', 'dune', 'echo', 'edge', 'fern', 'flag', 'flint', 'flux', 'foam', 'fork',
+  'fuse', 'gate', 'gear', 'gem', 'glow', 'grid', 'gust', 'haze', 'helm', 'hive',
+  'hook', 'hull', 'jade', 'jazz', 'jest', 'kelp', 'kite', 'knot', 'lake', 'lamp',
+  'leaf', 'lime', 'link', 'loft', 'loom', 'loop', 'mars', 'mast', 'maze', 'mesa',
+  'mill', 'mint', 'moon', 'moss', 'nest', 'node', 'nova', 'oaks', 'opal', 'orb',
+  'palm', 'pane', 'peak', 'pier', 'pine', 'plum', 'pond', 'port', 'quay', 'raft',
+  'rain', 'reed', 'reef', 'ridge', 'ring', 'rock', 'root', 'rune', 'rush', 'sage',
+  'sand', 'shard', 'shed', 'silk', 'silo', 'slab', 'snow', 'soil', 'spark', 'star',
+  'stem', 'sun', 'surf', 'tank', 'thorn', 'tide', 'tile', 'tomb', 'tower', 'vale',
+  'valve', 'vault', 'veil', 'vine', 'void', 'wave', 'well', 'whirl', 'wind', 'wire',
+  'wood', 'yarn', 'yew', 'zinc', 'zone', 'pixel', 'prism', 'vapor', 'spire', 'blaze',
+  'frost', 'storm', 'flame', 'flare', 'gleam', 'pulse', 'drift', 'siren', 'comet', 'nexus',
+]
+
+/**
+ * Slugify a string into a valid subdomain (lowercase alphanumeric + hyphens)
+ */
+function slugify(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 63)
+}
+
+/**
+ * Generate a subdomain, checking APP_NAME env var first, then falling back
+ * to a memorable random adjective-noun combo like "swift-fox" or "bold-comet".
+ * ~40,000 unique random combinations from 200 adjectives x 200 nouns.
+ */
+export function generateSubdomain(): string {
+  const appName = process.env.APP_NAME
+  if (appName) {
+    const slug = slugify(appName)
+    if (slug && isValidSubdomain(slug))
+      return slug
+  }
+
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)]
+  return `${adj}-${noun}`
+}
+
 /**
  * Parse a host string into its components
  * @param host - The host string (e.g., "subdomain.example.com:3000")

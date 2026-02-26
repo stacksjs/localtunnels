@@ -1,10 +1,11 @@
 import type { ServerWebSocket } from 'bun'
 import type { ClientState, ServerStats, TunnelOptions, TunnelRequest } from './types'
 import { EventEmitter } from 'node:events'
-import { calculateBackoff, debugLog, delay, generateId, isValidSubdomain } from './utils'
+import { canSystemConnect, resolveHostname } from './hosts'
+import { calculateBackoff, debugLog, delay, generateId, generateSubdomain, isValidSubdomain } from './utils'
 
 // Internal options type with ssl being optional
-type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl'> & { ssl?: TunnelOptions['ssl'] }
+type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl' | 'manageHosts'> & { ssl?: TunnelOptions['ssl'], manageHosts: boolean }
 
 // Scalability limits
 const MAX_CONNECTIONS_PER_SUBDOMAIN = 5
@@ -59,6 +60,7 @@ export class TunnelServer extends EventEmitter {
       timeout: options.timeout || 30000,
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
+      manageHosts: false,
       ...(options.ssl ? { ssl: options.ssl } : {}),
     }
   }
@@ -350,6 +352,16 @@ export class TunnelServer extends EventEmitter {
                 return
               }
 
+              // Check if subdomain is already in use by another client
+              if (this.subdomainSockets.has(subdomain) && this.subdomainSockets.get(subdomain)!.size > 0) {
+                ws.send(JSON.stringify({
+                  type: 'subdomain_taken',
+                  subdomain,
+                }))
+                debugLog('server', `Subdomain ${subdomain} already in use, notifying client`, this.options.verbose)
+                return
+              }
+
               ws.data.subdomain = subdomain
               const accepted = this.addSocket(subdomain, ws)
               if (!accepted) {
@@ -479,6 +491,7 @@ export class TunnelClient extends EventEmitter {
   private shouldReconnect = true
   private state: ClientState = 'disconnected'
   private pingInterval: ReturnType<typeof setInterval> | null = null
+  private resolvedIp: string | null = null
 
   constructor(options: TunnelOptions = {}) {
     super()
@@ -489,10 +502,11 @@ export class TunnelClient extends EventEmitter {
       verbose: options.verbose || false,
       localPort: options.localPort || 8000,
       localHost: options.localHost || 'localhost',
-      subdomain: options.subdomain || generateId(8),
+      subdomain: options.subdomain || generateSubdomain(),
       timeout: options.timeout || 10000,
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
+      manageHosts: options.manageHosts !== false,
     }
   }
 
@@ -501,11 +515,30 @@ export class TunnelClient extends EventEmitter {
   }
 
   public async connect(): Promise<void> {
+    // If DNS/connectivity to the server doesn't work, resolve the IP directly
+    // so we can connect to the IP and bypass broken system DNS (common on macOS with .dev TLD)
+    if (this.options.manageHosts && !this.resolvedIp) {
+      try {
+        const reachable = await canSystemConnect(this.options.host, this.options.secure)
+        if (!reachable) {
+          debugLog('client', `Cannot reach ${this.options.host} via system DNS, resolving IP...`, this.options.verbose)
+          this.resolvedIp = await resolveHostname(this.options.host, this.options.verbose)
+          if (this.resolvedIp) {
+            debugLog('client', `Will connect directly to ${this.resolvedIp} for ${this.options.host}`, this.options.verbose)
+          }
+        }
+      }
+      catch (err) {
+        debugLog('client', `DNS resolution fallback failed (non-fatal): ${err}`, this.options.verbose, 'warn')
+      }
+    }
+
     return new Promise((resolve, reject) => {
       this.state = 'connecting'
 
       const protocol = this.options.secure ? 'wss' : 'ws'
-      let url = `${protocol}://${this.options.host}`
+      const connectHost = this.resolvedIp || this.options.host
+      let url = `${protocol}://${connectHost}`
 
       // Add port if not default
       if ((this.options.secure && this.options.port !== 443)
@@ -518,7 +551,13 @@ export class TunnelClient extends EventEmitter {
 
       debugLog('client', `Connecting to WebSocket server at ${url}`, this.options.verbose)
 
-      this.ws = new WebSocket(url)
+      // When connecting to an IP directly, set the Host header and disable strict TLS
+      // so the TLS handshake uses the right SNI but doesn't reject the IP-based cert
+      const wsOptions = this.resolvedIp
+        ? { headers: { Host: this.options.host }, tls: { rejectUnauthorized: false } }
+        : undefined
+
+      this.ws = new WebSocket(url, wsOptions as any)
 
       const timeout = setTimeout(() => {
         if (this.ws?.readyState !== WebSocket.OPEN) {
@@ -529,28 +568,19 @@ export class TunnelClient extends EventEmitter {
         }
       }, this.options.timeout)
 
+      let settled = false
+
       this.ws.addEventListener('open', () => {
         clearTimeout(timeout)
         this.state = 'connected'
         this.reconnectAttempts = 0
         debugLog('client', 'Connected to tunnel server', this.options.verbose)
 
-        // Send ready message with subdomain
+        // Send ready message with subdomain — wait for 'registered' before resolving
         this.ws?.send(JSON.stringify({
           type: 'ready',
           subdomain: this.options.subdomain,
         }))
-
-        this.emit('connected', {
-          url: `${this.options.secure ? 'https' : 'http'}://${this.options.subdomain}.${this.options.host}`,
-          subdomain: this.options.subdomain,
-          tunnelServer: this.options.host,
-        })
-
-        // Start ping interval
-        this.startPing()
-
-        resolve()
       })
 
       this.ws.addEventListener('message', async (event) => {
@@ -558,11 +588,40 @@ export class TunnelClient extends EventEmitter {
           const data = JSON.parse(event.data as string)
           debugLog('client', `Received message: ${data.type}`, this.options.verbose)
 
-          if (data.type === 'request') {
-            await this.handleRequest(data)
-          }
-          else if (data.type === 'registered') {
+          if (data.type === 'registered') {
+            // Server confirmed our subdomain — now we're truly ready
+            this.options.subdomain = data.subdomain
             debugLog('client', `Registered with subdomain: ${data.subdomain}`, this.options.verbose)
+
+            this.emit('connected', {
+              url: `${this.options.secure ? 'https' : 'http'}://${this.options.subdomain}.${this.options.host}`,
+              subdomain: this.options.subdomain,
+              tunnelServer: this.options.host,
+            })
+
+            this.startPing()
+
+            if (!settled) {
+              settled = true
+              resolve()
+            }
+          }
+          else if (data.type === 'subdomain_taken') {
+            // Subdomain in use — append or increment suffix and retry
+            const current = this.options.subdomain
+            const match = current.match(/^(.+)-(\d+)$/)
+            const base = match ? match[1] : current
+            const next = match ? Number.parseInt(match[2]) + 1 : 2
+            this.options.subdomain = `${base}-${next}`
+            debugLog('client', `Subdomain ${data.subdomain} taken, trying ${this.options.subdomain}`, this.options.verbose)
+
+            this.ws?.send(JSON.stringify({
+              type: 'ready',
+              subdomain: this.options.subdomain,
+            }))
+          }
+          else if (data.type === 'request') {
+            await this.handleRequest(data)
           }
           else if (data.type === 'pong') {
             debugLog('client', 'Received pong', this.options.verbose)
@@ -790,6 +849,7 @@ export async function startLocalTunnel(options: {
   verbose?: boolean
   timeout?: number
   maxReconnectAttempts?: number
+  manageHosts?: boolean
   onConnect?: (info: { url: string, subdomain: string }) => void
   onRequest?: (req: { method: string, url: string }) => void
   onResponse?: (res: { status: number, size: number, duration?: number }) => void
@@ -811,6 +871,7 @@ export async function startLocalTunnel(options: {
     subdomain: options.subdomain,
     ...(options.timeout ? { timeout: options.timeout } : {}),
     ...(options.maxReconnectAttempts ? { maxReconnectAttempts: options.maxReconnectAttempts } : {}),
+    ...(options.manageHosts !== undefined ? { manageHosts: options.manageHosts } : {}),
   })
 
   if (options.onConnect) {

@@ -3,7 +3,7 @@
 import { CLI } from '@stacksjs/clapp'
 import { version } from '../package.json'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
-import { generateId, isValidPort, isValidSubdomain } from '../src/utils'
+import { generateSubdomain, isValidPort, isValidSubdomain } from '../src/utils'
 
 const cli = new CLI('localtunnels')
 
@@ -14,6 +14,7 @@ interface TunnelOptions {
   server?: string
   verbose?: boolean
   secure?: boolean
+  manageHosts?: boolean
 }
 
 interface ServerOptions {
@@ -54,6 +55,7 @@ cli
   .option('--server <server>', 'Tunnel server URL', { default: DEFAULT_SERVER })
   .option('--verbose', 'Enable verbose logging')
   .option('--secure', 'Use secure WebSocket (wss://)')
+  .option('--no-manage-hosts', 'Disable automatic /etc/hosts management')
   .action(async (options: TunnelOptions) => {
     const localPort = Number.parseInt(options.port)
 
@@ -62,7 +64,7 @@ cli
       process.exit(1)
     }
 
-    const subdomain = options.subdomain || generateId(8)
+    const subdomain = options.subdomain || generateSubdomain()
 
     if (options.subdomain && !isValidSubdomain(options.subdomain)) {
       console.error(`Invalid subdomain: ${options.subdomain}`)
@@ -70,21 +72,12 @@ cli
       process.exit(1)
     }
 
-    console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║                       localtunnels                           ║
-╚══════════════════════════════════════════════════════════════╝
-`)
-
-    console.log(`Local server:    http://${options.host}:${localPort}`)
-    console.log(`Tunnel server:   ${options.server}`)
-    console.log(`Subdomain:       ${subdomain}`)
-    console.log('')
-    console.log('Connecting...')
-
     try {
       const serverHost = options.server?.replace(/^(wss?|https?):\/\//, '') || DEFAULT_SERVER
       const secure = options.secure || options.server?.startsWith('wss://') || options.server?.startsWith('https://') || serverHost === DEFAULT_SERVER
+
+      console.log('')
+      console.log(`  Connecting to ${serverHost}...`)
 
       const client = new TunnelClient({
         host: serverHost,
@@ -94,38 +87,39 @@ cli
         localPort,
         localHost: options.host || 'localhost',
         subdomain,
+        manageHosts: options.manageHosts,
       })
 
       // Handle process signals for graceful shutdown
       const cleanup = () => {
-        console.log('\nShutting down tunnel...')
+        console.log('\n  Closing tunnel...')
         client.disconnect()
         process.exit(0)
       }
 
-      process.on('SIGINT', cleanup)
-      process.on('SIGTERM', cleanup)
+      process.on('SIGINT', () => cleanup())
+      process.on('SIGTERM', () => cleanup())
 
       // Set up event listeners
       client.on('request', (req) => {
         if (options.verbose) {
-          console.log(`→ ${req.method} ${req.url}`)
+          console.log(`  -> ${req.method} ${req.url}`)
         }
       })
 
       client.on('response', (res) => {
         if (options.verbose) {
-          console.log(`← ${res.status} (${res.size} bytes, ${res.duration}ms)`)
+          console.log(`  <- ${res.status} (${res.size} bytes, ${res.duration}ms)`)
         }
       })
 
       client.on('reconnecting', (info) => {
-        console.log(`Reconnecting... (attempt ${info.attempt}/${info.maxAttempts})`)
+        console.log(`  Reconnecting... (attempt ${info.attempt}/${info.maxAttempts})`)
       })
 
       client.on('error', (err) => {
         if (options.verbose) {
-          console.error(`Error: ${err}`)
+          console.error(`  Error: ${err}`)
         }
       })
 
@@ -134,29 +128,22 @@ cli
       const tunnelUrl = client.getTunnelUrl()
 
       console.log('')
-      console.log('╔══════════════════════════════════════════════════════════════╗')
-      console.log('║                      TUNNEL ACTIVE                           ║')
-      console.log('╚══════════════════════════════════════════════════════════════╝')
+      console.log(`  Public:     ${tunnelUrl}`)
+      console.log(`  Forwarding: ${tunnelUrl} -> http://${options.host}:${localPort}`)
       console.log('')
-      console.log(`Your public URL:  ${tunnelUrl}`)
-      console.log('')
-      console.log(`Forwarding:       ${tunnelUrl}`)
-      console.log(`                  ↓`)
-      console.log(`                  http://${options.host}:${localPort}`)
-      console.log('')
-      console.log('Press Ctrl+C to stop the tunnel')
+      console.log(`  Press Ctrl+C to stop sharing`)
       console.log('')
 
       if (options.verbose) {
-        console.log('Verbose mode enabled - showing all requests')
-        console.log('─'.repeat(60))
+        console.log(`  Verbose mode — showing all requests`)
+        console.log('')
       }
 
       // Keep the process running
       await new Promise(() => {})
     }
     catch (error: any) {
-      console.error(`Failed to connect: ${error.message}`)
+      console.error(`\n  Failed to connect: ${error.message}`)
       process.exit(1)
     }
   })

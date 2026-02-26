@@ -1,4 +1,5 @@
 export { config } from './config'
+export { resolveHostname } from './hosts'
 export { startLocalTunnel, TunnelClient, TunnelServer } from './tunnel'
 export * from './types'
 export * from './utils'
