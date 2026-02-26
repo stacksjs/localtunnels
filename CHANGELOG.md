@@ -1,6 +1,20 @@
 # Changelog
 
 
+## v0.2.3...main
+
+[compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.3...main)
+
+### 🏡 Chore
+
+- Fix unused variable lint errors ([da0a2c0](https://github.com/stacksjs/localtunnels/commit/da0a2c0))
+- Wip ([99835af](https://github.com/stacksjs/localtunnels/commit/99835af))
+
+### ❤️ Contributors
+
+- Chris ([@chrisbbreuer](https://github.com/chrisbbreuer))
+- Glennmichael123 ([@glennmichael123](https://github.com/glennmichael123))
+
 ## v0.2.2...main
 
 [compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.2...main)
