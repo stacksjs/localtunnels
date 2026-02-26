@@ -6,6 +6,13 @@ import { calculateBackoff, debugLog, delay, generateId, isValidSubdomain } from 
 // Internal options type with ssl being optional
 type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl'> & { ssl?: TunnelOptions['ssl'] }
 
+// Scalability limits
+const MAX_CONNECTIONS_PER_SUBDOMAIN = 5
+const MAX_TOTAL_CONNECTIONS = 10_000
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const IDLE_CLEANUP_INTERVAL_MS = 60 * 1000 // check every minute
+const MAX_PAYLOAD_SIZE = 64 * 1024 * 1024 // 64MB
+
 interface WebSocketData {
   subdomain: string
   connectedAt: number
@@ -26,6 +33,9 @@ export class TunnelServer extends EventEmitter {
   private options: ResolvedTunnelOptions
   private responseHandlers: Map<string, (response: any) => void> = new Map()
   private subdomainSockets: Map<string, Set<ServerWebSocket<WebSocketData>>> = new Map()
+  private idleCleanupInterval: ReturnType<typeof setInterval> | null = null
+  private activeConnections = 0
+  private totalConnections = 0
   private stats: InternalStats = {
     connections: 0,
     requests: 0,
@@ -53,38 +63,60 @@ export class TunnelServer extends EventEmitter {
     }
   }
 
-  private addSocket(subdomain: string, socket: ServerWebSocket<WebSocketData>) {
+  private addSocket(subdomain: string, socket: ServerWebSocket<WebSocketData>): boolean {
+    // Global connection limit
+    if (this.activeConnections >= MAX_TOTAL_CONNECTIONS) {
+      debugLog('server', `Rejected connection for ${subdomain}: global limit reached (${this.activeConnections})`, this.options.verbose, 'error')
+      return false
+    }
+
     if (!this.subdomainSockets.has(subdomain)) {
       this.subdomainSockets.set(subdomain, new Set())
     }
-    this.subdomainSockets.get(subdomain)?.add(socket)
-    this.stats.connections++
-    this.emit('connection', { subdomain, totalConnections: this.stats.connections })
+
+    const sockets = this.subdomainSockets.get(subdomain)!
+    // Per-subdomain connection limit
+    if (sockets.size >= MAX_CONNECTIONS_PER_SUBDOMAIN) {
+      debugLog('server', `Rejected connection for ${subdomain}: per-subdomain limit reached (${sockets.size})`, this.options.verbose, 'error')
+      return false
+    }
+
+    sockets.add(socket)
+    this.activeConnections++
+    this.totalConnections++
+    this.stats.connections = this.activeConnections
+    this.emit('connection', { subdomain, totalConnections: this.activeConnections })
+    return true
   }
 
   private removeSocket(subdomain: string, socket: ServerWebSocket<WebSocketData>) {
-    this.subdomainSockets.get(subdomain)?.delete(socket)
-    if (this.subdomainSockets.get(subdomain)?.size === 0) {
-      this.subdomainSockets.delete(subdomain)
+    const sockets = this.subdomainSockets.get(subdomain)
+    if (sockets) {
+      sockets.delete(socket)
+      if (sockets.size === 0) {
+        this.subdomainSockets.delete(subdomain)
+      }
     }
+    this.activeConnections = Math.max(0, this.activeConnections - 1)
+    this.stats.connections = this.activeConnections
     this.emit('disconnection', { subdomain })
   }
 
   private getSocketForSubdomain(subdomain: string): ServerWebSocket<WebSocketData> | undefined {
     const sockets = this.subdomainSockets.get(subdomain)
-    if (sockets && sockets.size > 0) {
-      // Simple round-robin: get first and move to end
-      const socketArray = Array.from(sockets)
-      const socket = socketArray[0]
+    if (!sockets || sockets.size === 0) return undefined
 
-      // Update last seen
-      if (socket.data) {
-        socket.data.lastSeen = Date.now()
-      }
-
-      return socket
+    // Fast path: single socket (most common case)
+    const iter = sockets.values()
+    const first = iter.next().value
+    if (sockets.size === 1) {
+      if (first?.data) first.data.lastSeen = Date.now()
+      return first
     }
-    return undefined
+
+    // Multiple sockets: pick first (Set iteration order = insertion order)
+    if (first?.data) first.data.lastSeen = Date.now()
+    return first
   }
 
   private async forwardRequest(req: Request, url: URL, subdomain: string): Promise<Response> {
@@ -103,7 +135,7 @@ export class TunnelServer extends EventEmitter {
           || contentType.includes('audio/')
           || contentType.includes('video/')) {
           const buffer = await req.arrayBuffer()
-          body = btoa(String.fromCharCode(...new Uint8Array(buffer)))
+          body = Buffer.from(buffer).toString('base64')
           isBase64Encoded = true
           this.stats.bytesIn += buffer.byteLength
         }
@@ -150,7 +182,7 @@ export class TunnelServer extends EventEmitter {
         // Handle binary responses
         let responseBody: string | Uint8Array = responseData.body || ''
         if (responseData.isBase64Encoded && typeof responseBody === 'string') {
-          responseBody = Uint8Array.from(atob(responseBody), c => c.charCodeAt(0))
+          responseBody = Buffer.from(responseBody, 'base64')
         }
 
         resolve(new Response(responseBody, {
@@ -171,13 +203,13 @@ export class TunnelServer extends EventEmitter {
     })
   }
 
-  public getStats(): ServerStats {
+  public getStats(includeSubdomains = false): ServerStats {
     return {
-      connections: this.stats.connections,
+      connections: this.activeConnections,
       requests: this.stats.requests,
       startTime: this.stats.startTime,
       uptime: Math.floor((Date.now() - this.stats.startTime.getTime()) / 1000),
-      activeSubdomains: Array.from(this.subdomainSockets.keys()),
+      activeSubdomains: includeSubdomains ? Array.from(this.subdomainSockets.keys()) : [],
     }
   }
 
@@ -209,11 +241,15 @@ export class TunnelServer extends EventEmitter {
           const stats = this.getStats()
           return new Response(JSON.stringify({
             status: 'ok',
-            version: '0.1.1',
-            connections: this.subdomainSockets.size,
+            version: '0.2.6',
+            connections: this.activeConnections,
+            totalConnections: this.totalConnections,
+            activeSubdomains: this.subdomainSockets.size,
+            pendingResponses: this.responseHandlers.size,
             requests: stats.requests,
             uptime: `${stats.uptime}s`,
-            activeSubdomains: stats.activeSubdomains,
+            bytesIn: this.stats.bytesIn,
+            bytesOut: this.stats.bytesOut,
           }), {
             headers: { 'Content-Type': 'application/json' },
           })
@@ -226,20 +262,32 @@ export class TunnelServer extends EventEmitter {
 
         // Handle metrics endpoint (Prometheus format)
         if (url.pathname === '/metrics' || url.pathname === '/_metrics') {
-          const stats = this.getStats()
+          const uptime = Math.floor((Date.now() - this.stats.startTime.getTime()) / 1000)
           const metrics = [
-            `# HELP tunnel_connections_total Total number of connections`,
+            `# HELP tunnel_connections_active Current active connections`,
+            `# TYPE tunnel_connections_active gauge`,
+            `tunnel_connections_active ${this.activeConnections}`,
+            `# HELP tunnel_connections_total Total connections since start`,
             `# TYPE tunnel_connections_total counter`,
-            `tunnel_connections_total ${stats.connections}`,
+            `tunnel_connections_total ${this.totalConnections}`,
             `# HELP tunnel_requests_total Total number of requests`,
             `# TYPE tunnel_requests_total counter`,
-            `tunnel_requests_total ${stats.requests}`,
+            `tunnel_requests_total ${this.stats.requests}`,
             `# HELP tunnel_active_subdomains Current number of active subdomains`,
             `# TYPE tunnel_active_subdomains gauge`,
-            `tunnel_active_subdomains ${stats.activeSubdomains.length}`,
+            `tunnel_active_subdomains ${this.subdomainSockets.size}`,
             `# HELP tunnel_uptime_seconds Server uptime in seconds`,
             `# TYPE tunnel_uptime_seconds gauge`,
-            `tunnel_uptime_seconds ${stats.uptime}`,
+            `tunnel_uptime_seconds ${uptime}`,
+            `# HELP tunnel_bytes_in Total bytes received`,
+            `# TYPE tunnel_bytes_in counter`,
+            `tunnel_bytes_in ${this.stats.bytesIn}`,
+            `# HELP tunnel_bytes_out Total bytes sent`,
+            `# TYPE tunnel_bytes_out counter`,
+            `tunnel_bytes_out ${this.stats.bytesOut}`,
+            `# HELP tunnel_pending_responses Pending response handlers`,
+            `# TYPE tunnel_pending_responses gauge`,
+            `tunnel_pending_responses ${this.responseHandlers.size}`,
           ].join('\n')
           return new Response(metrics, {
             headers: { 'Content-Type': 'text/plain' },
@@ -281,6 +329,10 @@ export class TunnelServer extends EventEmitter {
       },
 
       websocket: {
+        maxPayloadLength: MAX_PAYLOAD_SIZE,
+        idleTimeout: 120, // seconds - Bun auto-pings, closes if no pong in 120s
+        perMessageDeflate: true,
+
         message: (ws, message) => {
           try {
             const data = JSON.parse(String(message))
@@ -299,8 +351,16 @@ export class TunnelServer extends EventEmitter {
               }
 
               ws.data.subdomain = subdomain
-              this.addSocket(subdomain, ws)
-              debugLog('server', `Client ${subdomain} is ready`, this.options.verbose)
+              const accepted = this.addSocket(subdomain, ws)
+              if (!accepted) {
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  message: 'Connection limit reached',
+                }))
+                ws.close(1013, 'Connection limit reached')
+                return
+              }
+              debugLog('server', `Client ${subdomain} is ready (${this.activeConnections} total connections)`, this.options.verbose)
 
               // Confirm registration
               ws.send(JSON.stringify({
@@ -344,13 +404,64 @@ export class TunnelServer extends EventEmitter {
       },
     })
 
+    // Start idle connection cleanup interval
+    this.idleCleanupInterval = setInterval(() => {
+      this.cleanupIdleConnections()
+      this.cleanupStaleHandlers()
+    }, IDLE_CLEANUP_INTERVAL_MS)
+
     debugLog('server', `Server started on ${this.options.host}:${this.options.port}`, this.options.verbose)
     this.emit('start', { host: this.options.host, port: this.options.port })
   }
 
+  private cleanupIdleConnections(): void {
+    const now = Date.now()
+    let cleaned = 0
+    for (const [subdomain, sockets] of this.subdomainSockets) {
+      for (const socket of sockets) {
+        if (now - socket.data.lastSeen > IDLE_TIMEOUT_MS) {
+          debugLog('server', `Closing idle connection for ${subdomain} (idle ${Math.round((now - socket.data.lastSeen) / 1000)}s)`, this.options.verbose)
+          socket.close(1000, 'Idle timeout')
+          this.removeSocket(subdomain, socket)
+          cleaned++
+        }
+      }
+    }
+    if (cleaned > 0) {
+      debugLog('server', `Cleaned up ${cleaned} idle connections (${this.activeConnections} remaining)`, this.options.verbose)
+    }
+  }
+
+  private cleanupStaleHandlers(): void {
+    // Safety net: if response handlers accumulate beyond a threshold,
+    // the per-request timeouts may not be firing (e.g. timer GC).
+    let cleaned = 0
+    for (const [id] of this.responseHandlers) {
+      // We can't easily track when the handler was created from the Map alone,
+      // but the timeout in forwardRequest already handles cleanup.
+      // This catches edge cases where the timeout timer was GC'd.
+      // Use a heuristic: if the response handler map is very large, something is wrong.
+      if (this.responseHandlers.size > 10_000) {
+        this.responseHandlers.delete(id)
+        cleaned++
+        if (cleaned >= 1000) break // batch cleanup
+      }
+    }
+    if (cleaned > 0) {
+      debugLog('server', `Cleaned up ${cleaned} stale response handlers`, this.options.verbose)
+    }
+  }
+
   public stop(): void {
+    if (this.idleCleanupInterval) {
+      clearInterval(this.idleCleanupInterval)
+      this.idleCleanupInterval = null
+    }
     if (this.server) {
       this.server.stop()
+      this.subdomainSockets.clear()
+      this.responseHandlers.clear()
+      this.activeConnections = 0
       debugLog('server', 'Server stopped', this.options.verbose)
       this.emit('stop')
     }
@@ -560,7 +671,7 @@ export class TunnelClient extends EventEmitter {
       if (data.method !== 'GET' && data.method !== 'HEAD' && data.body) {
         // Handle base64 encoded binary data
         if (data.isBase64Encoded) {
-          fetchOptions.body = Uint8Array.from(atob(data.body), c => c.charCodeAt(0))
+          fetchOptions.body = Buffer.from(data.body, 'base64')
         }
         else {
           fetchOptions.body = data.body
@@ -580,7 +691,7 @@ export class TunnelClient extends EventEmitter {
         || contentType.includes('video/')
         || contentType.includes('application/pdf')) {
         const buffer = await response.arrayBuffer()
-        responseBody = btoa(String.fromCharCode(...new Uint8Array(buffer)))
+        responseBody = Buffer.from(buffer).toString('base64')
         isBase64Encoded = true
       }
       else {

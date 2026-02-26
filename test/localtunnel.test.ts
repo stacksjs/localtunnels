@@ -252,7 +252,7 @@ describe('localtunnels', () => {
       await new Promise(resolve => setTimeout(resolve, 100))
 
       // Server should show the connection
-      const stats = server.getStats()
+      const stats = server.getStats(true)
       expect(stats.activeSubdomains).toContain('testclient')
 
       client.disconnect()
