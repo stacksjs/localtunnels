@@ -30,6 +30,8 @@ interface DeployOptions {
   instanceType?: string
   keyName?: string
   enableSsl?: boolean
+  porkbunApiKey?: string
+  porkbunSecretKey?: string
   verbose?: boolean
 }
 
@@ -240,7 +242,9 @@ cli
   .option('--domain <domain>', 'Domain for tunnel URLs (sets up Route53 DNS)')
   .option('--instance-type <type>', 'EC2 instance type', { default: 't3.micro' })
   .option('--key-name <name>', 'EC2 key pair name for SSH access')
-  .option('--enable-ssl', 'Enable SSL (HTTPS/WSS)')
+  .option('--enable-ssl', 'Enable SSL (HTTPS/WSS) via Caddy reverse proxy')
+  .option('--porkbun-api-key <key>', 'Porkbun API key for DNS-01 TLS challenge (or set PORKBUN_API_KEY env)')
+  .option('--porkbun-secret-key <key>', 'Porkbun secret key for DNS-01 TLS challenge (or set PORKBUN_SECRET_KEY env)')
   .option('--verbose', 'Enable verbose logging')
   .action(async (options: DeployOptions) => {
     console.log(`
@@ -270,6 +274,8 @@ cli
         instanceType: options.instanceType,
         keyName: options.keyName,
         enableSsl: options.enableSsl,
+        porkbunApiKey: options.porkbunApiKey,
+        porkbunSecretKey: options.porkbunSecretKey,
         verbose: options.verbose,
       })
 

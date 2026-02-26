@@ -16,3 +16,4 @@ storage
 bin/localtunnels
 bin/localtunnels*
 pantry
+.env

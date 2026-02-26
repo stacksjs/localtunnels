@@ -55,6 +55,18 @@ export interface TunnelDeployConfig {
    * @default false
    */
   enableSsl?: boolean
+
+  /**
+   * Porkbun API key for DNS-01 TLS challenge (required when enableSsl is true)
+   * Falls back to PORKBUN_API_KEY environment variable
+   */
+  porkbunApiKey?: string
+
+  /**
+   * Porkbun secret API key for DNS-01 TLS challenge (required when enableSsl is true)
+   * Falls back to PORKBUN_SECRET_KEY or PORKBUN_SECRET_API_KEY environment variable
+   */
+  porkbunSecretKey?: string
 }
 
 export interface TunnelDeployResult {
@@ -152,126 +164,183 @@ export async function deployTunnelInfrastructure(
   const ec2 = new EC2Client(region)
 
   // ============================================
-  // Step 1: Find or create VPC and public subnet
+  // Step 1: Find or create VPC with internet access
   // ============================================
 
-  log('Finding VPC and public subnet...')
+  log('Finding VPC with internet access...')
 
-  // Try to find an existing VPC (prefer default, then any)
   let vpcId: string | undefined
-
-  const defaultVpcs = await ec2.describeVpcs({
-    Filters: [{ Name: 'isDefault', Values: ['true'] }],
-  })
-  if (defaultVpcs.Vpcs?.[0]?.VpcId) {
-    vpcId = defaultVpcs.Vpcs[0].VpcId
-    log(`Found default VPC: ${vpcId}`)
-  }
-  else {
-    // Check for any existing VPC
-    const allVpcs = await ec2.describeVpcs()
-    if (allVpcs.Vpcs?.[0]?.VpcId) {
-      vpcId = allVpcs.Vpcs[0].VpcId
-      log(`Found existing VPC: ${vpcId}`)
-    }
-    else {
-      // Create a new VPC
-      log('No VPC found, creating one...')
-      const vpcResult = await ec2.createVpc({
-        CidrBlock: '10.0.0.0/16',
-        TagSpecifications: [{
-          ResourceType: 'vpc',
-          Tags: [
-            { Key: 'Name', Value: `${prefix}-tunnel-vpc` },
-            { Key: 'Project', Value: 'localtunnels' },
-          ],
-        }],
-      })
-      vpcId = vpcResult.Vpc?.VpcId
-      if (!vpcId) {
-        throw new Error('Failed to create VPC')
-      }
-      log(`Created VPC: ${vpcId}`)
-
-      // Create and attach an internet gateway for public access
-      log('Creating internet gateway...')
-      const igwResult = await ec2.createInternetGateway({
-        TagSpecifications: [{
-          ResourceType: 'internet-gateway',
-          Tags: [
-            { Key: 'Name', Value: `${prefix}-tunnel-igw` },
-            { Key: 'Project', Value: 'localtunnels' },
-          ],
-        }],
-      })
-      const igwId = igwResult.InternetGatewayId
-      if (igwId) {
-        log(`Created internet gateway: ${igwId}`)
-        await ec2.attachInternetGateway({
-          InternetGatewayId: igwId,
-          VpcId: vpcId,
-        })
-        log('Attached internet gateway to VPC')
-
-        // Add a route to the internet gateway in the main route table
-        const routeTables = await ec2.describeRouteTables({
-          Filters: [
-            { Name: 'vpc-id', Values: [vpcId] },
-            { Name: 'association.main', Values: ['true'] },
-          ],
-        })
-        const mainRouteTableId = routeTables.RouteTables?.[0]?.RouteTableId
-        if (mainRouteTableId) {
-          await ec2.createRoute({
-            RouteTableId: mainRouteTableId,
-            DestinationCidrBlock: '0.0.0.0/0',
-            GatewayId: igwId,
-          })
-          log('Added default route to internet gateway')
-        }
-      }
-      else {
-        log('Warning: Could not create internet gateway — instance may not have internet access')
-      }
-    }
-  }
-
-  // Find or create a public subnet
   let subnetId: string | undefined
 
-  const existingSubnets = await ec2.describeSubnets({
-    Filters: [{ Name: 'vpc-id', Values: [vpcId!] }],
+  // Strategy: find a VPC that has an internet gateway + a subnet with a
+  // route to that IGW. Prefer the default VPC, then any VPC with IGW access.
+
+  const allVpcs = await ec2.describeVpcs()
+  const vpcs = allVpcs.Vpcs || []
+
+  // Sort: default VPCs first, then localtunnel-tagged, then others
+  vpcs.sort((a, b) => {
+    if (a.IsDefault && !b.IsDefault) return -1
+    if (!a.IsDefault && b.IsDefault) return 1
+    const aProject = a.Tags?.find(t => t.Key === 'Project')?.Value === 'localtunnels'
+    const bProject = b.Tags?.find(t => t.Key === 'Project')?.Value === 'localtunnels'
+    if (aProject && !bProject) return -1
+    if (!aProject && bProject) return 1
+    return 0
   })
-  if (existingSubnets.Subnets?.[0]?.SubnetId) {
-    subnetId = existingSubnets.Subnets[0].SubnetId
-    log(`Found subnet: ${subnetId} (${existingSubnets.Subnets[0].AvailabilityZone})`)
+
+  for (const vpc of vpcs) {
+    const vid = vpc.VpcId!
+    const vpcName = vpc.Tags?.find(t => t.Key === 'Name')?.Value || vid
+    log(`Checking VPC: ${vpcName} (${vid})...`)
+
+    // Check if VPC has an internet gateway
+    const igws = await ec2.describeInternetGateways({
+      Filters: [{ Name: 'attachment.vpc-id', Values: [vid] }],
+    })
+    if (!igws.InternetGateways?.length) {
+      log(`  No internet gateway — skipping`)
+      continue
+    }
+
+    // Find a subnet that has a route to the IGW
+    const subnets = await ec2.describeSubnets({
+      Filters: [{ Name: 'vpc-id', Values: [vid] }],
+    })
+    const routeTables = await ec2.describeRouteTables({
+      Filters: [{ Name: 'vpc-id', Values: [vid] }],
+    })
+
+    // Build a map of subnet -> route table
+    let mainRtId: string | undefined
+    const subnetToRt: Record<string, string> = {}
+
+    for (const rt of routeTables.RouteTables || []) {
+      for (const assoc of rt.Associations || []) {
+        if (assoc.Main) {
+          mainRtId = rt.RouteTableId
+        }
+        else if (assoc.SubnetId) {
+          subnetToRt[assoc.SubnetId] = rt.RouteTableId!
+        }
+      }
+    }
+
+    // Find a subnet whose route table has an IGW route
+    for (const subnet of subnets.Subnets || []) {
+      const rtId = subnetToRt[subnet.SubnetId!] || mainRtId
+      const rt = (routeTables.RouteTables || []).find(r => r.RouteTableId === rtId)
+      const hasIgwRoute = rt?.Routes?.some(r => r.GatewayId?.startsWith('igw-'))
+
+      if (hasIgwRoute) {
+        vpcId = vid
+        subnetId = subnet.SubnetId
+        const sname = subnet.Tags?.find(t => t.Key === 'Name')?.Value || subnet.SubnetId
+        log(`  Found public subnet: ${sname} (${subnet.SubnetId})`)
+        break
+      }
+    }
+
+    if (vpcId) break
   }
-  else {
-    log('No subnet found, creating one...')
-    const subnetResult = await ec2.createSubnet({
-      VpcId: vpcId!,
-      CidrBlock: '10.0.1.0/24',
-      AvailabilityZone: `${region}a`,
+
+  // If no VPC with internet access found, create one
+  if (!vpcId) {
+    log('No VPC with internet access found, creating one...')
+    const vpcResult = await ec2.createVpc({
+      CidrBlock: '10.0.0.0/16',
       TagSpecifications: [{
-        ResourceType: 'subnet',
+        ResourceType: 'vpc',
         Tags: [
-          { Key: 'Name', Value: `${prefix}-tunnel-subnet` },
+          { Key: 'Name', Value: `${prefix}-tunnel-vpc` },
           { Key: 'Project', Value: 'localtunnels' },
         ],
       }],
     })
-    subnetId = subnetResult.Subnet?.SubnetId
-    if (!subnetId) {
-      throw new Error('Failed to create subnet')
+    vpcId = vpcResult.Vpc?.VpcId
+    if (!vpcId) {
+      throw new Error('Failed to create VPC')
     }
-    log(`Created subnet: ${subnetId}`)
+    log(`Created VPC: ${vpcId}`)
 
-    // Enable auto-assign public IPs
-    await ec2.modifySubnetAttribute({
-      SubnetId: subnetId,
-      MapPublicIpOnLaunch: { Value: true },
+    // Create and attach an internet gateway
+    log('Creating internet gateway...')
+    const igwResult = await ec2.createInternetGateway({
+      TagSpecifications: [{
+        ResourceType: 'internet-gateway',
+        Tags: [
+          { Key: 'Name', Value: `${prefix}-tunnel-igw` },
+          { Key: 'Project', Value: 'localtunnels' },
+        ],
+      }],
     })
-    log('Enabled auto-assign public IPs on subnet')
+    const igwId = igwResult.InternetGatewayId
+    if (igwId) {
+      log(`Created internet gateway: ${igwId}`)
+      await ec2.attachInternetGateway({
+        InternetGatewayId: igwId,
+        VpcId: vpcId,
+      })
+      log('Attached internet gateway to VPC')
+
+      // Add default route to IGW in main route table
+      const routeTables = await ec2.describeRouteTables({
+        Filters: [
+          { Name: 'vpc-id', Values: [vpcId] },
+          { Name: 'association.main', Values: ['true'] },
+        ],
+      })
+      const mainRouteTableId = routeTables.RouteTables?.[0]?.RouteTableId
+      if (mainRouteTableId) {
+        await ec2.createRoute({
+          RouteTableId: mainRouteTableId,
+          DestinationCidrBlock: '0.0.0.0/0',
+          GatewayId: igwId,
+        })
+        log('Added default route to internet gateway')
+      }
+    }
+    else {
+      log('Warning: Could not create internet gateway — instance may not have internet access')
+    }
+  }
+
+  // Find or create a public subnet in the selected VPC
+  if (!subnetId) {
+    const existingSubnets = await ec2.describeSubnets({
+      Filters: [{ Name: 'vpc-id', Values: [vpcId!] }],
+    })
+    if (existingSubnets.Subnets?.[0]?.SubnetId) {
+      subnetId = existingSubnets.Subnets[0].SubnetId
+      log(`Found subnet: ${subnetId} (${existingSubnets.Subnets[0].AvailabilityZone})`)
+    }
+    else {
+      log('Creating subnet...')
+      const subnetResult = await ec2.createSubnet({
+        VpcId: vpcId!,
+        CidrBlock: '10.0.1.0/24',
+        AvailabilityZone: `${region}a`,
+        TagSpecifications: [{
+          ResourceType: 'subnet',
+          Tags: [
+            { Key: 'Name', Value: `${prefix}-tunnel-subnet` },
+            { Key: 'Project', Value: 'localtunnels' },
+          ],
+        }],
+      })
+      subnetId = subnetResult.Subnet?.SubnetId
+      if (!subnetId) {
+        throw new Error('Failed to create subnet')
+      }
+      log(`Created subnet: ${subnetId}`)
+
+      // Enable auto-assign public IPs
+      await ec2.modifySubnetAttribute({
+        SubnetId: subnetId,
+        MapPublicIpOnLaunch: { Value: true },
+      })
+      log('Enabled auto-assign public IPs on subnet')
+    }
   }
 
   // ============================================
@@ -358,8 +427,27 @@ export async function deployTunnelInfrastructure(
   // Step 4: Generate user data script
   // ============================================
 
-  const serverPort = config.enableSsl ? 443 : 80
-  const userData = generateUserData(serverPort)
+  // With SSL: Bun serves TLS directly on port 443
+  // Without SSL: Bun serves HTTP on port 80
+  const internalPort = config.enableSsl ? 443 : 80
+  const porkbunApiKey = config.porkbunApiKey || process.env.PORKBUN_API_KEY || ''
+  const porkbunSecretKey = config.porkbunSecretKey || process.env.PORKBUN_SECRET_KEY || process.env.PORKBUN_SECRET_API_KEY || ''
+
+  if (config.enableSsl && (!porkbunApiKey || !porkbunSecretKey)) {
+    throw new Error(
+      'Porkbun API credentials are required for SSL.\n'
+      + 'Set PORKBUN_API_KEY and PORKBUN_SECRET_KEY environment variables,\n'
+      + 'or pass them via --porkbun-api-key and --porkbun-secret-key.',
+    )
+  }
+
+  const userData = generateUserData({
+    internalPort,
+    domain: config.domain,
+    enableSsl: config.enableSsl,
+    porkbunApiKey,
+    porkbunSecretKey,
+  })
   log('Generated user data script')
 
   // ============================================
@@ -368,7 +456,7 @@ export async function deployTunnelInfrastructure(
 
   log(`Launching ${instanceType} instance...`)
 
-  const runResult = await ec2.runInstances({
+  const runInstancesParams: Record<string, any> = {
     ImageId: amiId,
     InstanceType: instanceType,
     MinCount: 1,
@@ -383,7 +471,14 @@ export async function deployTunnelInfrastructure(
         { Key: 'Project', Value: 'localtunnels' },
       ],
     }],
-  })
+  }
+
+  if (config.keyName) {
+    runInstancesParams.KeyName = config.keyName
+    log(`Using key pair: ${config.keyName}`)
+  }
+
+  const runResult = await ec2.runInstances(runInstancesParams)
 
   const instanceId = runResult.Instances?.[0]?.InstanceId
 
@@ -393,10 +488,6 @@ export async function deployTunnelInfrastructure(
   }
 
   log(`Launched instance: ${instanceId}`)
-
-  if (config.keyName) {
-    log(`Note: Key pair "${config.keyName}" was not attached. Use --key-name with runInstances for SSH access.`)
-  }
 
   // ============================================
   // Step 6: Wait for instance to be running
@@ -728,16 +819,54 @@ export async function destroyTunnelInfrastructure(
 /**
  * Generate the EC2 user data script that installs Bun, localtunnels,
  * and sets up a systemd service running the TunnelServer.
+ *
+ * When SSL is enabled with a domain, uses certbot with the Porkbun DNS
+ * plugin to obtain a wildcard Let's Encrypt certificate, then passes
+ * the cert/key files directly to TunnelServer's ssl option (Bun's
+ * native TLS — no reverse proxy needed).
  */
-function generateUserData(port: number): string {
+function generateUserData(opts: {
+  internalPort: number
+  domain?: string
+  enableSsl?: boolean
+  porkbunApiKey?: string
+  porkbunSecretKey?: string
+}): string {
+  const { internalPort, domain, enableSsl, porkbunApiKey, porkbunSecretKey } = opts
+
+  // Build the server script based on SSL mode
+  const sslLines = enableSsl && domain
+    ? [
+        '  ssl: {',
+        '    key: \'/etc/ssl/localtunnel/privkey.pem\',',
+        '    cert: \'/etc/ssl/localtunnel/fullchain.pem\',',
+        '  },',
+      ]
+    : []
+
+  // Workaround: also set ssl directly on options after construction
+  // to handle older versions where the constructor doesn't pass ssl through
+  const sslWorkaround = enableSsl && domain
+    ? [
+        '',
+        '// Ensure ssl option is set (workaround for constructor)',
+        ';(server as any).options.ssl = {',
+        '  key: \'/etc/ssl/localtunnel/privkey.pem\',',
+        '  cert: \'/etc/ssl/localtunnel/fullchain.pem\',',
+        '}',
+      ]
+    : []
+
   const serverScript = [
     'import { TunnelServer } from \'localtunnels\'',
     '',
     'const server = new TunnelServer({',
-    `  port: ${port},`,
+    `  port: ${internalPort},`,
     '  host: \'0.0.0.0\',',
     '  verbose: true,',
+    ...sslLines,
     '})',
+    ...sslWorkaround,
     '',
     'server.on(\'connection\', (info) => {',
     '  console.log(\'+ Client connected: \' + info.subdomain)',
@@ -748,12 +877,12 @@ function generateUserData(port: number): string {
     '})',
     '',
     'await server.start()',
-    `console.log('LocalTunnel server is running on port ${port}')`,
+    `console.log('LocalTunnel server is running on port ${internalPort}')`,
   ].join('\n')
 
-  return [
+  const lines = [
     '#!/bin/bash',
-    'set -ex',
+    'set -x',
     '',
     '# Set HOME explicitly (cloud-init does not always set it)',
     'export HOME=/root',
@@ -776,30 +905,133 @@ function generateUserData(port: number): string {
     serverScript,
     'SERVERSCRIPT',
     '',
-    '# Create systemd service',
-    'cat > /etc/systemd/system/localtunnel.service << \'SERVICEUNIT\'',
-    '[Unit]',
-    'Description=LocalTunnel Server',
-    'After=network.target',
-    '',
-    '[Service]',
-    'Type=simple',
-    'WorkingDirectory=/opt/localtunnel',
-    'Environment=BUN_INSTALL=/root/.bun',
-    'Environment=PATH=/root/.bun/bin:/usr/local/bin:/usr/bin:/bin',
-    'ExecStart=/root/.bun/bin/bun run server.ts',
-    'Restart=always',
-    'RestartSec=5',
-    'StandardOutput=journal',
-    'StandardError=journal',
-    '',
-    '[Install]',
-    'WantedBy=multi-user.target',
-    'SERVICEUNIT',
-    '',
-    'systemctl daemon-reload',
-    'systemctl enable localtunnel',
-    'systemctl start localtunnel',
-    '',
-  ].join('\n')
+  ]
+
+  // When SSL is enabled, install acme.sh for cert provisioning
+  if (enableSsl && domain) {
+    lines.push(
+      '# Install acme.sh for Let\'s Encrypt certificate provisioning',
+      'dnf install -y socat cronie',
+      'curl -fsSL https://get.acme.sh | sh -s email=admin@' + domain,
+      '',
+      'mkdir -p /etc/ssl/localtunnel',
+      '',
+      '# Create cert provisioning script (called by systemd before server start)',
+      'cat > /opt/localtunnel/provision-certs.sh << \'CERTSCRIPT\'',
+      '#!/bin/bash',
+      'set -e',
+      '',
+      'CERT_DIR=/etc/ssl/localtunnel',
+      'ACME=/root/.acme.sh/acme.sh',
+      '',
+      '# Skip if certs already exist and are valid',
+      'if [ -f "$CERT_DIR/fullchain.pem" ] && [ -f "$CERT_DIR/privkey.pem" ]; then',
+      '  # Check cert is not expired (within 30 days)',
+      '  if openssl x509 -checkend 2592000 -noout -in "$CERT_DIR/fullchain.pem" 2>/dev/null; then',
+      '    echo "Valid certs already present"',
+      '    exit 0',
+      '  fi',
+      '  echo "Certs exist but expiring soon, renewing..."',
+      'fi',
+      '',
+      'echo "Provisioning SSL certificates..."',
+      '',
+      '# Issue wildcard cert via Porkbun DNS-01 challenge',
+      `$ACME --issue --dns dns_porkbun \\`,
+      `  -d '${domain}' \\`,
+      `  -d '*.${domain}' \\`,
+      `  --server letsencrypt \\`,
+      '  --keylength ec-256 \\',
+      '  --dnssleep 120 \\',
+      '  --log /var/log/acme.sh.log \\',
+      '  --force || {',
+      '  echo "acme.sh --issue failed, check /var/log/acme.sh.log"',
+      '  exit 1',
+      '}',
+      '',
+      '# Install cert to a stable location',
+      `$ACME --install-cert -d '${domain}' --ecc \\`,
+      '  --key-file $CERT_DIR/privkey.pem \\',
+      '  --fullchain-file $CERT_DIR/fullchain.pem \\',
+      '  --reloadcmd "systemctl restart localtunnel" || {',
+      '  echo "acme.sh --install-cert failed"',
+      '  exit 1',
+      '}',
+      '',
+      'echo "SSL certificates provisioned successfully"',
+      'CERTSCRIPT',
+      'chmod +x /opt/localtunnel/provision-certs.sh',
+      '',
+    )
+  }
+
+  // Create systemd service with cert provisioning as ExecStartPre
+  if (enableSsl && domain) {
+    lines.push(
+      '# Create tunnel server service with cert provisioning',
+      'cat > /etc/systemd/system/localtunnel.service << \'SERVICEUNIT\'',
+      '[Unit]',
+      'Description=LocalTunnel Server',
+      'After=network-online.target',
+      'Wants=network-online.target',
+      '',
+      '[Service]',
+      'Type=simple',
+      'WorkingDirectory=/opt/localtunnel',
+      'Environment=BUN_INSTALL=/root/.bun',
+      'Environment=PATH=/root/.acme.sh:/root/.bun/bin:/usr/local/bin:/usr/bin:/bin',
+      `Environment=PORKBUN_API_KEY=${porkbunApiKey}`,
+      `Environment=PORKBUN_SECRET_API_KEY=${porkbunSecretKey}`,
+      'TimeoutStartSec=600',
+      'ExecStartPre=/opt/localtunnel/provision-certs.sh',
+      'ExecStart=/root/.bun/bin/bun run server.ts',
+      'Restart=always',
+      'RestartSec=30',
+      'StandardOutput=journal',
+      'StandardError=journal',
+      '',
+      '[Install]',
+      'WantedBy=multi-user.target',
+      'SERVICEUNIT',
+      '',
+      'systemctl daemon-reload',
+      'systemctl enable localtunnel',
+      'systemctl start localtunnel',
+      '',
+    )
+  }
+  else {
+    // No SSL — single service, no cert dependency
+    lines.push(
+      '# Create systemd service for localtunnel',
+      'cat > /etc/systemd/system/localtunnel.service << \'SERVICEUNIT\'',
+      '[Unit]',
+      'Description=LocalTunnel Server',
+      'After=network.target',
+      '',
+      '[Service]',
+      'Type=simple',
+      'WorkingDirectory=/opt/localtunnel',
+      'Environment=BUN_INSTALL=/root/.bun',
+      'Environment=PATH=/root/.bun/bin:/usr/local/bin:/usr/bin:/bin',
+      'ExecStart=/root/.bun/bin/bun run server.ts',
+      'Restart=always',
+      'RestartSec=5',
+      'StandardOutput=journal',
+      'StandardError=journal',
+      '',
+      '[Install]',
+      'WantedBy=multi-user.target',
+      'SERVICEUNIT',
+      '',
+      'systemctl daemon-reload',
+      'systemctl enable localtunnel',
+      'systemctl start localtunnel',
+      '',
+    )
+  }
+
+  // acme.sh installs its own cron job for auto-renewal
+
+  return lines.join('\n')
 }

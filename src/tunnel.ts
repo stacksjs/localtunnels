@@ -49,6 +49,7 @@ export class TunnelServer extends EventEmitter {
       timeout: options.timeout || 30000,
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
+      ...(options.ssl ? { ssl: options.ssl } : {}),
     }
   }
 
@@ -183,10 +184,20 @@ export class TunnelServer extends EventEmitter {
   public async start(): Promise<void> {
     this.stats.startTime = new Date()
 
+    // Build TLS config if ssl options are provided
+    const tlsConfig = this.options.ssl
+      ? {
+          key: Bun.file(this.options.ssl.key),
+          cert: Bun.file(this.options.ssl.cert),
+          ...(this.options.ssl.ca ? { ca: Bun.file(this.options.ssl.ca) } : {}),
+        }
+      : undefined
+
     this.server = Bun.serve<WebSocketData>({
       port: this.options.port,
       hostname: this.options.host,
       development: false,
+      ...(tlsConfig ? { tls: tlsConfig } : {}),
 
       fetch: async (req, server) => {
         const url = new URL(req.url)
