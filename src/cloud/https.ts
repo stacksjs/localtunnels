@@ -105,7 +105,7 @@ export async function handler(event: any): Promise<any> {
 
     try {
       // Send request to WebSocket client via API Gateway Management API
-      const endpoint = new URL(WEBSOCKET_ENDPOINT)
+      const _endpoint = new URL(WEBSOCKET_ENDPOINT)
       await aws.request({
         service: 'execute-api',
         region,

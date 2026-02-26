@@ -87,7 +87,7 @@ async function handleReady(
     const { AWSClient } = await import('@stacksjs/ts-cloud')
     const aws = new AWSClient({ region: process.env.AWS_REGION || 'us-east-1' })
 
-    const endpoint = `https://${event.requestContext.domainName}/${event.requestContext.stage}`
+    const _endpoint = `https://${event.requestContext.domainName}/${event.requestContext.stage}`
 
     await aws.request({
       service: 'execute-api',
@@ -161,7 +161,7 @@ async function handleResponse(
 async function handlePing(
   dynamodb: any,
   connectionId: string,
-  event: any,
+  _event: any,
   tableName: string,
 ): Promise<{ statusCode: number, body: string }> {
   try {
