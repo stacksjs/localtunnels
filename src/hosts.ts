@@ -46,10 +46,10 @@ async function sudoExec(args: string[], verbose?: boolean): Promise<boolean> {
  * 3. dig @8.8.8.8 as last resort
  */
 export async function resolveHostname(hostname: string, verbose?: boolean): Promise<string | null> {
-  // Strategy 1: Bun.dns.resolve with timeout
+  // Strategy 1: Bun.dns.lookup with timeout
   try {
     const records = await Promise.race([
-      Bun.dns.resolve(hostname, 'A'),
+      Bun.dns.lookup(hostname, { family: 4 }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), DNS_TIMEOUT_MS)),
     ])
     if (records.length > 0) {
