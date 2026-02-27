@@ -1,7 +1,7 @@
 import type { ServerWebSocket } from 'bun'
 import type { ClientState, ServerStats, TunnelOptions, TunnelRequest } from './types'
 import { EventEmitter } from 'node:events'
-import { canSystemConnect, resolveHostname } from './hosts'
+import { canSystemConnect, cleanupMacOSResolver, ensureMacOSResolver, resolveHostname } from './hosts'
 import { calculateBackoff, debugLog, delay, generateId, generateSubdomain, isValidSubdomain } from './utils'
 
 // Internal options type with ssl being optional
@@ -171,9 +171,10 @@ export class TunnelServer extends EventEmitter {
       // Set up response handler
       this.responseHandlers.set(requestId, (responseData) => {
         const headers = new Headers(responseData.headers || {})
-        // Remove content-encoding if present to avoid double-encoding issues
+        // Remove headers that will be incorrect after body transformation
         headers.delete('content-encoding')
         headers.delete('transfer-encoding')
+        headers.delete('content-length')
 
         // Track response size
         const bodySize = responseData.body?.length || 0
@@ -492,6 +493,7 @@ export class TunnelClient extends EventEmitter {
   private state: ClientState = 'disconnected'
   private pingInterval: ReturnType<typeof setInterval> | null = null
   private resolvedIp: string | null = null
+  private resolverCreated = false
 
   constructor(options: TunnelOptions = {}) {
     super()
@@ -515,21 +517,35 @@ export class TunnelClient extends EventEmitter {
   }
 
   public async connect(): Promise<void> {
-    // If DNS/connectivity to the server doesn't work, resolve the IP directly
-    // so we can connect to the IP and bypass broken system DNS (common on macOS with .dev TLD)
-    if (this.options.manageHosts && !this.resolvedIp) {
-      try {
-        const reachable = await canSystemConnect(this.options.host, this.options.secure)
-        if (!reachable) {
-          debugLog('client', `Cannot reach ${this.options.host} via system DNS, resolving IP...`, this.options.verbose)
-          this.resolvedIp = await resolveHostname(this.options.host, this.options.verbose)
-          if (this.resolvedIp) {
-            debugLog('client', `Will connect directly to ${this.resolvedIp} for ${this.options.host}`, this.options.verbose)
-          }
+    if (this.options.manageHosts) {
+      // On macOS, fix the system DNS so browsers can also reach the tunnel URL.
+      // This must run regardless of canSystemConnect — the tunnel client can bypass DNS
+      // with direct IP, but browsers need system DNS to work.
+      if (!this.resolverCreated) {
+        try {
+          this.resolverCreated = await ensureMacOSResolver(this.options.host, this.options.verbose)
+        }
+        catch (err) {
+          debugLog('client', `macOS resolver setup failed (non-fatal): ${err}`, this.options.verbose, 'warn')
         }
       }
-      catch (err) {
-        debugLog('client', `DNS resolution fallback failed (non-fatal): ${err}`, this.options.verbose, 'warn')
+
+      // If DNS/connectivity to the server doesn't work, resolve the IP directly
+      // so we can connect to the IP and bypass broken system DNS (common on macOS with .dev TLD)
+      if (!this.resolvedIp) {
+        try {
+          const reachable = await canSystemConnect(this.options.host, this.options.secure)
+          if (!reachable) {
+            debugLog('client', `Cannot reach ${this.options.host} via system DNS, resolving IP...`, this.options.verbose)
+            this.resolvedIp = await resolveHostname(this.options.host, this.options.verbose)
+            if (this.resolvedIp) {
+              debugLog('client', `Will connect directly to ${this.resolvedIp} for ${this.options.host}`, this.options.verbose)
+            }
+          }
+        }
+        catch (err) {
+          debugLog('client', `DNS resolution fallback failed (non-fatal): ${err}`, this.options.verbose, 'warn')
+        }
       }
     }
 
@@ -763,8 +779,8 @@ export class TunnelClient extends EventEmitter {
       // Convert headers to plain object
       const responseHeaders: Record<string, string> = {}
       response.headers.forEach((value, key) => {
-        // Skip problematic headers
-        if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+        // Skip headers that will be incorrect after body transformation
+        if (!['content-encoding', 'transfer-encoding', 'connection', 'content-length'].includes(key.toLowerCase())) {
           responseHeaders[key] = value
         }
       })
@@ -818,6 +834,11 @@ export class TunnelClient extends EventEmitter {
     }
     this.state = 'disconnected'
     this.emit('disconnected')
+
+    // Clean up macOS resolver file (fire-and-forget)
+    if (this.resolverCreated) {
+      cleanupMacOSResolver(this.options.host, this.options.verbose).catch(() => {})
+    }
   }
 
   public isConnected(): boolean {
