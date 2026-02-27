@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>localtunnels - DevTools</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <script>
+    const version = '0.2.7'
+  </script>
+
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-0: #09090b;
+      --bg-1: #0f0f12;
+      --bg-2: #18181b;
+      --bg-3: #1e1e22;
+      --bg-hover: #27272a;
+      --border: #27272a;
+      --border-light: #3f3f46;
+      --text-0: #fafafa;
+      --text-1: #a1a1aa;
+      --text-2: #71717a;
+      --text-3: #52525b;
+      --green: #22c55e;
+      --green-dim: #16a34a;
+      --green-bg: rgba(34, 197, 94, 0.1);
+      --green-border: rgba(34, 197, 94, 0.2);
+      --blue: #3b82f6;
+      --blue-bg: rgba(59, 130, 246, 0.1);
+      --blue-border: rgba(59, 130, 246, 0.2);
+      --yellow: #eab308;
+      --yellow-bg: rgba(234, 179, 8, 0.1);
+      --yellow-border: rgba(234, 179, 8, 0.2);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.1);
+      --red-border: rgba(239, 68, 68, 0.2);
+      --purple: #a855f7;
+      --purple-bg: rgba(168, 85, 247, 0.1);
+      --orange: #f97316;
+      --cyan: #06b6d4;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --radius: 8px;
+      --radius-sm: 6px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-0);
+      color: var(--text-0);
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    ::selection {
+      background: var(--blue);
+      color: white;
+    }
+
+    /* Layout */
+    .devtools {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 48px 1fr;
+      grid-template-columns: 260px 1fr 320px;
+      grid-template-areas:
+        "header header header"
+        "sidebar main inspector";
+    }
+
+    /* Header */
+    .header {
+      grid-area: header;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+      user-select: none;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text-0);
+    }
+
+    .header-brand svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .header-badge {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--green);
+      background: var(--green-bg);
+      border: 1px solid var(--green-border);
+      padding: 2px 8px;
+      border-radius: 99px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .header-sep {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+      margin: 0 4px;
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-1);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+    }
+
+    .status-dot.offline {
+      background: var(--red);
+      box-shadow: 0 0 6px var(--red);
+    }
+
+    .status-dot.connecting {
+      background: var(--yellow);
+      box-shadow: 0 0 6px var(--yellow);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .header-spacer { flex: 1; }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .header-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: transparent;
+      border: none;
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .header-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-0);
+    }
+
+    .header-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      grid-area: sidebar;
+      background: var(--bg-1);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-section {
+      padding: 12px;
+    }
+
+    .sidebar-section-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+      padding: 0 8px;
+    }
+
+    .tunnel-card {
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.15s;
+      border: 1px solid transparent;
+    }
+
+    .tunnel-card:hover {
+      background: var(--bg-hover);
+    }
+
+    .tunnel-card.active {
+      background: var(--bg-3);
+      border-color: var(--border-light);
+    }
+
+    .tunnel-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .tunnel-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-0);
+    }
+
+    .tunnel-status {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 99px;
+    }
+
+    .tunnel-status.active {
+      color: var(--green);
+      background: var(--green-bg);
+    }
+
+    .tunnel-status.idle {
+      color: var(--yellow);
+      background: var(--yellow-bg);
+    }
+
+    .tunnel-url {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-2);
+      margin-top: 2px;
+    }
+
+    .tunnel-meta {
+      display: flex;
+      gap: 12px;
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    .tunnel-meta-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat-card {
+      background: var(--bg-1);
+      padding: 12px 16px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-0);
+      font-family: var(--mono);
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    /* Main content */
+    .main {
+      grid-area: main;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .main-tabs {
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      gap: 2px;
+      min-height: 36px;
+    }
+
+    .tab {
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-2);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .tab:hover {
+      color: var(--text-1);
+    }
+
+    .tab.active {
+      color: var(--text-0);
+      border-bottom-color: var(--blue);
+    }
+
+    .tab-count {
+      font-size: 10px;
+      color: var(--text-3);
+      background: var(--bg-3);
+      padding: 1px 5px;
+      border-radius: 99px;
+      margin-left: 4px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      padding: 8px 16px;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-0);
+    }
+
+    .toolbar-input {
+      flex: 1;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      color: var(--text-0);
+      font-family: var(--mono);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .toolbar-input:focus {
+      border-color: var(--blue);
+    }
+
+    .toolbar-input::placeholder {
+      color: var(--text-3);
+    }
+
+    .toolbar-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 10px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-1);
+      font-family: var(--sans);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .toolbar-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-0);
+    }
+
+    .toolbar-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Request list */
+    .request-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .request-list::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .request-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .request-list::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    .request-row {
+      display: grid;
+      grid-template-columns: 56px 1fr 80px 60px 60px 90px;
+      align-items: center;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.1s;
+      font-size: 12px;
+    }
+
+    .request-row:hover {
+      background: var(--bg-2);
+    }
+
+    .request-row.selected {
+      background: var(--blue-bg);
+      border-color: var(--blue-border);
+    }
+
+    .request-row-header {
+      display: grid;
+      grid-template-columns: 56px 1fr 80px 60px 60px 90px;
+      padding: 6px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: var(--bg-1);
+      user-select: none;
+    }
+
+    .method {
+      font-family: var(--mono);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .method.get { color: var(--green); }
+    .method.post { color: var(--blue); }
+    .method.put { color: var(--yellow); }
+    .method.patch { color: var(--orange); }
+    .method.delete { color: var(--red); }
+    .method.options { color: var(--purple); }
+
+    .request-path {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-0);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-code {
+      font-family: var(--mono);
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .status-code.s2xx { color: var(--green); }
+    .status-code.s3xx { color: var(--blue); }
+    .status-code.s4xx { color: var(--yellow); }
+    .status-code.s5xx { color: var(--red); }
+
+    .request-size {
+      color: var(--text-2);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .request-time {
+      color: var(--text-2);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .request-timestamp {
+      color: var(--text-3);
+      font-size: 11px;
+    }
+
+    /* Inspector panel */
+    .inspector {
+      grid-area: inspector;
+      background: var(--bg-1);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .inspector-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      min-height: 40px;
+    }
+
+    .inspector-title {
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text-0);
+    }
+
+    .inspector-close {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--text-3);
+      cursor: pointer;
+    }
+
+    .inspector-close:hover {
+      background: var(--bg-hover);
+      color: var(--text-0);
+    }
+
+    .inspector-tabs {
+      display: flex;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      gap: 2px;
+    }
+
+    .inspector-tab {
+      padding: 8px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-2);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .inspector-tab:hover {
+      color: var(--text-1);
+    }
+
+    .inspector-tab.active {
+      color: var(--text-0);
+      border-bottom-color: var(--blue);
+    }
+
+    .inspector-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+    }
+
+    .inspector-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .inspector-body::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    .inspector-group {
+      margin-bottom: 16px;
+    }
+
+    .inspector-group-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .inspector-row {
+      display: flex;
+      padding: 3px 0;
+      font-size: 12px;
+      gap: 8px;
+    }
+
+    .inspector-key {
+      color: var(--text-2);
+      min-width: 100px;
+      flex-shrink: 0;
+    }
+
+    .inspector-value {
+      color: var(--text-0);
+      font-family: var(--mono);
+      font-size: 11px;
+      word-break: break-all;
+    }
+
+    .inspector-body-content {
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-1);
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    /* JSON syntax highlighting */
+    .json-key { color: var(--cyan); }
+    .json-string { color: var(--green); }
+    .json-number { color: var(--yellow); }
+    .json-bool { color: var(--purple); }
+    .json-null { color: var(--text-3); }
+
+    /* Empty state */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-3);
+      gap: 8px;
+      padding: 40px;
+    }
+
+    .empty-state svg {
+      width: 40px;
+      height: 40px;
+      opacity: 0.3;
+      margin-bottom: 4px;
+    }
+
+    .empty-state-text {
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .empty-state-hint {
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    /* Connection info in sidebar */
+    .conn-info {
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      margin-top: auto;
+    }
+
+    .conn-info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      padding: 3px 8px;
+    }
+
+    .conn-info-label {
+      color: var(--text-3);
+    }
+
+    .conn-info-value {
+      color: var(--text-1);
+      font-family: var(--mono);
+    }
+
+    /* Live badge */
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .live-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--red);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    /* Tag/Badge */
+    .badge {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .badge-ws {
+      color: var(--purple);
+      background: var(--purple-bg);
+    }
+
+    .badge-http {
+      color: var(--blue);
+      background: var(--blue-bg);
+    }
+
+    /* Bottom bar */
+    .bottom-bar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      height: 28px;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-3);
+      gap: 16px;
+    }
+
+    .bottom-bar-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* WebSocket messages view */
+    .ws-message {
+      display: flex;
+      gap: 8px;
+      padding: 6px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-family: var(--mono);
+      align-items: flex-start;
+    }
+
+    .ws-direction {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 4px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .ws-direction.outgoing {
+      color: var(--green);
+      background: var(--green-bg);
+    }
+
+    .ws-direction.incoming {
+      color: var(--blue);
+      background: var(--blue-bg);
+    }
+
+    .ws-payload {
+      color: var(--text-1);
+      font-size: 11px;
+      word-break: break-all;
+      flex: 1;
+    }
+
+    .ws-time {
+      color: var(--text-3);
+      font-size: 10px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    /* Responsive */
+    @media (max-width: 1100px) {
+      .devtools {
+        grid-template-columns: 220px 1fr 0;
+        grid-template-areas:
+          "header header"
+          "sidebar main";
+      }
+      .inspector { display: none; }
+    }
+
+    @media (max-width: 768px) {
+      .devtools {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "header"
+          "main";
+      }
+      .sidebar { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="devtools" id="app">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-brand">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+        localtunnels
+      </div>
+      <span class="header-badge">DevTools</span>
+      <div class="header-sep"></div>
+      <div class="header-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Connected</span>
+      </div>
+      <div class="header-spacer"></div>
+      <div class="live-badge">Live</div>
+      <div class="header-sep"></div>
+      <div class="header-actions">
+        <button class="header-btn" title="Clear requests" id="btn-clear">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+          </svg>
+        </button>
+        <button class="header-btn" title="Toggle recording" id="btn-record">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5" fill="var(--red)"/>
+          </svg>
+        </button>
+        <button class="header-btn" title="Settings" id="btn-settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Active Tunnels</div>
+
+        <div class="tunnel-card active" data-tunnel="swift-fox">
+          <div class="tunnel-card-header">
+            <span class="tunnel-name">swift-fox</span>
+            <span class="tunnel-status active">active</span>
+          </div>
+          <div class="tunnel-url">swift-fox.localtunnel.dev</div>
+          <div class="tunnel-meta">
+            <span class="tunnel-meta-item">:3000</span>
+            <span class="tunnel-meta-item">47 req</span>
+            <span class="tunnel-meta-item">2m ago</span>
+          </div>
+        </div>
+
+        <div class="tunnel-card" data-tunnel="bold-comet">
+          <div class="tunnel-card-header">
+            <span class="tunnel-name">bold-comet</span>
+            <span class="tunnel-status idle">idle</span>
+          </div>
+          <div class="tunnel-url">bold-comet.localtunnel.dev</div>
+          <div class="tunnel-meta">
+            <span class="tunnel-meta-item">:8080</span>
+            <span class="tunnel-meta-item">12 req</span>
+            <span class="tunnel-meta-item">14m ago</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Quick Stats</div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Uptime</span>
+          <span class="conn-info-value" id="uptime">02:34:17</span>
+        </div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Total requests</span>
+          <span class="conn-info-value" id="total-requests">59</span>
+        </div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Bandwidth</span>
+          <span class="conn-info-value" id="bandwidth">1.2 MB</span>
+        </div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Avg latency</span>
+          <span class="conn-info-value" id="avg-latency">23ms</span>
+        </div>
+      </div>
+
+      <div class="conn-info">
+        <div class="sidebar-section-title">Connection</div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Server</span>
+          <span class="conn-info-value">localtunnel.dev</span>
+        </div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Protocol</span>
+          <span class="conn-info-value">wss://</span>
+        </div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Client ID</span>
+          <span class="conn-info-value">c7f2a</span>
+        </div>
+        <div class="conn-info-row">
+          <span class="conn-info-label">Version</span>
+          <span class="conn-info-value">v{{ version }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main content area -->
+    <div class="main">
+      <!-- Stats row -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-2xx">42</div>
+          <div class="stat-label" style="color: var(--green)">2xx Success</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-3xx">8</div>
+          <div class="stat-label" style="color: var(--blue)">3xx Redirect</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-4xx">7</div>
+          <div class="stat-label" style="color: var(--yellow)">4xx Client</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-5xx">2</div>
+          <div class="stat-label" style="color: var(--red)">5xx Server</div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="main-tabs">
+        <div class="tab active" data-tab="requests">Requests <span class="tab-count" id="request-count">59</span></div>
+        <div class="tab" data-tab="websocket">WebSocket <span class="tab-count">24</span></div>
+        <div class="tab" data-tab="timeline">Timeline</div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <input type="text" class="toolbar-input" id="filter-input" placeholder="Filter by path, method, or status..." spellcheck="false" />
+        <button class="toolbar-btn" id="btn-method-filter">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          All methods
+        </button>
+      </div>
+
+      <!-- Request table (Requests tab) -->
+      <div id="tab-requests">
+        <div class="request-row-header">
+          <span>Method</span>
+          <span>Path</span>
+          <span>Status</span>
+          <span>Size</span>
+          <span>Time</span>
+          <span>Timestamp</span>
+        </div>
+        <div class="request-list" id="request-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- WebSocket tab (hidden by default) -->
+      <div id="tab-websocket" style="display: none; flex: 1; overflow-y: auto;">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Timeline tab (hidden by default) -->
+      <div id="tab-timeline" style="display: none;">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
+          <div class="empty-state-text">Timeline view</div>
+          <div class="empty-state-hint">Visual waterfall of request timing coming soon</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inspector panel -->
+    <div class="inspector" id="inspector">
+      <div class="inspector-header">
+        <span class="inspector-title" id="inspector-title">Request Details</span>
+        <button class="inspector-close" id="inspector-close">&times;</button>
+      </div>
+      <div class="inspector-tabs">
+        <div class="inspector-tab active" data-inspector-tab="headers">Headers</div>
+        <div class="inspector-tab" data-inspector-tab="body">Body</div>
+        <div class="inspector-tab" data-inspector-tab="response">Response</div>
+      </div>
+      <div class="inspector-body" id="inspector-body">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <div class="empty-state-text">Select a request to inspect</div>
+          <div class="empty-state-hint">Click any row to view headers, body, and response</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Sample data
+    const sampleRequests = [
+      { id: 1, method: 'GET', path: '/', status: 200, size: '4.2 KB', time: '12ms', ts: '10:42:03', headers: { 'Host': 'swift-fox.localtunnel.dev', 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html', 'Accept-Encoding': 'gzip, deflate, br', 'Connection': 'keep-alive', 'Cache-Control': 'no-cache' }, body: null, response: '<!DOCTYPE html><html>...</html>' },
+      { id: 2, method: 'GET', path: '/assets/style.css', status: 200, size: '8.1 KB', time: '3ms', ts: '10:42:03', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'text/css', 'Referer': 'https://swift-fox.localtunnel.dev/' }, body: null, response: '/* CSS content */' },
+      { id: 3, method: 'GET', path: '/api/users', status: 200, size: '1.8 KB', time: '45ms', ts: '10:42:05', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: null, response: JSON.stringify([{ id: 1, name: 'Alice', role: 'admin' }, { id: 2, name: 'Bob', role: 'editor' }], null, 2) },
+      { id: 4, method: 'POST', path: '/api/webhook', status: 201, size: '0.3 KB', time: '89ms', ts: '10:42:08', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'X-GitHub-Event': 'push', 'X-GitHub-Delivery': 'a1b2c3d4' }, body: JSON.stringify({ ref: 'refs/heads/main', repository: { full_name: 'stacksjs/localtunnels' }, pusher: { name: 'chrisbreuer' } }, null, 2), response: JSON.stringify({ received: true, processed: true }, null, 2) },
+      { id: 5, method: 'GET', path: '/api/users/1', status: 200, size: '0.5 KB', time: '22ms', ts: '10:42:10', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json' }, body: null, response: JSON.stringify({ id: 1, name: 'Alice', email: 'alice@example.com', role: 'admin', created_at: '2025-12-01' }, null, 2) },
+      { id: 6, method: 'PUT', path: '/api/users/1', status: 200, size: '0.4 KB', time: '67ms', ts: '10:42:12', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: JSON.stringify({ name: 'Alice Smith', role: 'admin' }, null, 2), response: JSON.stringify({ id: 1, name: 'Alice Smith', role: 'admin', updated: true }, null, 2) },
+      { id: 7, method: 'GET', path: '/api/settings', status: 401, size: '0.1 KB', time: '8ms', ts: '10:42:15', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json' }, body: null, response: JSON.stringify({ error: 'Unauthorized', message: 'Invalid or expired token' }, null, 2) },
+      { id: 8, method: 'DELETE', path: '/api/users/99', status: 404, size: '0.1 KB', time: '15ms', ts: '10:42:18', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Authorization': 'Bearer eyJhbG...' }, body: null, response: JSON.stringify({ error: 'Not Found', message: 'User 99 does not exist' }, null, 2) },
+      { id: 9, method: 'GET', path: '/favicon.ico', status: 304, size: '0 B', time: '1ms', ts: '10:42:18', headers: { 'Host': 'swift-fox.localtunnel.dev', 'If-None-Match': '"abc123"' }, body: null, response: '' },
+      { id: 10, method: 'POST', path: '/api/upload', status: 500, size: '0.2 KB', time: '234ms', ts: '10:42:22', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'multipart/form-data' }, body: '[binary data]', response: JSON.stringify({ error: 'Internal Server Error', message: 'File processing failed', stack: 'Error: ENOSPC...' }, null, 2) },
+      { id: 11, method: 'GET', path: '/api/health', status: 200, size: '0.1 KB', time: '2ms', ts: '10:42:25', headers: { 'Host': 'swift-fox.localtunnel.dev' }, body: null, response: JSON.stringify({ status: 'ok', uptime: 9257 }, null, 2) },
+      { id: 12, method: 'PATCH', path: '/api/users/2/settings', status: 200, size: '0.3 KB', time: '34ms', ts: '10:42:28', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: JSON.stringify({ theme: 'dark', notifications: true }, null, 2), response: JSON.stringify({ updated: true }, null, 2) },
+      { id: 13, method: 'OPTIONS', path: '/api/users', status: 204, size: '0 B', time: '1ms', ts: '10:42:28', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Origin': 'https://app.example.com', 'Access-Control-Request-Method': 'POST' }, body: null, response: '' },
+      { id: 14, method: 'GET', path: '/api/users?page=2&limit=10', status: 200, size: '2.1 KB', time: '52ms', ts: '10:42:31', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: null, response: JSON.stringify({ data: [{ id: 11, name: 'User 11' }, { id: 12, name: 'User 12' }], total: 47, page: 2 }, null, 2) },
+      { id: 15, method: 'POST', path: '/api/auth/login', status: 200, size: '0.4 KB', time: '112ms', ts: '10:42:35', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'alice@example.com', password: '***' }, null, 2), response: JSON.stringify({ token: 'eyJhbGciOiJIUzI1NiIs...', expiresIn: 3600 }, null, 2) },
+      { id: 16, method: 'GET', path: '/api/metrics', status: 200, size: '1.4 KB', time: '18ms', ts: '10:42:38', headers: { 'Host': 'swift-fox.localtunnel.dev' }, body: null, response: JSON.stringify({ requests_total: 1847, active_connections: 12, avg_response_time_ms: 23 }, null, 2) },
+      { id: 17, method: 'POST', path: '/api/webhook', status: 502, size: '0.2 KB', time: '5001ms', ts: '10:42:44', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'X-Stripe-Signature': 'whsec_...' }, body: JSON.stringify({ type: 'payment_intent.succeeded', data: { object: { amount: 2000 } } }, null, 2), response: JSON.stringify({ error: 'Bad Gateway', message: 'Upstream timeout' }, null, 2) },
+    ]
+
+    const sampleWsMessages = [
+      { dir: 'outgoing', type: 'ready', payload: '{"type":"ready","subdomain":"swift-fox"}', time: '10:41:58' },
+      { dir: 'incoming', type: 'connected', payload: '{"type":"connected","message":"WebSocket connected"}', time: '10:41:58' },
+      { dir: 'incoming', type: 'registered', payload: '{"type":"registered","subdomain":"swift-fox","url":"https://swift-fox.localtunnel.dev"}', time: '10:41:59' },
+      { dir: 'outgoing', type: 'ping', payload: '{"type":"ping"}', time: '10:42:00' },
+      { dir: 'incoming', type: 'pong', payload: '{"type":"pong"}', time: '10:42:00' },
+      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_1","method":"GET","url":"/","headers":{...}}', time: '10:42:03' },
+      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_1","status":200,"headers":{...},"body":"..."}', time: '10:42:03' },
+      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_2","method":"GET","url":"/assets/style.css"}', time: '10:42:03' },
+      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_2","status":200}', time: '10:42:03' },
+      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_3","method":"GET","url":"/api/users"}', time: '10:42:05' },
+      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_3","status":200,"body":"[{...}]"}', time: '10:42:05' },
+      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_4","method":"POST","url":"/api/webhook"}', time: '10:42:08' },
+      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_4","status":201}', time: '10:42:08' },
+      { dir: 'outgoing', type: 'ping', payload: '{"type":"ping"}', time: '10:42:30' },
+      { dir: 'incoming', type: 'pong', payload: '{"type":"pong"}', time: '10:42:30' },
+      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_10","method":"POST","url":"/api/upload"}', time: '10:42:22' },
+      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_10","status":500,"body":"Error: ENOSPC"}', time: '10:42:22' },
+      { dir: 'outgoing', type: 'ping', payload: '{"type":"ping"}', time: '10:43:00' },
+      { dir: 'incoming', type: 'pong', payload: '{"type":"pong"}', time: '10:43:00' },
+    ]
+
+    // DOM refs
+    const requestList = document.getElementById('request-list')
+    const inspectorBody = document.getElementById('inspector-body')
+    const inspectorTitle = document.getElementById('inspector-title')
+    const filterInput = document.getElementById('filter-input')
+    let selectedRequest = null
+
+    // Render requests
+    function renderRequests(requests) {
+      requestList.innerHTML = ''
+      requests.forEach(req => {
+        const row = document.createElement('div')
+        row.className = 'request-row'
+        row.dataset.id = req.id
+
+        const statusClass = req.status < 300 ? 's2xx' : req.status < 400 ? 's3xx' : req.status < 500 ? 's4xx' : 's5xx'
+        row.innerHTML = `
+          <span class="method ${req.method.toLowerCase()}">${req.method}</span>
+          <span class="request-path" title="${escapeHtml(req.path)}">${escapeHtml(req.path)}</span>
+          <span class="status-code ${statusClass}">${req.status}</span>
+          <span class="request-size">${req.size}</span>
+          <span class="request-time">${req.time}</span>
+          <span class="request-timestamp">${req.ts}</span>
+        `
+        row.addEventListener('click', () => selectRequest(req, row))
+        requestList.appendChild(row)
+      })
+    }
+
+    // Render WebSocket messages
+    function renderWsMessages() {
+      const container = document.getElementById('tab-websocket')
+      container.innerHTML = ''
+      sampleWsMessages.forEach(msg => {
+        const div = document.createElement('div')
+        div.className = 'ws-message'
+        div.innerHTML = `
+          <span class="ws-direction ${msg.dir}">${msg.dir === 'outgoing' ? '\u2191 OUT' : '\u2193 IN'}</span>
+          <span class="ws-payload">${escapeHtml(msg.payload)}</span>
+          <span class="ws-time">${msg.time}</span>
+        `
+        container.appendChild(div)
+      })
+    }
+
+    // Select request
+    function selectRequest(req, row) {
+      document.querySelectorAll('.request-row.selected').forEach(r => r.classList.remove('selected'))
+      row.classList.add('selected')
+      selectedRequest = req
+      inspectorTitle.textContent = `${req.method} ${req.path}`
+      renderInspectorHeaders(req)
+    }
+
+    function renderInspectorHeaders(req) {
+      const statusClass = req.status < 300 ? 's2xx' : req.status < 400 ? 's3xx' : req.status < 500 ? 's4xx' : 's5xx'
+      let html = `
+        <div class="inspector-group">
+          <div class="inspector-group-title">General</div>
+          <div class="inspector-row">
+            <span class="inspector-key">URL</span>
+            <span class="inspector-value">https://swift-fox.localtunnel.dev${escapeHtml(req.path)}</span>
+          </div>
+          <div class="inspector-row">
+            <span class="inspector-key">Method</span>
+            <span class="inspector-value"><span class="method ${req.method.toLowerCase()}">${req.method}</span></span>
+          </div>
+          <div class="inspector-row">
+            <span class="inspector-key">Status</span>
+            <span class="inspector-value"><span class="status-code ${statusClass}">${req.status}</span></span>
+          </div>
+          <div class="inspector-row">
+            <span class="inspector-key">Time</span>
+            <span class="inspector-value">${req.time}</span>
+          </div>
+          <div class="inspector-row">
+            <span class="inspector-key">Size</span>
+            <span class="inspector-value">${req.size}</span>
+          </div>
+        </div>
+        <div class="inspector-group">
+          <div class="inspector-group-title">Request Headers</div>
+      `
+      for (const [key, value] of Object.entries(req.headers)) {
+        html += `<div class="inspector-row">
+          <span class="inspector-key">${escapeHtml(key)}</span>
+          <span class="inspector-value">${escapeHtml(String(value))}</span>
+        </div>`
+      }
+      html += '</div>'
+      inspectorBody.innerHTML = html
+    }
+
+    function renderInspectorBody(req) {
+      if (!req.body) {
+        inspectorBody.innerHTML = `<div class="empty-state">
+          <div class="empty-state-text">No request body</div>
+          <div class="empty-state-hint">This request did not include a body</div>
+        </div>`
+        return
+      }
+      inspectorBody.innerHTML = `
+        <div class="inspector-group">
+          <div class="inspector-group-title">Request Body</div>
+          <div class="inspector-body-content">${syntaxHighlight(req.body)}</div>
+        </div>
+      `
+    }
+
+    function renderInspectorResponse(req) {
+      if (!req.response) {
+        inspectorBody.innerHTML = `<div class="empty-state">
+          <div class="empty-state-text">No response body</div>
+        </div>`
+        return
+      }
+      inspectorBody.innerHTML = `
+        <div class="inspector-group">
+          <div class="inspector-group-title">Response Body</div>
+          <div class="inspector-body-content">${syntaxHighlight(req.response)}</div>
+        </div>
+      `
+    }
+
+    function syntaxHighlight(str) {
+      try {
+        const obj = JSON.parse(str)
+        str = JSON.stringify(obj, null, 2)
+      } catch {}
+      return escapeHtml(str)
+        .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+        .replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+        .replace(/: (\d+)/g, ': <span class="json-number">$1</span>')
+        .replace(/: (true|false)/g, ': <span class="json-bool">$1</span>')
+        .replace(/: (null)/g, ': <span class="json-null">null</span>')
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement('div')
+      d.textContent = text
+      return d.innerHTML
+    }
+
+    // Tab switching (main)
+    document.querySelectorAll('.main-tabs .tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.main-tabs .tab').forEach(t => t.classList.remove('active'))
+        tab.classList.add('active')
+        const tabName = tab.dataset.tab
+
+        document.getElementById('tab-requests').style.display = tabName === 'requests' ? '' : 'none'
+        document.getElementById('tab-websocket').style.display = tabName === 'websocket' ? '' : 'none'
+        document.getElementById('tab-timeline').style.display = tabName === 'timeline' ? '' : 'none'
+
+        if (tabName === 'websocket') renderWsMessages()
+      })
+    })
+
+    // Inspector tab switching
+    document.querySelectorAll('.inspector-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        if (!selectedRequest) return
+        document.querySelectorAll('.inspector-tab').forEach(t => t.classList.remove('active'))
+        tab.classList.add('active')
+        const tabName = tab.dataset.inspectorTab
+
+        if (tabName === 'headers') renderInspectorHeaders(selectedRequest)
+        else if (tabName === 'body') renderInspectorBody(selectedRequest)
+        else if (tabName === 'response') renderInspectorResponse(selectedRequest)
+      })
+    })
+
+    // Filter
+    filterInput.addEventListener('input', () => {
+      const q = filterInput.value.toLowerCase()
+      const filtered = sampleRequests.filter(r =>
+        r.path.toLowerCase().includes(q)
+        || r.method.toLowerCase().includes(q)
+        || String(r.status).includes(q)
+      )
+      renderRequests(filtered)
+    })
+
+    // Clear
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      requestList.innerHTML = ''
+      inspectorBody.innerHTML = `<div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <div class="empty-state-text">Requests cleared</div>
+        <div class="empty-state-hint">New requests will appear as they come in</div>
+      </div>`
+      selectedRequest = null
+    })
+
+    // Tunnel card selection
+    document.querySelectorAll('.tunnel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.tunnel-card').forEach(c => c.classList.remove('active'))
+        card.classList.add('active')
+      })
+    })
+
+    // Uptime counter
+    let uptimeSeconds = 9257
+    setInterval(() => {
+      uptimeSeconds++
+      const h = String(Math.floor(uptimeSeconds / 3600)).padStart(2, '0')
+      const m = String(Math.floor((uptimeSeconds % 3600) / 60)).padStart(2, '0')
+      const s = String(uptimeSeconds % 60).padStart(2, '0')
+      document.getElementById('uptime').textContent = `${h}:${m}:${s}`
+    }, 1000)
+
+    // Simulate new requests arriving
+    let requestId = sampleRequests.length + 1
+    const paths = ['/api/users', '/api/health', '/api/metrics', '/api/webhook', '/api/settings', '/api/upload', '/']
+    const methods = ['GET', 'GET', 'GET', 'POST', 'GET', 'PUT', 'DELETE']
+    const statuses = [200, 200, 200, 201, 304, 200, 404, 500]
+
+    function simulateRequest() {
+      const method = methods[Math.floor(Math.random() * methods.length)]
+      const path = paths[Math.floor(Math.random() * paths.length)]
+      const status = statuses[Math.floor(Math.random() * statuses.length)]
+      const time = Math.floor(Math.random() * 200) + 1
+      const size = (Math.random() * 10).toFixed(1) + ' KB'
+      const now = new Date()
+      const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+
+      const req = {
+        id: requestId++,
+        method, path, status, size, time: `${time}ms`, ts,
+        headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json' },
+        body: method === 'POST' || method === 'PUT' ? '{"data": "..."}' : null,
+        response: JSON.stringify({ ok: true }, null, 2)
+      }
+
+      sampleRequests.push(req)
+
+      const statusClass = status < 300 ? 's2xx' : status < 400 ? 's3xx' : status < 500 ? 's4xx' : 's5xx'
+      const row = document.createElement('div')
+      row.className = 'request-row'
+      row.dataset.id = req.id
+      row.innerHTML = `
+        <span class="method ${method.toLowerCase()}">${method}</span>
+        <span class="request-path">${path}</span>
+        <span class="status-code ${statusClass}">${status}</span>
+        <span class="request-size">${size}</span>
+        <span class="request-time">${time}ms</span>
+        <span class="request-timestamp">${ts}</span>
+      `
+      row.addEventListener('click', () => selectRequest(req, row))
+      requestList.appendChild(row)
+
+      // Update counters
+      document.getElementById('request-count').textContent = sampleRequests.length
+      document.getElementById('total-requests').textContent = sampleRequests.length
+
+      const s2xx = sampleRequests.filter(r => r.status >= 200 && r.status < 300).length
+      const s3xx = sampleRequests.filter(r => r.status >= 300 && r.status < 400).length
+      const s4xx = sampleRequests.filter(r => r.status >= 400 && r.status < 500).length
+      const s5xx = sampleRequests.filter(r => r.status >= 500).length
+      document.getElementById('stat-2xx').textContent = s2xx
+      document.getElementById('stat-3xx').textContent = s3xx
+      document.getElementById('stat-4xx').textContent = s4xx
+      document.getElementById('stat-5xx').textContent = s5xx
+
+      // Auto-scroll if near bottom
+      if (requestList.scrollHeight - requestList.scrollTop - requestList.clientHeight < 100) {
+        requestList.scrollTop = requestList.scrollHeight
+      }
+    }
+
+    // Start with sample data
+    renderRequests(sampleRequests)
+
+    // Simulate live requests every 3-8 seconds
+    function scheduleNext() {
+      const delay = 3000 + Math.random() * 5000
+      setTimeout(() => {
+        simulateRequest()
+        scheduleNext()
+      }, delay)
+    }
+    scheduleNext()
+  </script>
+</body>
+</html>

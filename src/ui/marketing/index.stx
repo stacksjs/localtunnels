@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>localtunnels - Expose your localhost to the world</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <script>
+    const version = '0.2.7'
+    const year = new Date().getFullYear()
+  </script>
+
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --green: #00ff41;
+      --green-dim: #00cc33;
+      --green-dark: #009922;
+      --green-glow: rgba(0, 255, 65, 0.15);
+      --green-faint: rgba(0, 255, 65, 0.06);
+      --bg: #0a0a0a;
+      --bg-light: #111111;
+      --bg-lighter: #1a1a1a;
+      --gray: #333333;
+      --gray-text: #555555;
+      --white: #e0e0e0;
+      --cyan: #00e5ff;
+      --yellow: #ffd600;
+      --red: #ff1744;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--green);
+      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      overflow: hidden;
+    }
+
+    ::selection {
+      background: var(--green);
+      color: var(--bg);
+    }
+
+    /* Scanline effect */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.08) 2px,
+        rgba(0, 0, 0, 0.08) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* CRT vignette */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(
+        ellipse at center,
+        transparent 60%,
+        rgba(0, 0, 0, 0.4) 100%
+      );
+      pointer-events: none;
+      z-index: 9998;
+    }
+
+    .terminal {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      padding: 10px 16px;
+      background: var(--bg-lighter);
+      border-bottom: 1px solid var(--gray);
+      gap: 12px;
+      user-select: none;
+      -webkit-app-region: drag;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 8px;
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      -webkit-app-region: no-drag;
+      cursor: pointer;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #ffbd2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      color: var(--gray-text);
+      font-size: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    .terminal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px;
+      scroll-behavior: smooth;
+    }
+
+    .terminal-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .terminal-body::-webkit-scrollbar-track {
+      background: var(--bg);
+    }
+
+    .terminal-body::-webkit-scrollbar-thumb {
+      background: var(--gray);
+      border-radius: 3px;
+    }
+
+    .terminal-body::-webkit-scrollbar-thumb:hover {
+      background: var(--green-dark);
+    }
+
+    /* ASCII art */
+    .ascii-art {
+      color: var(--green);
+      white-space: pre;
+      font-size: 11px;
+      line-height: 1.2;
+      margin-bottom: 8px;
+      text-shadow: 0 0 10px var(--green-glow);
+    }
+
+    .tagline {
+      color: var(--green-dim);
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .version-info {
+      color: var(--gray-text);
+      font-size: 12px;
+      margin-bottom: 24px;
+    }
+
+    /* Output lines */
+    .line {
+      margin-bottom: 2px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .line.empty {
+      height: 1.6em;
+    }
+
+    .prompt-prefix {
+      color: var(--cyan);
+    }
+
+    .prompt-symbol {
+      color: var(--green);
+      margin: 0 4px;
+    }
+
+    .cmd-text {
+      color: var(--white);
+    }
+
+    /* Help output */
+    .help-section {
+      margin: 8px 0;
+    }
+
+    .help-title {
+      color: var(--yellow);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .help-cmd {
+      display: inline-block;
+      min-width: 280px;
+      color: var(--green);
+    }
+
+    .help-desc {
+      color: var(--gray-text);
+    }
+
+    .help-flag {
+      display: inline-block;
+      min-width: 320px;
+      color: var(--cyan);
+    }
+
+    .help-default {
+      color: var(--green-dark);
+      font-size: 12px;
+    }
+
+    .help-example {
+      color: var(--green-dim);
+      padding-left: 4px;
+    }
+
+    .help-example .dollar {
+      color: var(--gray-text);
+    }
+
+    .success { color: var(--green); }
+    .info { color: var(--cyan); }
+    .warning { color: var(--yellow); }
+    .error { color: var(--red); }
+    .dim { color: var(--gray-text); }
+    .bright { color: var(--white); }
+
+    /* Input area */
+    .input-area {
+      display: flex;
+      align-items: center;
+      padding: 12px 24px 16px;
+      border-top: 1px solid var(--gray);
+      background: var(--bg);
+    }
+
+    .input-area .prompt-prefix {
+      white-space: nowrap;
+    }
+
+    .input-area .prompt-symbol {
+      white-space: nowrap;
+    }
+
+    #terminal-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--white);
+      font-family: inherit;
+      font-size: inherit;
+      caret-color: var(--green);
+      padding-left: 4px;
+    }
+
+    #terminal-input::placeholder {
+      color: var(--gray);
+    }
+
+    /* Typing animation for initial boot */
+    .typewriter {
+      overflow: hidden;
+      animation: reveal 0.02s steps(1) forwards;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .cursor-blink::after {
+      content: '\2588';
+      animation: blink 1s step-end infinite;
+      color: var(--green);
+    }
+
+    /* Glow pulse on the ASCII art */
+    @keyframes glow-pulse {
+      0%, 100% { text-shadow: 0 0 10px var(--green-glow); }
+      50% { text-shadow: 0 0 20px var(--green-glow), 0 0 40px rgba(0, 255, 65, 0.08); }
+    }
+
+    .ascii-art {
+      animation: glow-pulse 4s ease-in-out infinite;
+    }
+
+    /* Links */
+    a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    /* Boot sequence animation */
+    .boot-line {
+      opacity: 0;
+      animation: fade-in 0.1s forwards;
+    }
+
+    @keyframes fade-in {
+      to { opacity: 1; }
+    }
+
+    /* Connection simulation */
+    .connection-demo {
+      border: 1px solid var(--gray);
+      border-radius: 4px;
+      padding: 12px 16px;
+      margin: 8px 0;
+      background: var(--bg-light);
+    }
+
+    .connection-demo .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-right: 8px;
+      animation: blink 2s ease-in-out infinite;
+    }
+
+    /* Features grid in info */
+    .feature-item {
+      padding-left: 20px;
+    }
+
+    .feature-item::before {
+      content: none;
+    }
+
+    .check {
+      color: var(--green);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      html, body { font-size: 12px; }
+      .ascii-art { font-size: 8px; }
+      .terminal-body { padding: 12px 16px; }
+      .input-area { padding: 10px 16px 14px; }
+      .help-cmd, .help-flag { min-width: auto; display: block; }
+      .help-desc { display: block; padding-left: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal">
+    <div class="terminal-header">
+      <div class="terminal-dots">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+      </div>
+      <div class="terminal-title">localtunnels &mdash; zsh</div>
+      <div style="width: 52px;"></div>
+    </div>
+
+    <div class="terminal-body" id="output">
+      <div class="ascii-art">
+ _                 _ _                         _
+| | ___   ___ __ _| | |_ _   _ _ __  _ __   ___| |___
+| |/ _ \ / __/ _` | | __| | | | '_ \| '_ \ / _ \ / __|
+| | (_) | (_| (_| | | |_| |_| | | | | | | |  __/ \__ \
+|_|\___/ \___\__,_|_|\__|\__,_|_| |_|_| |_|\___|_|___/</div>
+      <div class="tagline">Expose your localhost to the world. Simple. Fast. Secure.</div>
+      <div class="version-info">v{{ version }} &middot; <a href="https://github.com/stacksjs/localtunnels" target="_blank">github.com/stacksjs/localtunnels</a></div>
+
+      <div class="line dim">Welcome to localtunnels interactive shell.</div>
+      <div class="line dim">Type <span class="bright">help</span> to see available commands, or <span class="bright">demo</span> to see it in action.</div>
+      <div class="line empty"></div>
+    </div>
+
+    <div class="input-area">
+      <span class="prompt-prefix">localtunnels</span>
+      <span class="prompt-symbol">~$</span>
+      <input type="text" id="terminal-input" placeholder="type a command..." autofocus spellcheck="false" autocomplete="off" />
+    </div>
+  </div>
+
+  <script type="module">
+    const output = document.getElementById('output')
+    const input = document.getElementById('terminal-input')
+    const commandHistory = []
+    let historyIndex = -1
+
+    function addLine(html, className = '') {
+      const div = document.createElement('div')
+      div.className = `line ${className}`.trim()
+      div.innerHTML = html
+      output.appendChild(div)
+    }
+
+    function addEmpty() {
+      addLine('', 'empty')
+    }
+
+    function addPrompt(cmd) {
+      addLine(`<span class="prompt-prefix">localtunnels</span><span class="prompt-symbol">~$</span> <span class="cmd-text">${escapeHtml(cmd)}</span>`)
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement('div')
+      d.textContent = text
+      return d.innerHTML
+    }
+
+    function scrollToBottom() {
+      output.scrollTop = output.scrollHeight
+    }
+
+    // Commands
+    const commands = {
+      help() {
+        addLine('<span class="help-title">LOCALTUNNELS CLI</span>')
+        addLine('<span class="dim">A simple and smart tunneling solution</span>')
+        addEmpty()
+        addLine('<span class="help-title">USAGE</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels &lt;command&gt; [options]</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">COMMANDS</span>')
+        addLine('  <span class="help-cmd">start</span> <span class="help-desc">Start a tunnel client (default)</span>')
+        addLine('  <span class="help-cmd">server</span> <span class="help-desc">Start a self-hosted tunnel server</span>')
+        addLine('  <span class="help-cmd">deploy</span> <span class="help-desc">Deploy tunnel server to AWS EC2</span>')
+        addLine('  <span class="help-cmd">destroy</span> <span class="help-desc">Tear down deployed AWS infrastructure</span>')
+        addLine('  <span class="help-cmd">status</span> <span class="help-desc">Check tunnel server status</span>')
+        addLine('  <span class="help-cmd">info</span> <span class="help-desc">Show localtunnels information &amp; examples</span>')
+        addLine('  <span class="help-cmd">version</span> <span class="help-desc">Show version number</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">START OPTIONS</span>')
+        addLine('  <span class="help-flag">-p, --port &lt;port&gt;</span> <span class="help-desc">Local port to expose</span> <span class="help-default">[default: 3000]</span>')
+        addLine('  <span class="help-flag">-s, --subdomain &lt;name&gt;</span> <span class="help-desc">Request a specific subdomain</span>')
+        addLine('  <span class="help-flag">-h, --host &lt;host&gt;</span> <span class="help-desc">Local hostname</span> <span class="help-default">[default: localhost]</span>')
+        addLine('  <span class="help-flag">--server &lt;url&gt;</span> <span class="help-desc">Tunnel server URL</span> <span class="help-default">[default: localtunnel.dev]</span>')
+        addLine('  <span class="help-flag">--secure</span> <span class="help-desc">Use secure WebSocket (wss://)</span>')
+        addLine('  <span class="help-flag">--verbose</span> <span class="help-desc">Enable verbose logging</span>')
+        addLine('  <span class="help-flag">--no-manage-hosts</span> <span class="help-desc">Disable automatic DNS management</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">SERVER OPTIONS</span>')
+        addLine('  <span class="help-flag">-p, --port &lt;port&gt;</span> <span class="help-desc">Port to listen on</span> <span class="help-default">[default: 3000]</span>')
+        addLine('  <span class="help-flag">-h, --host &lt;host&gt;</span> <span class="help-desc">Host to bind to</span> <span class="help-default">[default: 0.0.0.0]</span>')
+        addLine('  <span class="help-flag">--domain &lt;domain&gt;</span> <span class="help-desc">Domain for tunnel URLs</span> <span class="help-default">[default: localhost]</span>')
+        addLine('  <span class="help-flag">--verbose</span> <span class="help-desc">Enable verbose logging</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">DEPLOY OPTIONS</span>')
+        addLine('  <span class="help-flag">--region &lt;region&gt;</span> <span class="help-desc">AWS region</span> <span class="help-default">[default: us-east-1]</span>')
+        addLine('  <span class="help-flag">--domain &lt;domain&gt;</span> <span class="help-desc">Domain for tunnel URLs</span>')
+        addLine('  <span class="help-flag">--instance-type &lt;type&gt;</span> <span class="help-desc">EC2 instance type</span> <span class="help-default">[default: t3.micro]</span>')
+        addLine('  <span class="help-flag">--key-name &lt;name&gt;</span> <span class="help-desc">EC2 key pair name for SSH</span>')
+        addLine('  <span class="help-flag">--enable-ssl</span> <span class="help-desc">Enable SSL via Caddy reverse proxy</span>')
+        addLine('  <span class="help-flag">--porkbun-api-key &lt;key&gt;</span> <span class="help-desc">Porkbun API key</span>')
+        addLine('  <span class="help-flag">--porkbun-secret-key &lt;key&gt;</span> <span class="help-desc">Porkbun secret key</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">EXAMPLES</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels start --port 8080</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels start --port 3000 --subdomain myapp</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels server --port 3000 --domain tunnel.example.com</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels deploy --domain tunnel.example.com --enable-ssl</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels status --server tunnel.example.com</span>')
+        addEmpty()
+
+        addLine('<span class="dim">Documentation: <a href="https://localtunnels.sh" target="_blank">https://localtunnels.sh</a></span>')
+        addLine('<span class="dim">GitHub:        <a href="https://github.com/stacksjs/localtunnels" target="_blank">https://github.com/stacksjs/localtunnels</a></span>')
+      },
+
+      start() {
+        addLine('<span class="info">Connecting to tunnel server...</span>')
+        setTimeout(() => {
+          addLine('<span class="success">  Connected!</span>')
+          addEmpty()
+          addLine('<div class="connection-demo"><span class="status-dot"></span><span class="bright">Tunnel active</span></div>')
+          addLine('  <span class="dim">Public URL:</span>  <span class="success">https://swift-fox.localtunnel.dev</span>')
+          addLine('  <span class="dim">Forwarding:</span>  <span class="bright">localhost:3000</span> <span class="dim">&rarr;</span> <span class="success">swift-fox.localtunnel.dev</span>')
+          addLine('  <span class="dim">Subdomain:</span>  <span class="bright">swift-fox</span>')
+          addLine('  <span class="dim">Protocol:</span>   <span class="bright">wss://</span>')
+          addEmpty()
+          addLine('<span class="dim">Press Ctrl+C to disconnect</span>')
+          scrollToBottom()
+        }, 1200)
+      },
+
+      demo() {
+        addLine('<span class="info">Running demo...</span>')
+        addEmpty()
+
+        const steps = [
+          { delay: 400, html: '<span class="dim">1.</span> <span class="bright">Starting local dev server on port 3000...</span>' },
+          { delay: 800, html: '<span class="success">   Server running at http://localhost:3000</span>' },
+          { delay: 1200, html: '' },
+          { delay: 1400, html: '<span class="dim">2.</span> <span class="bright">Connecting to localtunnel.dev...</span>' },
+          { delay: 2200, html: '<span class="success">   Tunnel established!</span>' },
+          { delay: 2400, html: '' },
+          { delay: 2600, html: '<div class="connection-demo"><span class="status-dot"></span><span class="bright">Tunnel active</span></div>' },
+          { delay: 2800, html: '  <span class="dim">Public URL:</span>  <a href="#" class="success">https://bold-comet.localtunnel.dev</a>' },
+          { delay: 3000, html: '  <span class="dim">Forwarding:</span>  localhost:3000 <span class="dim">&rarr;</span> bold-comet.localtunnel.dev' },
+          { delay: 3200, html: '' },
+          { delay: 3400, html: '<span class="dim">3.</span> <span class="bright">Incoming requests:</span>' },
+          { delay: 3800, html: '  <span class="success">GET</span>  <span class="bright">/</span>                 <span class="dim">200</span> <span class="dim">12ms</span>' },
+          { delay: 4200, html: '  <span class="success">GET</span>  <span class="bright">/api/users</span>       <span class="dim">200</span> <span class="dim">45ms</span>' },
+          { delay: 4600, html: '  <span class="warning">POST</span> <span class="bright">/api/webhook</span>     <span class="dim">201</span> <span class="dim">89ms</span>' },
+          { delay: 5000, html: '  <span class="success">GET</span>  <span class="bright">/assets/style.css</span> <span class="dim">200</span> <span class="dim">3ms</span>' },
+          { delay: 5400, html: '' },
+          { delay: 5600, html: '<span class="dim">Share the URL with anyone to access your local server.</span>' },
+          { delay: 5800, html: '<span class="dim">That\'s it. No accounts, no config files, no complex setup.</span>' },
+        ]
+
+        steps.forEach(step => {
+          setTimeout(() => {
+            if (step.html === '') addEmpty()
+            else addLine(step.html)
+            scrollToBottom()
+          }, step.delay)
+        })
+      },
+
+      version() {
+        addLine(`<span class="bright">localtunnels</span> <span class="success">v0.2.7</span>`)
+        addLine('<span class="dim">Runtime: Bun</span>')
+        addLine('<span class="dim">Platform: ' + navigator.platform + '</span>')
+      },
+
+      info() {
+        addLine('<span class="help-title">LOCALTUNNELS</span>')
+        addLine('<span class="dim">A simple and smart tunneling solution.</span>')
+        addLine('<span class="dim">Expose your localhost to the world.</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">FEATURES</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">Zero-config</span> <span class="dim">- works out of the box</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">Smart subdomains</span> <span class="dim">- memorable auto-generated names</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">Self-hostable</span> <span class="dim">- deploy your own server in one command</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">HTTPS support</span> <span class="dim">- automatic SSL via Caddy</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">AWS deployment</span> <span class="dim">- one-command EC2 infrastructure</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">WebSocket-based</span> <span class="dim">- fast, bidirectional communication</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">Auto-reconnect</span> <span class="dim">- exponential backoff with jitter</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">Prometheus metrics</span> <span class="dim">- built-in monitoring</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">Cross-platform</span> <span class="dim">- Linux, macOS, Windows</span>')
+        addLine('  <span class="check">\u2713</span> <span class="bright">TypeScript API</span> <span class="dim">- full programmatic control</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">QUICK START</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> bun i -g localtunnels</span>')
+        addLine('  <span class="help-example"><span class="dollar">$</span> localtunnels start --port 3000</span>')
+        addEmpty()
+
+        addLine('<span class="help-title">PROGRAMMATIC USAGE</span>')
+        addLine('  <span class="dim">import</span> <span class="bright">{ startLocalTunnel }</span> <span class="dim">from</span> <span class="success">\'localtunnels\'</span>')
+        addEmpty()
+        addLine('  <span class="dim">const</span> <span class="bright">client</span> <span class="dim">= await</span> <span class="bright">startLocalTunnel</span><span class="dim">({</span>')
+        addLine('    <span class="cyan">port</span><span class="dim">:</span> <span class="yellow">3000</span><span class="dim">,</span>')
+        addLine('    <span class="cyan">subdomain</span><span class="dim">:</span> <span class="success">\'myapp\'</span><span class="dim">,</span>')
+        addLine('    <span class="cyan">onConnect</span><span class="dim">:</span> <span class="bright">(info)</span> <span class="dim">=></span> <span class="bright">console.log</span><span class="dim">(</span><span class="bright">info.url</span><span class="dim">)</span>')
+        addLine('  <span class="dim">})</span>')
+        addEmpty()
+
+        addLine('<span class="dim">License: MIT &middot; Author: Chris Breuer &lt;chris@stacksjs.com&gt;</span>')
+      },
+
+      server() {
+        addLine('<span class="info">Starting tunnel server...</span>')
+        setTimeout(() => {
+          addLine('<span class="success">  Tunnel server running!</span>')
+          addEmpty()
+          addLine('  <span class="dim">Listening on:</span>  <span class="bright">0.0.0.0:3000</span>')
+          addLine('  <span class="dim">Domain:</span>       <span class="bright">localhost</span>')
+          addLine('  <span class="dim">Health:</span>       <span class="success">http://localhost:3000/health</span>')
+          addLine('  <span class="dim">Metrics:</span>      <span class="success">http://localhost:3000/metrics</span>')
+          addEmpty()
+          addLine('<span class="dim">Waiting for tunnel clients...</span>')
+          scrollToBottom()
+        }, 800)
+      },
+
+      status() {
+        addLine('<span class="info">Checking server status...</span>')
+        setTimeout(() => {
+          addLine('<span class="success">  Server is online</span>')
+          addEmpty()
+          addLine('  <span class="dim">Uptime:</span>          <span class="bright">3d 14h 22m</span>')
+          addLine('  <span class="dim">Active tunnels:</span>  <span class="bright">12</span>')
+          addLine('  <span class="dim">Total served:</span>    <span class="bright">1,847</span>')
+          addLine('  <span class="dim">Bandwidth:</span>       <span class="bright">2.4 GB</span>')
+          addLine('  <span class="dim">Latency:</span>         <span class="bright">14ms</span>')
+          scrollToBottom()
+        }, 600)
+      },
+
+      deploy() {
+        addLine('<span class="info">Deploying to AWS EC2...</span>')
+        const steps = [
+          { delay: 500, html: '  <span class="dim">[1/6]</span> Creating security group...' },
+          { delay: 1200, html: '  <span class="success">\u2713</span> Security group created' },
+          { delay: 1800, html: '  <span class="dim">[2/6]</span> Launching EC2 instance (t3.micro)...' },
+          { delay: 3000, html: '  <span class="success">\u2713</span> Instance launched (i-0a1b2c3d4e5f)' },
+          { delay: 3500, html: '  <span class="dim">[3/6]</span> Allocating Elastic IP...' },
+          { delay: 4200, html: '  <span class="success">\u2713</span> Elastic IP: 52.14.88.201' },
+          { delay: 4600, html: '  <span class="dim">[4/6]</span> Configuring DNS (Route53)...' },
+          { delay: 5400, html: '  <span class="success">\u2713</span> *.tunnel.example.com \u2192 52.14.88.201' },
+          { delay: 5800, html: '  <span class="dim">[5/6]</span> Installing tunnel server...' },
+          { delay: 7000, html: '  <span class="success">\u2713</span> Server installed and running' },
+          { delay: 7400, html: '  <span class="dim">[6/6]</span> Configuring SSL (Caddy + Porkbun)...' },
+          { delay: 8500, html: '  <span class="success">\u2713</span> SSL configured and active' },
+          { delay: 8800, html: '' },
+          { delay: 9000, html: '<span class="success">  Deployment complete!</span>' },
+          { delay: 9200, html: '  <span class="dim">Server URL:</span> <span class="success">https://tunnel.example.com</span>' },
+          { delay: 9400, html: '  <span class="dim">Connect:</span>    <span class="help-example"><span class="dollar">$</span> localtunnels start --server tunnel.example.com</span>' },
+        ]
+
+        steps.forEach(step => {
+          setTimeout(() => {
+            if (step.html === '') addEmpty()
+            else addLine(step.html)
+            scrollToBottom()
+          }, step.delay)
+        })
+      },
+
+      clear() {
+        const header = output.querySelector('.ascii-art')
+        const tagline = output.querySelector('.tagline')
+        const versionInfo = output.querySelector('.version-info')
+
+        output.innerHTML = ''
+        if (header) output.appendChild(header)
+        if (tagline) output.appendChild(tagline)
+        if (versionInfo) output.appendChild(versionInfo)
+        addEmpty()
+      },
+
+      neofetch() {
+        addLine('<span class="success">        .--.</span>          <span class="bright">localtunnels</span> <span class="dim">@</span> <span class="bright">v0.2.7</span>')
+        addLine('<span class="success">       |o_o |</span>         <span class="dim">-----------</span>')
+        addLine('<span class="success">       |:_/ |</span>         <span class="cyan">Runtime:</span>   <span class="bright">Bun</span>')
+        addLine('<span class="success">      //   \\ \\</span>        <span class="cyan">Protocol:</span>  <span class="bright">WebSocket</span>')
+        addLine('<span class="success">     (|     | )</span>       <span class="cyan">License:</span>   <span class="bright">MIT</span>')
+        addLine('<span class="success">    /\'\\_   _/`\\</span>      <span class="cyan">Platform:</span>  <span class="bright">' + navigator.platform + '</span>')
+        addLine('<span class="success">    \\___)=(___/</span>      <span class="cyan">Max Conn:</span>  <span class="bright">10,000</span>')
+        addLine('                       <span class="cyan">Payload:</span>   <span class="bright">64MB</span>')
+      },
+    }
+
+    // Handle input
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const cmd = input.value.trim()
+        input.value = ''
+
+        if (cmd) {
+          commandHistory.unshift(cmd)
+          historyIndex = -1
+          addPrompt(cmd)
+
+          const handler = commands[cmd.toLowerCase().split(' ')[0]]
+          if (handler) {
+            handler()
+          } else if (cmd.toLowerCase() === 'ls') {
+            addLine('<span class="bright">bin/</span>  <span class="bright">src/</span>  <span class="bright">test/</span>  <span class="bright">docs/</span>  <span class="dim">package.json</span>  <span class="dim">tunnel.config.ts</span>  <span class="dim">README.md</span>')
+          } else if (cmd.toLowerCase() === 'whoami') {
+            addLine('<span class="bright">tunnel-user</span>')
+          } else if (cmd.toLowerCase() === 'date') {
+            addLine(`<span class="bright">${new Date().toString()}</span>`)
+          } else if (cmd.toLowerCase() === 'exit') {
+            addLine('<span class="dim">Goodbye.</span>')
+            setTimeout(() => {
+              document.body.style.opacity = '0'
+              document.body.style.transition = 'opacity 0.5s'
+            }, 300)
+          } else {
+            addLine(`<span class="error">command not found:</span> <span class="bright">${escapeHtml(cmd)}</span>`)
+            addLine('<span class="dim">Type <span class="bright">help</span> to see available commands</span>')
+          }
+          addEmpty()
+          scrollToBottom()
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (historyIndex < commandHistory.length - 1) {
+          historyIndex++
+          input.value = commandHistory[historyIndex]
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        if (historyIndex > 0) {
+          historyIndex--
+          input.value = commandHistory[historyIndex]
+        } else {
+          historyIndex = -1
+          input.value = ''
+        }
+      } else if (e.key === 'Tab') {
+        e.preventDefault()
+        const partial = input.value.toLowerCase()
+        const cmds = Object.keys(commands)
+        const match = cmds.find(c => c.startsWith(partial))
+        if (match) input.value = match
+      } else if (e.key === 'l' && e.ctrlKey) {
+        e.preventDefault()
+        commands.clear()
+      }
+    })
+
+    // Focus input on click anywhere
+    document.addEventListener('click', () => input.focus())
+    document.addEventListener('keydown', (e) => {
+      if (e.target !== input && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        input.focus()
+      }
+    })
+  </script>
+</body>
+</html>
