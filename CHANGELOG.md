@@ -1,6 +1,25 @@
 # Changelog
 
 
+## v0.2.6...main
+
+[compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.6...main)
+
+### 🚀 Enhancements
+
+- Add `manageHosts` ([46ddef0](https://github.com/stacksjs/localtunnels/commit/46ddef0))
+
+### 🏡 Chore
+
+- Update docs ([1d7ca85](https://github.com/stacksjs/localtunnels/commit/1d7ca85))
+- Add bun exports ([df53461](https://github.com/stacksjs/localtunnels/commit/df53461))
+- Wip ([f6f7d23](https://github.com/stacksjs/localtunnels/commit/f6f7d23))
+- Wip ([fac7dcd](https://github.com/stacksjs/localtunnels/commit/fac7dcd))
+
+### ❤️ Contributors
+
+- Chris ([@chrisbbreuer](https://github.com/chrisbbreuer))
+
 ## v0.2.5...main
 
 [compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.5...main)
