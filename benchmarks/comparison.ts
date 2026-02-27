@@ -2,7 +2,7 @@
  * Cross-tool comparison benchmarks.
  *
  * Compares localtunnels against other popular tunneling solutions.
- * Each competitor is tested if its CLI binary is available on the system.
+ * Each tool is tested if its CLI binary is available on the system.
  * If not installed, the benchmark is skipped with a note.
  *
  * Tested tools:
@@ -114,7 +114,7 @@ if (check.status !== 200) {
   process.exit(1)
 }
 
-// ─── Setup: Start competitor tunnels ─────────────────────────────────────────
+// ─── Setup: Start external tunnels ─────────────────────────────────────────
 
 interface TunnelProcess {
   name: string
@@ -287,7 +287,7 @@ async function setupBore(): Promise<TunnelProcess> {
   return entry
 }
 
-// Start all competitor tunnels
+// Start all external tunnels
 const [cloudflaredTunnel, ngrokTunnel, boreTunnel] = await Promise.all([
   setupCloudflared(),
   setupNgrok(),
@@ -671,4 +671,4 @@ for (const t of tunnelProcesses) {
   }
 }
 
-console.log('\nAll competitor processes stopped.')
+console.log('\nAll external processes stopped.')

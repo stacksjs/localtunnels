@@ -173,9 +173,9 @@ bun benchmarks/comparison.ts     # Cross-tool comparison
 
 ### Results
 
-_Measured on Apple M3 Pro, bun 1.3.10 (arm64-darwin). Competitor tools: cloudflared 2026.2.0, ngrok 3.36.1, bore-cli 0.6.0, frpc 0.67.0._
+_Measured on Apple M3 Pro, bun 1.3.10 (arm64-darwin). Other tools tested: cloudflared 2026.2.0, ngrok 3.36.1, bore-cli 0.6.0, frpc 0.67.0._
 
-#### localtunnels vs Competitors — Request Forwarding
+#### localtunnels vs Alternatives — Request Forwarding
 
 Real end-to-end request forwarding through each tool's tunnel. localtunnels runs on localhost, bore routes through bore.pub.
 
@@ -211,7 +211,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | **localtunnels** | **592.58 µs** | 5.48x |
 | **bore** | 188.46 ms | 1,744x |
 
-#### localtunnels vs Competitors — Startup Time
+#### localtunnels vs Alternatives — Startup Time
 
 | Tool | Time to tunnel ready |
 |---|---|
@@ -219,7 +219,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | **bore** | 195 ms |
 | **Cloudflare Tunnels** | 3,969 ms |
 
-#### localtunnels vs Competitors — Subdomain Generation
+#### localtunnels vs Alternatives — Subdomain Generation
 
 | Tool | Strategy | Example Output | avg | vs localtunnels |
 |---|---|---|---|---|
@@ -230,7 +230,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | **bore** | Short hex | `df28e3`, `1cb723`, `06189e` | 191.94 ns | 63.98x slower |
 | **ngrok** | Random hex | `c2a8b92e`, `5c219911`, `65a2aba4` | 279.09 ns | 93.03x slower |
 
-#### localtunnels vs Competitors — ID Generation
+#### localtunnels vs Alternatives — ID Generation
 
 | Tool | Strategy | avg | vs fastest |
 |---|---|---|---|
@@ -239,7 +239,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | **localtunnels** | `crypto.randomUUID().substring()` | 42.42 ns | 1.91x |
 | **bore** | `crypto.getRandomValues` | 358.60 ns | 16.16x |
 
-#### localtunnels vs Competitors — Protocol Overhead
+#### localtunnels vs Alternatives — Protocol Overhead
 
 localtunnels uses WebSocket + JSON. bore and frp use binary protocols. This measures per-message encode/decode cost.
 
@@ -250,7 +250,7 @@ localtunnels uses WebSocket + JSON. bore and frp use binary protocols. This meas
 | **bore / frp** | Binary header decode | 176.33 ns | 1.43x |
 | **localtunnels** | JSON parse | 434.87 ns | 3.53x |
 
-#### localtunnels vs Competitors — State Machine
+#### localtunnels vs Alternatives — State Machine
 
 | Tool | Strategy | avg | vs fastest |
 |---|---|---|---|

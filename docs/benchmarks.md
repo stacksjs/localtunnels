@@ -384,11 +384,11 @@ Request latency remains flat regardless of the number of active tunnel connectio
 
 ### Cross-Tool Comparison
 
-The comparison suite benchmarks localtunnels against its competitors with real, running tunnels. Each tool is started, a tunnel is established, and requests are forwarded through each tool's tunnel infrastructure. The benchmark auto-detects which tools are installed and includes them in the results.
+The comparison suite benchmarks localtunnels against other popular tunneling tools with real, running tunnels. Each tool is started, a tunnel is established, and requests are forwarded through each tool's tunnel infrastructure. The benchmark auto-detects which tools are installed and includes them in the results.
 
 _Tested with: cloudflared 2026.2.0, ngrok 3.36.1, bore-cli 0.6.0, frpc 0.67.0. localtunnels runs on localhost. bore routes through bore.pub. cloudflared routes through Cloudflare's network. ngrok routes through ngrok's network._
 
-#### localtunnels vs Competitors — Request Forwarding
+#### localtunnels vs Alternatives — Request Forwarding
 
 Real end-to-end request forwarding through each tool's tunnel.
 
@@ -426,7 +426,7 @@ Real end-to-end request forwarding through each tool's tunnel.
 
 Note: bore's numbers include the round trip to bore.pub over the public internet. localtunnels runs entirely on localhost in self-hosted mode. cloudflared and ngrok tunnel URLs were not reachable during this benchmark run (cloudflared's quick tunnel URL had a DNS propagation delay; ngrok required auth token configuration). Install and configure these tools to include them in your own benchmark runs.
 
-#### localtunnels vs Competitors — Startup Time
+#### localtunnels vs Alternatives — Startup Time
 
 Time from process start to tunnel ready and accepting connections.
 
@@ -438,7 +438,7 @@ Time from process start to tunnel ready and accepting connections.
 
 localtunnels starts in microseconds because it's an in-process Bun server. bore and cloudflared are external processes that must initialize, connect to their relay servers, and register tunnels.
 
-#### localtunnels vs Competitors — Subdomain Generation
+#### localtunnels vs Alternatives — Subdomain Generation
 
 Each tool uses a different strategy to generate tunnel subdomains.
 
@@ -465,7 +465,7 @@ Each tool uses a different strategy to generate tunnel subdomains.
 | **bore** | Short hex | 191.94 ns | 63.98x slower |
 | **ngrok** | Random hex | 279.09 ns | 93.03x slower |
 
-#### localtunnels vs Competitors — ID Generation
+#### localtunnels vs Alternatives — ID Generation
 
 Each tool uses a different strategy to generate connection/request IDs.
 
@@ -476,7 +476,7 @@ Each tool uses a different strategy to generate connection/request IDs.
 | **localtunnels** | `crypto.randomUUID().substring()` | 42.42 ns | 1.91x |
 | **bore** | `crypto.getRandomValues` (8 bytes) | 358.60 ns | 16.16x |
 
-#### localtunnels vs Competitors — Protocol Overhead
+#### localtunnels vs Alternatives — Protocol Overhead
 
 localtunnels uses WebSocket + JSON. bore and frp use binary protocols with fixed-size headers. This measures per-message encode/decode cost for a typical tunnel request.
 
@@ -489,7 +489,7 @@ localtunnels uses WebSocket + JSON. bore and frp use binary protocols with fixed
 
 localtunnels' JSON serialization is now faster than binary protocol encoding thanks to a leaner message format (counter IDs, no redundant URL field). JSON parsing is slower, but the difference is sub-microsecond.
 
-#### localtunnels vs Competitors — Payload Serialization
+#### localtunnels vs Alternatives — Payload Serialization
 
 localtunnels and ngrok use JSON for payload framing. bore uses raw binary. This measures serialization cost for a typical response payload (~1.4 KB).
 
@@ -500,7 +500,7 @@ localtunnels and ngrok use JSON for payload framing. bore uses raw binary. This 
 | **localtunnels / ngrok** (JSON approach) | `JSON.parse` | 2.49 µs | 12.75x |
 | **localtunnels / ngrok** (JSON approach) | `JSON.stringify` | 2.56 µs | 13.09x |
 
-#### localtunnels vs Competitors — State Machine
+#### localtunnels vs Alternatives — State Machine
 
 Each tool manages connection state differently. localtunnels uses simple string assignment. Go-based tools (frp, bore) typically use integer enums. Some tools use object-based state machines with transition tracking.
 
@@ -524,7 +524,7 @@ Measures the cost of creating the core objects used in every tunnel request.
 ## Methodology
 
 - localtunnels benchmarks (utils, connection, throughput, latency, scalability) run entirely on localhost with no external network hops.
-- Cross-tool comparison benchmarks start real tunnels through each tool's infrastructure. localtunnels runs on localhost, while bore routes through bore.pub, cloudflared through Cloudflare's network, and ngrok through ngrok's network. This means competitor results include real internet round-trip times.
+- Cross-tool comparison benchmarks start real tunnels through each tool's infrastructure. localtunnels runs on localhost, while bore routes through bore.pub, cloudflared through Cloudflare's network, and ngrok through ngrok's network. This means results for those tools include real internet round-trip times.
 - Each benchmark is run multiple times by mitata with automatic warmup and statistical analysis.
 - Results include min, max, avg, p75, and p99 timing.
 - Boxplot groups show the full distribution of measured times.
