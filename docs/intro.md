@@ -8,9 +8,29 @@
 
 - Simple, lightweight local tunnel
 - Security built-in, including HTTPS
+- Smart subdomains _(APP_NAME-aware, memorable random names, auto-collision handling)_
+- Auto DNS resolution _(bypasses broken system DNS on macOS `.dev` TLD)_
 - IAC, self-hostable _(via AWS)_
-- Custom subdomains
 - CLI & Library
+
+## Quick Start
+
+```bash
+# Install
+bun install -d localtunnels
+
+# Expose local port 3000
+localtunnels start --port 3000
+```
+
+```
+  Connecting to localtunnel.dev...
+
+  Public:     https://swift-fox.localtunnel.dev
+  Forwarding: https://swift-fox.localtunnel.dev -> http://localhost:3000
+
+  Press Ctrl+C to stop sharing
+```
 
 ## Changelog
 

@@ -14,8 +14,9 @@
 
 - Simple, lightweight local tunnel
 - Security built-in, including HTTPS
+- Smart subdomains _(APP_NAME-aware, memorable random names, auto-collision handling)_
+- Auto DNS resolution _(bypasses broken system DNS on macOS `.dev` TLD)_
 - IAC, self-hostable _(via AWS)_
-- Custom subdomains
 - CLI & Library
 
 ## Install
@@ -23,13 +24,6 @@
 ```sh
 bun install -d localtunnels
 ```
-
-<!-- _Alternatively, you can install:_
-
-```sh
-brew install localtunnels # wip
-pkgx install localtunnels # wip
-``` -->
 
 ## Get Started
 
@@ -40,50 +34,125 @@ There are two ways of using this local tunnel: _as a library or as a CLI._
 Given the npm package is installed:
 
 ```ts
-import type { LocalTunnelConfig } from 'localtunnels'
 import { startLocalTunnel } from 'localtunnels'
 
-const config: LocalTunnelConfig = {
-  from: 'localhost:5173',
-  domain: 'stacksjs.dev', // optional, defaults to the stacksjs.dev domain
-  subdomain: 'test', // optional, uses a random subdomain by default
-  verbose: true, // optional, defaults to false
-}
+const client = await startLocalTunnel({
+  port: 3000,
+  // subdomain: 'myapp', // optional, see Subdomains below
+  // verbose: true, // optional
+})
 
-startLocalTunnel(config)
+console.log(`Tunnel URL: ${client.getTunnelUrl()}`)
+
+// later...
+client.disconnect()
 ```
 
-You may als use a configuration file:
+Or use the `TunnelClient` class directly:
 
 ```ts
-// tunnel.config.{ts,js}
-import type { LocalTunnelConfig } from '@stacksjs/localtunnels'
+import { TunnelClient } from 'localtunnels'
 
-const config: LocalTunnelConfig = {
-  from: 'localhost:5173',
-  domain: 'stacksjs.dev', // optional, defaults to the stacksjs.dev domain
-  subdomain: 'test', // optional, uses a random subdomain by default
-  verbose: true, // optional, defaults to false
-}
+const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+})
 
-export default config
-```
+client.on('connected', (info) => {
+  console.log(`Public URL: ${info.url}`)
+})
 
-_Then run:_
-
-```sh
-./localtunnels start
+await client.connect()
 ```
 
 ### CLI
 
 ```sh
-localtunnels start --from localhost:5173 --subdomain test --verbose
-localtunnels --help
-localtunnels --version
+# Expose local port 3000 (default)
+localtunnels start
+
+# Expose a specific port
+localtunnels start --port 8080
+
+# Request a specific subdomain
+localtunnels start --port 3000 --subdomain myapp
+
+# Use a custom tunnel server
+localtunnels start --port 3000 --server mytunnel.example.com
+
+# Disable auto DNS resolution
+localtunnels start --port 3000 --no-manage-hosts
+
+# Show all requests
+localtunnels start --port 3000 --verbose
 ```
 
-To learn more, head over to the [documentation](https://localtunnels.sh/).
+Output:
+
+```
+  Connecting to localtunnel.dev...
+
+  Public:     https://swift-fox.localtunnel.dev
+  Forwarding: https://swift-fox.localtunnel.dev -> http://localhost:3000
+
+  Press Ctrl+C to stop sharing
+```
+
+## Subdomains
+
+localtunnels uses a smart subdomain resolution chain:
+
+1. **Explicit flag**: `--subdomain myapp` or `subdomain: 'myapp'` in code
+2. **`APP_NAME` env var**: automatically slugified _(e.g. `My Cool App` becomes `my-cool-app`)_
+3. **Random memorable name**: adjective-noun combos like `swift-fox`, `bold-comet`, `lazy-elk`
+
+### Collision Handling
+
+If a subdomain is already in use by another client, localtunnels automatically appends an incrementing suffix:
+
+- `myapp` is taken -> tries `myapp-2`
+- `myapp-2` is taken -> tries `myapp-3`
+- and so on...
+
+This happens transparently — no crashes, no manual intervention needed.
+
+### Examples
+
+```sh
+# Uses APP_NAME env var if set
+APP_NAME="My App" localtunnels start --port 3000
+# -> https://my-app.localtunnel.dev
+
+# Explicit subdomain
+localtunnels start --port 3000 --subdomain demo
+# -> https://demo.localtunnel.dev
+
+# Random memorable name (no APP_NAME, no --subdomain)
+localtunnels start --port 3000
+# -> https://bold-comet.localtunnel.dev
+```
+
+## DNS Resolution
+
+On some machines (especially macOS with `.dev` TLD), the system DNS resolver can't reach `localtunnel.dev` even though tools like `dig` and `nslookup` work fine. localtunnels detects this automatically and resolves the server IP via DNS-over-HTTPS (Cloudflare) or `dig @8.8.8.8`, then connects directly to the IP.
+
+This is on by default. Disable with `--no-manage-hosts` or `manageHosts: false`.
+
+## Self-Hosting
+
+Start your own tunnel server:
+
+```sh
+localtunnels server --port 8080 --domain mytunnel.example.com
+```
+
+Or deploy to AWS:
+
+```sh
+localtunnels deploy --domain mytunnel.example.com --key-name my-keypair
+```
 
 ## Testing
 

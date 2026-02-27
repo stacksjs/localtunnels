@@ -1,183 +1,111 @@
 # Custom Subdomains
 
-Custom subdomains allow you to choose a memorable, consistent URL for your tunnel instead of using a randomly generated one. This makes it easier to share URLs and configure webhooks that persist across tunnel restarts.
+Custom subdomains let you choose a consistent, memorable URL for your tunnel instead of using a randomly generated one.
 
-## Why Use Custom Subdomains?
+## Why Custom Subdomains?
 
 - **Consistent URLs**: Keep the same URL across tunnel sessions
-- **Easy to Remember**: Use meaningful names like `my-app.tunnels.dev`
-- **Webhook Friendly**: No need to update webhook URLs when restarting
+- **Easy to remember**: Use meaningful names like `myapp.localtunnel.dev`
+- **Webhook friendly**: No need to update webhook URLs when restarting
 - **Professional**: Share clean URLs with clients and teammates
 
 ## Using Custom Subdomains
 
-### CLI Usage
-
-Specify your preferred subdomain with the `--subdomain` flag:
+### CLI
 
 ```bash
-localtunnel start --from localhost:3000 --subdomain my-app
+localtunnels start --port 3000 --subdomain myapp
+# -> https://myapp.localtunnel.dev
 ```
 
-This will create a tunnel at `my-app.tunnels.dev` (or your configured domain).
+### Library
 
-### Library Usage
-
-Set the subdomain in your TunnelClient configuration:
-
-```typescript
+```ts
 import { TunnelClient } from 'localtunnels'
 
 const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
   localPort: 3000,
-  subdomain: 'my-app',
+  subdomain: 'myapp',
 })
 
 await client.connect()
-// Your tunnel is now available at my-app.tunnels.dev
+// -> https://myapp.localtunnel.dev
 ```
 
-### Configuration File
+### APP_NAME Environment Variable
 
-Define your subdomain in a configuration file for persistent settings:
-
-```typescript
-// tunnel.config.ts
-import type { LocalTunnelConfig } from 'localtunnels'
-
-const config: LocalTunnelConfig = {
-  from: 'localhost:3000',
-  subdomain: 'my-app',
-  verbose: true,
-}
-
-export default config
-```
-
-Then run:
+Set `APP_NAME` and localtunnels will automatically use it as the subdomain (slugified):
 
 ```bash
-localtunnel start
+APP_NAME="My Cool App" localtunnels start --port 3000
+# -> https://my-cool-app.localtunnel.dev
 ```
 
-## Subdomain Naming Rules
+This is useful in frameworks that already set `APP_NAME` — no extra configuration needed.
 
-When choosing a subdomain, follow these guidelines:
+| `APP_NAME` | Subdomain |
+|-----------|-----------|
+| `My Cool App` | `my-cool-app` |
+| `TrailBuddy` | `trailbuddy` |
+| `stacks.js` | `stacks-js` |
 
-- **Alphanumeric characters**: Use letters and numbers
-- **Hyphens allowed**: Separate words with hyphens (e.g., `my-cool-app`)
-- **Lowercase**: Subdomains are case-insensitive but conventionally lowercase
-- **Length limits**: Keep subdomains reasonably short (typically under 63 characters)
+## Automatic Collision Handling
 
-### Valid Examples
+If your chosen subdomain is already in use, localtunnels handles it automatically by appending `-2`, `-3`, etc.:
 
-```bash
-localtunnel start --subdomain my-app
-localtunnel start --subdomain staging-v2
-localtunnel start --subdomain client-demo-2024
+```
+myapp     -> taken by another client
+myapp-2   -> available, assigned to you
 ```
 
-### Invalid Examples
+This means you never need to worry about crashes or manual fallback logic. The client negotiates with the server over the existing WebSocket connection — no reconnection needed.
 
-```bash
-# Avoid these patterns
-localtunnel start --subdomain my_app        # underscores not recommended
-localtunnel start --subdomain my.app        # dots not allowed
-localtunnel start --subdomain -my-app       # can't start with hyphen
-```
-
-## Subdomain Availability
-
-If your chosen subdomain is already in use by another tunnel, you'll receive an error:
-
-```typescript
-import { TunnelClient } from 'localtunnels'
-
+```ts
 const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
   localPort: 3000,
-  subdomain: 'popular-name',
+  subdomain: 'myapp',
 })
 
-try {
-  await client.connect()
-} catch (error) {
-  console.error('Subdomain might be in use, try another one')
-}
-```
+await client.connect()
 
-### Handling Conflicts
-
-Consider these strategies for handling subdomain conflicts:
-
-```typescript
-import { TunnelClient } from 'localtunnels'
-
-async function connectWithFallback(preferredSubdomain: string) {
-  const subdomains = [
-    preferredSubdomain,
-    `${preferredSubdomain}-dev`,
-    `${preferredSubdomain}-${Date.now()}`,
-  ]
-
-  for (const subdomain of subdomains) {
-    try {
-      const client = new TunnelClient({
-        localPort: 3000,
-        subdomain,
-      })
-      await client.connect()
-      console.log(`Connected with subdomain: ${subdomain}`)
-      return client
-    } catch (error) {
-      console.log(`Subdomain ${subdomain} unavailable, trying next...`)
-    }
-  }
-
-  throw new Error('All subdomains unavailable')
-}
+// If 'myapp' was taken:
+console.log(client.getSubdomain()) // 'myapp-2'
+console.log(client.getTunnelUrl()) // 'https://myapp-2.localtunnel.dev'
 ```
 
 ## Environment-Based Subdomains
 
 Use environment variables for different environments:
 
-```typescript
-// tunnel.config.ts
-import type { LocalTunnelConfig } from 'localtunnels'
+```bash
+# Development
+APP_NAME="myapp-dev" localtunnels start --port 3000
 
-const env = process.env.NODE_ENV || 'development'
-const developer = process.env.USER || 'dev'
+# Staging
+APP_NAME="myapp-staging" localtunnels start --port 3000
 
-const config: LocalTunnelConfig = {
-  from: 'localhost:3000',
-  subdomain: `${developer}-${env}`,
-  verbose: env === 'development',
-}
-
-export default config
+# Or use --subdomain directly
+localtunnels start --port 3000 --subdomain myapp-$(whoami)
 ```
 
-This creates subdomains like `john-development` or `jane-staging`.
+## Subdomain Rules
 
-## Self-Hosted Subdomain Management
+Valid subdomains must be lowercase alphanumeric with optional hyphens:
 
-When running your own tunnel server, you have full control over subdomain management:
+```bash
+# Valid
+localtunnels start --subdomain myapp
+localtunnels start --subdomain my-cool-app
+localtunnels start --subdomain staging-v2
 
-```typescript
-import { TunnelServer } from 'localtunnels'
-
-const server = new TunnelServer({
-  port: 3000,
-  host: '0.0.0.0',
-  verbose: true,
-})
-
-// The server automatically manages subdomain routing
-await server.start()
+# Invalid
+localtunnels start --subdomain my_app       # underscores
+localtunnels start --subdomain -my-app      # leading hyphen
+localtunnels start --subdomain MY-APP       # uppercase
 ```
-
-## Next Steps
-
-- Configure [HTTPS Support](/features/https-support) for secure connections
-- Learn about [Self-Hosting](/features/self-hosting) for custom domains
-- Review [Advanced Configuration](/advanced/configuration) options

@@ -1,318 +1,198 @@
 # Troubleshooting
 
-This guide covers common issues and their solutions when using localtunnels.
+Common issues and their solutions when using localtunnels.
 
-## Connection Issues
+## DNS / Connection Issues
 
-### Connection Timeout
-
-**Symptoms:**
-
-- Connection attempts fail with timeout errors
-- Slow connection establishment
-- Intermittent connection failures
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  timeout: {
-    connect: 10000, // Increase connection timeout
-    request: 30000, // Adjust request timeout
-    response: 30000 // Adjust response timeout
-  }
-})
-```
-
-### Connection Refused
+### Connection Timeout on macOS (`.dev` TLD)
 
 **Symptoms:**
 
-- "Connection refused" errors
-- Unable to establish connection
-- Port already in use
+- `localtunnels start` hangs at "Connecting..." then fails with "Connection timeout"
+- `dig localtunnel.dev` works, but `curl https://localtunnel.dev` times out
+- Only happens on macOS
 
-**Solutions:**
+**Cause:**
 
-1. Check if the port is already in use:
+macOS has a built-in resolver override for `.dev` domains at `/etc/resolver/dev` that points to a local DNS server (often from Docker Desktop or other tools). This overrides `/etc/hosts` and the system DNS resolver, but `dig`/`nslookup` use their own resolvers so they work fine.
+
+**Solution:**
+
+localtunnels handles this automatically. When the system resolver can't reach the tunnel server, it:
+
+1. Resolves the IP via DNS-over-HTTPS (Cloudflare) or `dig @8.8.8.8`
+2. Connects the WebSocket directly to the IP with the correct Host header
+
+This is enabled by default (`manageHosts: true`). If you disabled it, re-enable:
 
 ```bash
-# Check if port is in use
+# manageHosts is on by default, just don't pass --no-manage-hosts
+localtunnels start --port 3000
+```
+
+To verify your system has this issue:
+
+```bash
+# This works (uses its own resolver):
+dig localtunnel.dev
+
+# This times out (uses system resolver):
+curl -sk https://localtunnel.dev/status
+
+# This works (bypasses DNS):
+curl -sk --resolve 'localtunnel.dev:443:18.210.211.229' https://localtunnel.dev/status
+
+# Check for resolver override:
+cat /etc/resolver/dev
+```
+
+### Connection Timeout (General)
+
+**Symptoms:**
+
+- Connection fails with "Connection timeout"
+- Not macOS-specific
+
+**Solutions:**
+
+1. Check if the tunnel server is running:
+
+```bash
+localtunnels status --server localtunnel.dev
+```
+
+2. Increase the timeout:
+
+```bash
+localtunnels start --port 3000 --verbose
+```
+
+```ts
+const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+  timeout: 30000, // 30 seconds
+})
+```
+
+3. Check your firewall/proxy settings — WebSocket connections on port 443 need to be allowed.
+
+## Subdomain Issues
+
+### Subdomain Already in Use
+
+**Symptoms:**
+
+- Wanted `myapp` but got `myapp-2`
+
+**Explanation:**
+
+Another client already has `myapp` registered on the server. localtunnels automatically appends `-2`, `-3`, etc. to find a free subdomain. Check the actual subdomain:
+
+```ts
+await client.connect()
+console.log(client.getSubdomain()) // might be 'myapp-2'
+console.log(client.getTunnelUrl()) // https://myapp-2.localtunnel.dev
+```
+
+### Invalid Subdomain
+
+**Symptoms:**
+
+- Error: "Invalid subdomain format"
+
+**Solution:**
+
+Subdomains must be lowercase alphanumeric with optional hyphens, not starting/ending with a hyphen:
+
+```bash
+# Valid
+localtunnels start --subdomain my-app
+localtunnels start --subdomain staging-v2
+
+# Invalid
+localtunnels start --subdomain MY-APP       # uppercase
+localtunnels start --subdomain my_app       # underscores
+localtunnels start --subdomain -my-app      # leading hyphen
+```
+
+## Local Server Issues
+
+### "Bad Gateway" Responses
+
+**Symptoms:**
+
+- Tunnel connects fine, but requests return 502 errors
+
+**Solution:**
+
+Make sure your local server is running on the port you specified:
+
+```bash
+# If you're tunneling port 3000, make sure something is listening there
+curl http://localhost:3000
+```
+
+### Request Forwarding Fails
+
+**Symptoms:**
+
+- Requests reach the tunnel but don't arrive at your local server
+
+**Solutions:**
+
+1. Check the local host/port settings:
+
+```bash
+localtunnels start --port 3000 --host localhost --verbose
+```
+
+2. Try `127.0.0.1` instead of `localhost`:
+
+```bash
+localtunnels start --port 3000 --host 127.0.0.1
+```
+
+## Self-Hosted Server Issues
+
+### Port Already in Use
+
+```bash
+# Find what's using the port
 lsof -i :3000
-# Kill process using port
-kill -9 <PID>
+
+# Use a different port
+localtunnels server --port 8080
 ```
 
-2. Verify firewall settings:
+### Clients Can't Connect
 
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  host: '0.0.0.0', // Listen on all interfaces
-  firewall: {
-    allowedPorts: [3000],
-    allowedIps: ['0.0.0.0/0']
-  }
-})
+1. Check firewall rules — ports 80/443 (or your custom port) must be open
+2. Verify the server is listening on `0.0.0.0` (not just `localhost`):
+
+```bash
+localtunnels server --host 0.0.0.0 --port 3000
 ```
 
-## SSL/TLS Issues
+3. Check the server status:
 
-### Certificate Errors
-
-**Symptoms:**
-
-- SSL handshake failures
-- Certificate validation errors
-- Mixed content warnings
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  secure: true,
-  ssl: {
-    key: readFileSync('/path/to/private.key'),
-    cert: readFileSync('/path/to/certificate.crt'),
-    ca: readFileSync('/path/to/ca.crt'),
-    rejectUnauthorized: true
-  }
-})
+```bash
+curl http://your-server:3000/status
 ```
 
-### SSL Handshake Failures
+## Debugging
 
-**Symptoms:**
+Enable verbose mode to see all messages:
 
-- SSL handshake timeout
-- Protocol version mismatch
-- Cipher suite issues
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  secure: true,
-  ssl: {
-    key: readFileSync('/path/to/private.key'),
-    cert: readFileSync('/path/to/certificate.crt'),
-    ciphers: [
-      'TLS_AES_128_GCM_SHA256',
-      'TLS_AES_256_GCM_SHA384',
-      'TLS_CHACHA20_POLY1305_SHA256'
-    ].join(':'),
-    minVersion: 'TLSv1.2'
-  }
-})
+```bash
+localtunnels start --port 3000 --verbose
 ```
 
-## Performance Issues
-
-### High Memory Usage
-
-**Symptoms:**
-
-- Memory leaks
-- Slow performance
-- Out of memory errors
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  memory: {
-    maxHeapSize: 1024 * 1024 * 1024, // 1GB
-    maxOldSpaceSize: 512 * 1024 * 1024, // 512MB
-    gc: {
-      enabled: true,
-      interval: 30000
-    }
-  }
-})
-```
-
-### Slow Response Times
-
-**Symptoms:**
-
-- High latency
-- Slow request processing
-- Connection delays
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  performance: {
-    connectionPool: {
-      min: 2,
-      max: 10,
-      idleTimeoutMillis: 30000
-    },
-    cache: {
-      enabled: true,
-      ttl: 3600
-    }
-  }
-})
-```
-
-## WebSocket Issues
-
-### WebSocket Connection Failures
-
-**Symptoms:**
-
-- WebSocket connection drops
-- Connection timeouts
-- Protocol errors
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  websocket: {
-    pingInterval: 30000,
-    pingTimeout: 5000,
-    maxPayload: 1024 * 1024, // 1MB
-    perMessageDeflate: true
-  }
-})
-```
-
-### WebSocket Message Issues
-
-**Symptoms:**
-
-- Message delivery failures
-- Message corruption
-- Protocol violations
-
-**Solutions:**
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  websocket: {
-    messageValidation: true,
-    maxMessageSize: 1024 * 1024, // 1MB
-    compression: {
-      enabled: true,
-      threshold: 1024 // Compress messages > 1KB
-    }
-  }
-})
-```
-
-## Logging and Debugging
-
-### Enable Debug Logging
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  logging: {
-    level: 'debug',
-    format: 'json',
-    file: '/path/to/debug.log'
-  }
-})
-```
-
-### Custom Error Handling
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  errorHandling: {
-    onError: (error) => {
-      console.error('Server error:', error)
-      // Custom error handling
-    },
-    onWarning: (warning) => {
-      console.warn('Server warning:', warning)
-      // Custom warning handling
-    }
-  }
-})
-```
-
-## Common Error Codes
-
-1. **Connection Errors**
-   - ECONNREFUSED: Connection refused
-   - ETIMEDOUT: Connection timeout
-   - ECONNRESET: Connection reset
-   - EADDRINUSE: Address already in use
-
-2. **SSL/TLS Errors**
-   - CERT_HAS_EXPIRED: Certificate expired
-   - CERT_NOT_YET_VALID: Certificate not valid yet
-   - DEPTH_ZERO_SELF_SIGNED_CERT: Self-signed certificate
-   - UNABLE_TO_VERIFY_LEAF_SIGNATURE: Unable to verify certificate chain
-
-3. **WebSocket Errors**
-   - WS_ERR_INVALID_CLOSE_CODE: Invalid close code
-   - WS_ERR_INVALID_UTF8: Invalid UTF-8 sequence
-   - WS_ERR_UNEXPECTED_RESPONSE: Unexpected response
-   - WS_ERR_HANDSHAKE_UNEXPECTED: Unexpected handshake
-
-## Diagnostic Tools
-
-### Health Check
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  healthCheck: {
-    enabled: true,
-    path: '/health',
-    interval: 30000,
-    timeout: 5000
-  }
-})
-```
-
-### Performance Monitoring
-
-```typescript
-const server = new TunnelServer({
-  port: 3000,
-  monitoring: {
-    enabled: true,
-    metrics: [
-      'responseTime',
-      'memoryUsage',
-      'connectionCount',
-      'errorRate'
-    ],
-    interval: 60000
-  }
-})
-```
-
-## Best Practices
-
-1. **Error Handling**
-   - Implement proper error handling
-   - Log all errors
-   - Monitor error rates
-   - Set up alerts
-
-2. **Monitoring**
-   - Enable health checks
-   - Monitor performance metrics
-   - Track error rates
-   - Set up logging
-
-3. **Debugging**
-   - Use debug logging
-   - Implement custom error handling
-   - Monitor system resources
-   - Track connection states
+This shows:
+- DNS resolution attempts and results
+- WebSocket connection lifecycle
+- All HTTP requests/responses forwarded through the tunnel
+- Subdomain negotiation (taken/retry)
+- Reconnection attempts

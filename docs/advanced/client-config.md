@@ -1,221 +1,198 @@
 # Client Configuration
 
-This guide covers advanced client configuration options and best practices for localtunnels.
+Advanced configuration options for the localtunnels client.
 
 ## Basic Configuration
 
-```typescript
+```ts
 import { TunnelClient } from 'localtunnels'
 
 const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
-  localPort: 8000,
-  localHost: 'localhost'
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+  localHost: 'localhost',
 })
 
 await client.connect()
 ```
 
-## Advanced Options
+## All Options
 
-### Connection Settings
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `host` | `string` | `'localhost'` | Tunnel server hostname |
+| `port` | `number` | `3000` | Tunnel server port |
+| `secure` | `boolean` | `false` | Use WSS/HTTPS |
+| `localPort` | `number` | `8000` | Local server port to forward to |
+| `localHost` | `string` | `'localhost'` | Local server host to forward to |
+| `subdomain` | `string` | auto | Requested subdomain |
+| `timeout` | `number` | `10000` | Connection timeout (ms) |
+| `maxReconnectAttempts` | `number` | `10` | Max reconnect attempts |
+| `verbose` | `boolean` | `false` | Enable debug logging |
+| `apiKey` | `string` | `''` | Server API key |
+| `manageHosts` | `boolean` | `true` | Auto DNS resolution |
+| `ssl` | `object` | - | TLS options |
 
-```typescript
+## Subdomain Configuration
+
+### Explicit Subdomain
+
+```ts
 const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
-  localPort: 8000,
-  localHost: 'localhost',
-  secure: true, // Use secure WebSocket
-  reconnect: {
-    retries: 5,
-    minTimeout: 1000,
-    maxTimeout: 5000
-  }
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+  subdomain: 'myapp',
 })
+
+await client.connect()
+// https://myapp.localtunnel.dev
+// (or https://myapp-2.localtunnel.dev if taken)
 ```
 
-### Custom Subdomain
+### APP_NAME Auto-Detection
 
-```typescript
+If no subdomain is specified, localtunnels checks the `APP_NAME` environment variable:
+
+```bash
+APP_NAME="My App" node my-script.js
+```
+
+```ts
+// No subdomain specified — uses APP_NAME
 const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
-  subdomain: 'myapp', // Request specific subdomain
-  onSubdomainConflict: (subdomain) => {
-    console.log(`Subdomain ${subdomain} is already in use`)
-  }
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+})
+
+await client.connect()
+// https://my-app.localtunnel.dev
+```
+
+### Random Names
+
+With no `subdomain` option and no `APP_NAME` env var, a memorable random name is generated:
+
+```ts
+const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+})
+
+await client.connect()
+console.log(client.getSubdomain()) // e.g. 'swift-fox', 'bold-comet'
+```
+
+## DNS Resolution
+
+On some machines (especially macOS), the system DNS resolver can't reach `.dev` domains. localtunnels detects this automatically and connects directly to the server IP.
+
+The resolution strategy:
+
+1. Try reaching the server normally (actual HTTP request)
+2. If unreachable, resolve IP via DNS-over-HTTPS (Cloudflare)
+3. Fallback to `dig @8.8.8.8`
+4. Connect WebSocket directly to the IP
+
+Disable with:
+
+```ts
+const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+  manageHosts: false, // disable DNS fallback
 })
 ```
 
 ## Event Handling
 
-### Connection Events
-
-```typescript
+```ts
 const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com'
-})
-
-client.on('connected', () => {
-  console.log('Connected to tunnel server')
-})
-
-client.on('disconnected', () => {
-  console.log('Disconnected from tunnel server')
-})
-
-client.on('error', (error) => {
-  console.error('Tunnel error:', error)
-})
-```
-
-### Request Events
-
-```typescript
-const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com'
-})
-
-client.on('request', (req) => {
-  console.log('Received request:', req.url)
-})
-
-client.on('response', (res) => {
-  console.log('Sent response:', res.statusCode)
-})
-```
-
-## Performance Tuning
-
-### Connection Pooling
-
-```typescript
-const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
-  pool: {
-    min: 2,
-    max: 10,
-    idleTimeoutMillis: 30000
-  }
-})
-```
-
-### Request Timeouts
-
-```typescript
-const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
-  timeout: {
-    connect: 5000,
-    request: 30000,
-    response: 30000
-  }
-})
-```
-
-## Security Configuration
-
-### SSL/TLS
-
-```typescript
-import { readFileSync } from 'node:fs'
-
-const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
+  host: 'localtunnel.dev',
+  port: 443,
   secure: true,
-  ssl: {
-    key: readFileSync('/path/to/private.key'),
-    cert: readFileSync('/path/to/certificate.crt'),
-    ca: readFileSync('/path/to/ca.crt')
-  }
+  localPort: 3000,
+})
+
+// Tunnel is active and registered with the server
+client.on('connected', (info) => {
+  console.log(`URL: ${info.url}`)
+  console.log(`Subdomain: ${info.subdomain}`)
+})
+
+// Tunnel disconnected
+client.on('disconnected', () => {
+  console.log('Disconnected')
+})
+
+// Attempting to reconnect
+client.on('reconnecting', (info) => {
+  console.log(`Reconnecting (${info.attempt}/${info.maxAttempts})`)
+})
+
+// HTTP request forwarded through tunnel
+client.on('request', (req) => {
+  console.log(`${req.method} ${req.url}`)
+})
+
+// Response sent back through tunnel
+client.on('response', (res) => {
+  console.log(`${res.status} (${res.size} bytes, ${res.duration}ms)`)
+})
+
+// Error occurred
+client.on('error', (err) => {
+  console.error(err.message)
+})
+
+await client.connect()
+```
+
+## Reconnection
+
+The client automatically reconnects with exponential backoff when the connection drops:
+
+```ts
+const client = new TunnelClient({
+  host: 'localtunnel.dev',
+  port: 443,
+  secure: true,
+  localPort: 3000,
+  maxReconnectAttempts: 10, // default
 })
 ```
 
-### Authentication
+To disable reconnection, call `disconnect()` which sets `shouldReconnect = false`.
 
-```typescript
-const client = new TunnelClient({
+## Using `startLocalTunnel()`
+
+For simpler use cases, the convenience function handles setup:
+
+```ts
+import { startLocalTunnel } from 'localtunnels'
+
+const client = await startLocalTunnel({
   port: 3000,
-  host: 'tunnel.example.com',
-  auth: {
-    username: 'user',
-    password: 'pass'
-  }
-})
-```
-
-## Monitoring and Logging
-
-### Verbose Logging
-
-```typescript
-const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
+  server: 'localtunnel.dev',
+  subdomain: 'myapp',
   verbose: true,
-  logLevel: 'debug' // 'error' | 'warn' | 'info' | 'debug'
+  manageHosts: true,
+  onConnect: (info) => console.log(`Active: ${info.url}`),
+  onRequest: (req) => console.log(`-> ${req.method} ${req.url}`),
+  onResponse: (res) => console.log(`<- ${res.status}`),
+  onError: (err) => console.error(err.message),
+  onReconnecting: (info) => console.log(`Reconnecting (${info.attempt})`),
 })
+
+// later...
+client.disconnect()
 ```
-
-### Custom Logging
-
-```typescript
-const client = new TunnelClient({
-  port: 3000,
-  host: 'tunnel.example.com',
-  logger: {
-    info: message => console.log(`[INFO] ${message}`),
-    error: message => console.error(`[ERROR] ${message}`),
-    debug: message => console.debug(`[DEBUG] ${message}`)
-  }
-})
-```
-
-## Best Practices
-
-1. **Connection Management**
-   - Implement proper error handling
-   - Use automatic reconnection
-   - Monitor connection health
-   - Handle disconnections gracefully
-
-2. **Security**
-   - Always use SSL/TLS in production
-   - Implement proper authentication
-   - Validate server certificates
-   - Keep credentials secure
-
-3. **Performance**
-   - Use connection pooling
-   - Set appropriate timeouts
-   - Monitor resource usage
-   - Implement proper error handling
-
-## Troubleshooting
-
-Common client issues and solutions:
-
-1. **Connection Issues**
-   - Check network connectivity
-   - Verify server availability
-   - Check firewall settings
-   - Verify SSL configuration
-
-2. **Performance Issues**
-   - Monitor connection pool usage
-   - Check timeout settings
-   - Verify network bandwidth
-   - Review error logs
-
-3. **Security Issues**
-   - Verify SSL certificates
-   - Check authentication
-   - Review security settings
-   - Monitor for suspicious activity
