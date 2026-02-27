@@ -91,14 +91,17 @@ cli
       })
 
       // Handle process signals for graceful shutdown
-      const cleanup = () => {
+      let shuttingDown = false
+      const cleanup = async () => {
+        if (shuttingDown) return
+        shuttingDown = true
         console.log('\n  Closing tunnel...')
-        client.disconnect()
+        await client.disconnect()
         process.exit(0)
       }
 
-      process.on('SIGINT', () => cleanup())
-      process.on('SIGTERM', () => cleanup())
+      process.on('SIGINT', () => { cleanup() })
+      process.on('SIGTERM', () => { cleanup() })
 
       // Set up event listeners
       client.on('request', (req) => {

@@ -10,8 +10,8 @@ type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl' | 'manageHosts'
 // Scalability limits
 const MAX_CONNECTIONS_PER_SUBDOMAIN = 5
 const MAX_TOTAL_CONNECTIONS = 10_000
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
-const IDLE_CLEANUP_INTERVAL_MS = 60 * 1000 // check every minute
+const IDLE_TIMEOUT_MS = 60 * 1000 // 1 minute
+const IDLE_CLEANUP_INTERVAL_MS = 15 * 1000 // check every 15 seconds
 const MAX_PAYLOAD_SIZE = 64 * 1024 * 1024 // 64MB
 
 interface WebSocketData {
@@ -244,7 +244,7 @@ export class TunnelServer extends EventEmitter {
           const stats = this.getStats()
           return new Response(JSON.stringify({
             status: 'ok',
-            version: '0.2.6',
+            version: '0.2.7',
             connections: this.activeConnections,
             totalConnections: this.totalConnections,
             activeSubdomains: this.subdomainSockets.size,
@@ -333,7 +333,7 @@ export class TunnelServer extends EventEmitter {
 
       websocket: {
         maxPayloadLength: MAX_PAYLOAD_SIZE,
-        idleTimeout: 120, // seconds - Bun auto-pings, closes if no pong in 120s
+        idleTimeout: 30, // seconds - Bun auto-pings, closes if no pong in 30s
         perMessageDeflate: true,
 
         message: (ws, message) => {
@@ -388,6 +388,16 @@ export class TunnelServer extends EventEmitter {
                 handler(data)
                 this.responseHandlers.delete(data.id)
               }
+            }
+            else if (data.type === 'disconnect') {
+              // Client is explicitly disconnecting — remove subdomain immediately
+              const sub = data.subdomain || ws.data.subdomain
+              if (sub) {
+                debugLog('server', `Client explicitly disconnecting: ${sub}`, this.options.verbose)
+                this.removeSocket(sub, ws)
+                ws.data.subdomain = '' // prevent double-remove in close handler
+              }
+              ws.close(1000, 'Client disconnected')
             }
             else if (data.type === 'ping') {
               ws.data.lastSeen = Date.now()
@@ -825,19 +835,43 @@ export class TunnelClient extends EventEmitter {
     }
   }
 
-  public disconnect(): void {
+  public async disconnect(): Promise<void> {
     this.shouldReconnect = false
     this.stopPing()
+
     if (this.ws) {
-      this.ws.close()
+      // Tell the server to remove our subdomain immediately.
+      // This is more reliable than relying on WebSocket close frames,
+      // because process.exit/SIGKILL can kill the process before the
+      // close handshake completes, leaving stale subdomain mappings.
+      if (this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({
+            type: 'disconnect',
+            subdomain: this.options.subdomain,
+          }))
+        }
+        catch { /* socket may already be closing */ }
+      }
+
+      // Wait for the WebSocket close frame to reach the server (max 500ms)
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 500)
+        this.ws!.addEventListener('close', () => {
+          clearTimeout(timeout)
+          resolve()
+        }, { once: true })
+        this.ws!.close()
+      })
       this.ws = null
     }
+
     this.state = 'disconnected'
     this.emit('disconnected')
 
-    // Clean up macOS resolver file (fire-and-forget)
+    // Clean up macOS resolver file
     if (this.resolverCreated) {
-      cleanupMacOSResolver(this.options.host, this.options.verbose).catch(() => {})
+      await cleanupMacOSResolver(this.options.host, this.options.verbose).catch(() => {})
     }
   }
 
