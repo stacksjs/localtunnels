@@ -90,7 +90,7 @@
   "devDependencies": {
     "@stacksjs/bunpress": "^0.1.1",
     "@stacksjs/clapp": "^0.2.0",
-    "better-dx": "^0.2.5",
+    "better-dx": "^0.2.6",
     "mitata": "^1.0.34"
   },
   "git-hooks": {
