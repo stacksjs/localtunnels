@@ -33,6 +33,7 @@ export class TunnelServer extends EventEmitter {
   private server: ReturnType<typeof Bun.serve> | null = null
   private options: ResolvedTunnelOptions
   private responseHandlers: Map<string, (response: any) => void> = new Map()
+  private responseTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map()
   private subdomainSockets: Map<string, Set<ServerWebSocket<WebSocketData>>> = new Map()
   private idleCleanupInterval: ReturnType<typeof setInterval> | null = null
   private activeConnections = 0
@@ -108,15 +109,12 @@ export class TunnelServer extends EventEmitter {
     const sockets = this.subdomainSockets.get(subdomain)
     if (!sockets || sockets.size === 0) return undefined
 
-    // Fast path: single socket (most common case)
+    // Find the first socket that is still open (readyState check)
+    // Bun ServerWebSocket doesn't expose readyState, so we rely on
+    // the close handler + removeSocket to keep the set clean.
+    // But as a safety measure, try sending and let the caller handle errors.
     const iter = sockets.values()
     const first = iter.next().value
-    if (sockets.size === 1) {
-      if (first?.data) first.data.lastSeen = Date.now()
-      return first
-    }
-
-    // Multiple sockets: pick first (Set iteration order = insertion order)
     if (first?.data) first.data.lastSeen = Date.now()
     return first
   }
@@ -170,6 +168,13 @@ export class TunnelServer extends EventEmitter {
     return new Promise<Response>((resolve) => {
       // Set up response handler
       this.responseHandlers.set(requestId, (responseData) => {
+        // Cancel the timeout — response arrived
+        const tid = this.responseTimeouts.get(requestId)
+        if (tid) {
+          clearTimeout(tid)
+          this.responseTimeouts.delete(requestId)
+        }
+
         const headers = new Headers(responseData.headers || {})
         // Remove headers that will be incorrect after body transformation
         headers.delete('content-encoding')
@@ -194,15 +199,26 @@ export class TunnelServer extends EventEmitter {
         }))
       })
 
-      socket.send(JSON.stringify(message))
+      // Send request to client — handle socket being closed mid-flight
+      try {
+        socket.send(JSON.stringify(message))
+      }
+      catch (err) {
+        this.responseHandlers.delete(requestId)
+        debugLog('server', `Failed to send request ${requestId}: ${err}`, this.options.verbose, 'error')
+        resolve(new Response('Tunnel client disconnected', { status: 502 }))
+        return
+      }
 
       // Set timeout for response
-      setTimeout(() => {
+      const tid = setTimeout(() => {
         if (this.responseHandlers.has(requestId)) {
           this.responseHandlers.delete(requestId)
+          this.responseTimeouts.delete(requestId)
           resolve(new Response('Gateway timeout - tunnel client did not respond', { status: 504 }))
         }
       }, this.options.timeout)
+      this.responseTimeouts.set(requestId, tid)
     })
   }
 
@@ -440,15 +456,20 @@ export class TunnelServer extends EventEmitter {
   private cleanupIdleConnections(): void {
     const now = Date.now()
     let cleaned = 0
+    // Collect sockets to remove first, then mutate — avoids modifying Set during iteration
+    const toRemove: Array<[string, ServerWebSocket<WebSocketData>]> = []
     for (const [subdomain, sockets] of this.subdomainSockets) {
       for (const socket of sockets) {
         if (now - socket.data.lastSeen > IDLE_TIMEOUT_MS) {
-          debugLog('server', `Closing idle connection for ${subdomain} (idle ${Math.round((now - socket.data.lastSeen) / 1000)}s)`, this.options.verbose)
-          socket.close(1000, 'Idle timeout')
-          this.removeSocket(subdomain, socket)
-          cleaned++
+          toRemove.push([subdomain, socket])
         }
       }
+    }
+    for (const [subdomain, socket] of toRemove) {
+      debugLog('server', `Closing idle connection for ${subdomain} (idle ${Math.round((now - socket.data.lastSeen) / 1000)}s)`, this.options.verbose)
+      socket.close(1000, 'Idle timeout')
+      this.removeSocket(subdomain, socket)
+      cleaned++
     }
     if (cleaned > 0) {
       debugLog('server', `Cleaned up ${cleaned} idle connections (${this.activeConnections} remaining)`, this.options.verbose)
@@ -456,18 +477,21 @@ export class TunnelServer extends EventEmitter {
   }
 
   private cleanupStaleHandlers(): void {
-    // Safety net: if response handlers accumulate beyond a threshold,
-    // the per-request timeouts may not be firing (e.g. timer GC).
+    // Safety net: clean up response handlers whose timeouts may have been GC'd.
+    // The responseTimeouts map tracks active timeouts — any handler without a
+    // matching timeout entry is orphaned and should be removed.
     let cleaned = 0
     for (const [id] of this.responseHandlers) {
-      // We can't easily track when the handler was created from the Map alone,
-      // but the timeout in forwardRequest already handles cleanup.
-      // This catches edge cases where the timeout timer was GC'd.
-      // Use a heuristic: if the response handler map is very large, something is wrong.
-      if (this.responseHandlers.size > 10_000) {
+      if (!this.responseTimeouts.has(id)) {
         this.responseHandlers.delete(id)
         cleaned++
-        if (cleaned >= 1000) break // batch cleanup
+      }
+    }
+    // Also clean up orphaned timeouts (shouldn't happen, but defensive)
+    for (const [id, tid] of this.responseTimeouts) {
+      if (!this.responseHandlers.has(id)) {
+        clearTimeout(tid)
+        this.responseTimeouts.delete(id)
       }
     }
     if (cleaned > 0) {
@@ -484,6 +508,11 @@ export class TunnelServer extends EventEmitter {
       this.server.stop()
       this.subdomainSockets.clear()
       this.responseHandlers.clear()
+      // Cancel all pending response timeouts
+      for (const tid of this.responseTimeouts.values()) {
+        clearTimeout(tid)
+      }
+      this.responseTimeouts.clear()
       this.activeConnections = 0
       debugLog('server', 'Server stopped', this.options.verbose)
       this.emit('stop')
