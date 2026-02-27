@@ -61,14 +61,12 @@ export function debugLog(
 }
 
 /**
- * Generate a random identifier string
+ * Generate a random identifier string using crypto.randomUUID()
  * @param length - The length of the identifier (default: 7)
- * @returns A random string identifier
+ * @returns A random hex string identifier
  */
 export function generateId(length = 7): string {
-  return Math.random()
-    .toString(36)
-    .substring(2, 2 + length)
+  return crypto.randomUUID().substring(0, length)
 }
 
 // Word lists for generating memorable subdomain names (adjective-noun combos)

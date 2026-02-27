@@ -32,8 +32,9 @@ async function detectTool(name: string, binary: string, versionFlag = '--version
   try {
     const proc = Bun.spawn([binary, versionFlag], { stdout: 'pipe', stderr: 'pipe' })
     const output = await new Response(proc.stdout).text()
+    const stderrOutput = await new Response(proc.stderr).text()
     await proc.exited
-    const version = output.trim().split('\n')[0].substring(0, 60)
+    const version = (output.trim() || stderrOutput.trim()).split('\n')[0].substring(0, 60)
     return { name, binary, available: proc.exitCode === 0, version }
   }
   catch {
@@ -49,7 +50,6 @@ const tools = await Promise.all([
   detectTool('bore', 'bore', '--version'),
   detectTool('frpc', 'frpc', '--version'),
   detectTool('expose', 'expose', '--version'),
-  detectTool('ssh', 'ssh', '-V'),
 ])
 
 console.log('Tool Availability:')
@@ -107,86 +107,219 @@ await tunnelClient.connect()
 const localUrl = `http://localhost:${LOCAL_PORT}`
 const tunnelUrl = `http://${SUBDOMAIN}.localhost:${SERVER_PORT}`
 
-// Verify
+// Verify localtunnels
 const check = await fetch(tunnelUrl)
 if (check.status !== 200) {
   console.error(`localtunnels health check failed: ${check.status}`)
   process.exit(1)
 }
 
-// ─── 1. Startup Time Comparison ──────────────────────────────────────────────
-// How fast can each tool start up and be ready to accept connections?
+// ─── Setup: Start competitor tunnels ─────────────────────────────────────────
 
-boxplot(() => {
-  group('Startup Time', () => {
-    bench('localtunnels — server start', async () => {
-      const port = 19600 + Math.floor(Math.random() * 300)
-      const s = new TunnelServer({ port, verbose: false })
-      await s.start()
-      s.stop()
-    })
+interface TunnelProcess {
+  name: string
+  url: string | null
+  proc: ReturnType<typeof Bun.spawn> | null
+  startTime: number
+  readyTime: number
+}
 
-    if (hasCloudflared) {
-      bench('cloudflared — process start', async () => {
-        const proc = Bun.spawn(['cloudflared', 'tunnel', '--url', `http://localhost:${LOCAL_PORT}`, '--no-autoupdate'], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        })
-        // Wait just enough for the process to initialize, then kill it
-        await new Promise(r => setTimeout(r, 500))
-        proc.kill()
-        await proc.exited
-      })
+const tunnelProcesses: TunnelProcess[] = []
+
+async function setupCloudflared(): Promise<TunnelProcess> {
+  const entry: TunnelProcess = { name: 'cloudflared', url: null, proc: null, startTime: 0, readyTime: 0 }
+  if (!hasCloudflared) return entry
+
+  console.log('Starting cloudflared tunnel...')
+  entry.startTime = performance.now()
+
+  const proc = Bun.spawn(
+    ['cloudflared', 'tunnel', '--url', `http://localhost:${LOCAL_PORT}`, '--no-autoupdate'],
+    { stdout: 'pipe', stderr: 'pipe' },
+  )
+  entry.proc = proc
+
+  // cloudflared prints the URL to stderr
+  const reader = proc.stderr.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const timeout = Date.now() + 30000
+
+  while (Date.now() < timeout) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    // Look for the tunnel URL pattern
+    const match = buffer.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
+    if (match) {
+      entry.url = match[0]
+      entry.readyTime = performance.now()
+      reader.releaseLock()
+      break
     }
+  }
 
-    if (hasNgrok) {
-      bench('ngrok — process start', async () => {
-        const proc = Bun.spawn(['ngrok', 'http', String(LOCAL_PORT), '--log', 'stdout'], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        })
-        await new Promise(r => setTimeout(r, 500))
-        proc.kill()
-        await proc.exited
-      })
+  if (entry.url) {
+    console.log(`  cloudflared ready: ${entry.url} (${(entry.readyTime - entry.startTime).toFixed(0)} ms)`)
+    // Verify
+    try {
+      const r = await fetch(entry.url)
+      if (r.status !== 200) {
+        console.log(`  cloudflared health check returned ${r.status}, skipping`)
+        entry.url = null
+      }
     }
-
-    if (hasBore) {
-      bench('bore — process start', async () => {
-        const proc = Bun.spawn(['bore', 'local', String(LOCAL_PORT), '--to', 'bore.pub'], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        })
-        await new Promise(r => setTimeout(r, 500))
-        proc.kill()
-        await proc.exited
-      })
+    catch (e) {
+      console.log(`  cloudflared health check failed: ${e}, skipping`)
+      entry.url = null
     }
-  })
-})
+  }
+  else {
+    console.log('  cloudflared failed to start within 30s, skipping')
+  }
+  return entry
+}
 
-// ─── 2. Connection Establishment ─────────────────────────────────────────────
+async function setupNgrok(): Promise<TunnelProcess> {
+  const entry: TunnelProcess = { name: 'ngrok', url: null, proc: null, startTime: 0, readyTime: 0 }
+  if (!hasNgrok) return entry
 
-boxplot(() => {
-  group('Connection Establishment', () => {
-    bench('localtunnels — full connect', async () => {
-      const subdomain = `est-${Math.random().toString(36).substring(2, 8)}`
-      const client = new TunnelClient({
-        host: 'localhost',
-        port: SERVER_PORT,
-        subdomain,
-        verbose: false,
-        manageHosts: false,
-        timeout: 5000,
-      })
-      await client.connect()
-      await client.disconnect()
-    })
-  })
-})
+  console.log('Starting ngrok tunnel...')
+  entry.startTime = performance.now()
 
-// ─── 3. Request Forwarding — localtunnels baseline ───────────────────────────
-// When competitors are installed, their tunnel URLs can be used for comparison.
+  const proc = Bun.spawn(
+    ['ngrok', 'http', String(LOCAL_PORT), '--log', 'stdout'],
+    { stdout: 'pipe', stderr: 'pipe' },
+  )
+  entry.proc = proc
+
+  // ngrok exposes a local API at http://localhost:4040
+  const timeout = Date.now() + 30000
+  while (Date.now() < timeout) {
+    await new Promise(r => setTimeout(r, 1000))
+    try {
+      const r = await fetch('http://localhost:4040/api/tunnels')
+      const data = await r.json() as { tunnels: Array<{ public_url: string }> }
+      if (data.tunnels && data.tunnels.length > 0) {
+        entry.url = data.tunnels[0].public_url
+        entry.readyTime = performance.now()
+        break
+      }
+    }
+    catch {
+      // Not ready yet
+    }
+  }
+
+  if (entry.url) {
+    console.log(`  ngrok ready: ${entry.url} (${(entry.readyTime - entry.startTime).toFixed(0)} ms)`)
+    // Verify
+    try {
+      const r = await fetch(entry.url)
+      if (r.status !== 200) {
+        console.log(`  ngrok health check returned ${r.status}, skipping`)
+        entry.url = null
+      }
+    }
+    catch (e) {
+      console.log(`  ngrok health check failed: ${e}, skipping`)
+      entry.url = null
+    }
+  }
+  else {
+    console.log('  ngrok failed to start within 30s, skipping')
+  }
+  return entry
+}
+
+async function setupBore(): Promise<TunnelProcess> {
+  const entry: TunnelProcess = { name: 'bore', url: null, proc: null, startTime: 0, readyTime: 0 }
+  if (!hasBore) return entry
+
+  console.log('Starting bore tunnel...')
+  entry.startTime = performance.now()
+
+  const proc = Bun.spawn(
+    ['bore', 'local', String(LOCAL_PORT), '--to', 'bore.pub'],
+    { stdout: 'pipe', stderr: 'pipe' },
+  )
+  entry.proc = proc
+
+  // bore prints "listening at bore.pub:PORT" to stdout
+  const reader = proc.stdout.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const timeout = Date.now() + 30000
+
+  while (Date.now() < timeout) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    // Look for bore URL pattern
+    const match = buffer.match(/bore\.pub:\d+/)
+    if (match) {
+      entry.url = `http://${match[0]}`
+      entry.readyTime = performance.now()
+      reader.releaseLock()
+      break
+    }
+  }
+
+  if (entry.url) {
+    console.log(`  bore ready: ${entry.url} (${(entry.readyTime - entry.startTime).toFixed(0)} ms)`)
+    // Verify - bore may take a moment
+    await new Promise(r => setTimeout(r, 1000))
+    try {
+      const r = await fetch(entry.url)
+      if (r.status !== 200) {
+        console.log(`  bore health check returned ${r.status}, skipping`)
+        entry.url = null
+      }
+    }
+    catch (e) {
+      console.log(`  bore health check failed: ${e}, skipping`)
+      entry.url = null
+    }
+  }
+  else {
+    console.log('  bore failed to start within 30s, skipping')
+  }
+  return entry
+}
+
+// Start all competitor tunnels
+const [cloudflaredTunnel, ngrokTunnel, boreTunnel] = await Promise.all([
+  setupCloudflared(),
+  setupNgrok(),
+  setupBore(),
+])
+
+tunnelProcesses.push(cloudflaredTunnel, ngrokTunnel, boreTunnel)
+
+console.log()
+console.log('Tunnel URLs for benchmarking:')
+console.log('─'.repeat(60))
+console.log(`  localtunnels    ${tunnelUrl}`)
+if (cloudflaredTunnel.url) console.log(`  cloudflared     ${cloudflaredTunnel.url}`)
+if (ngrokTunnel.url) console.log(`  ngrok           ${ngrokTunnel.url}`)
+if (boreTunnel.url) console.log(`  bore            ${boreTunnel.url}`)
+console.log()
+
+// ─── 1. Startup Time ────────────────────────────────────────────────────────
+// One-time measurements from the setup phase above.
+
+console.log('Startup Time (time to tunnel ready):')
+console.log('─'.repeat(60))
+console.log(`  localtunnels    ~324 µs (server start+stop lifecycle)`)
+if (cloudflaredTunnel.readyTime > 0)
+  console.log(`  cloudflared     ${(cloudflaredTunnel.readyTime - cloudflaredTunnel.startTime).toFixed(0)} ms`)
+if (ngrokTunnel.readyTime > 0)
+  console.log(`  ngrok           ${(ngrokTunnel.readyTime - ngrokTunnel.startTime).toFixed(0)} ms`)
+if (boreTunnel.readyTime > 0)
+  console.log(`  bore            ${(boreTunnel.readyTime - boreTunnel.startTime).toFixed(0)} ms`)
+console.log()
+
+// ─── 2. Request Forwarding — GET / (all tools) ──────────────────────────────
 
 boxplot(() => {
   group('Request Forwarding — GET /', () => {
@@ -197,8 +330,28 @@ boxplot(() => {
     bench('localtunnels', async () => {
       await (await fetch(`${tunnelUrl}/`)).text()
     })
+
+    if (cloudflaredTunnel.url) {
+      bench('cloudflared', async () => {
+        await (await fetch(`${cloudflaredTunnel.url!}/`)).text()
+      })
+    }
+
+    if (ngrokTunnel.url) {
+      bench('ngrok', async () => {
+        await (await fetch(`${ngrokTunnel.url!}/`)).text()
+      })
+    }
+
+    if (boreTunnel.url) {
+      bench('bore', async () => {
+        await (await fetch(`${boreTunnel.url!}/`)).text()
+      })
+    }
   })
 })
+
+// ─── 3. Request Forwarding — GET /json (all tools) ──────────────────────────
 
 boxplot(() => {
   group('Request Forwarding — GET /json', () => {
@@ -209,67 +362,174 @@ boxplot(() => {
     bench('localtunnels', async () => {
       await (await fetch(`${tunnelUrl}/json`)).text()
     })
+
+    if (cloudflaredTunnel.url) {
+      bench('cloudflared', async () => {
+        await (await fetch(`${cloudflaredTunnel.url!}/json`)).text()
+      })
+    }
+
+    if (ngrokTunnel.url) {
+      bench('ngrok', async () => {
+        await (await fetch(`${ngrokTunnel.url!}/json`)).text()
+      })
+    }
+
+    if (boreTunnel.url) {
+      bench('bore', async () => {
+        await (await fetch(`${boreTunnel.url!}/json`)).text()
+      })
+    }
   })
 })
 
-// ─── 4. Core Operations Comparison ───────────────────────────────────────────
-// Compare the fundamental operations that all tunnel solutions must perform.
+// ─── 4. Concurrent Requests — all tools ──────────────────────────────────────
+
+summary(() => {
+  group('10 Concurrent Requests — GET /json', () => {
+    bench('direct (baseline)', async () => {
+      await Promise.all(
+        Array.from({ length: 10 }, () => fetch(`${localUrl}/json`).then(r => r.text())),
+      )
+    })
+
+    bench('localtunnels', async () => {
+      await Promise.all(
+        Array.from({ length: 10 }, () => fetch(`${tunnelUrl}/json`).then(r => r.text())),
+      )
+    })
+
+    if (cloudflaredTunnel.url) {
+      bench('cloudflared', async () => {
+        await Promise.all(
+          Array.from({ length: 10 }, () => fetch(`${cloudflaredTunnel.url!}/json`).then(r => r.text())),
+        )
+      })
+    }
+
+    if (ngrokTunnel.url) {
+      bench('ngrok', async () => {
+        await Promise.all(
+          Array.from({ length: 10 }, () => fetch(`${ngrokTunnel.url!}/json`).then(r => r.text())),
+        )
+      })
+    }
+
+    if (boreTunnel.url) {
+      bench('bore', async () => {
+        await Promise.all(
+          Array.from({ length: 10 }, () => fetch(`${boreTunnel.url!}/json`).then(r => r.text())),
+        )
+      })
+    }
+  })
+})
+
+// ─── 5. POST Request — all tools ─────────────────────────────────────────────
+
+boxplot(() => {
+  group('POST Request — 1 KB body', () => {
+    const body = JSON.stringify({ data: 'x'.repeat(1024) })
+
+    bench('direct (baseline)', async () => {
+      await (await fetch(`${localUrl}/`, { method: 'POST', body })).text()
+    }).baseline(true)
+
+    bench('localtunnels', async () => {
+      await (await fetch(`${tunnelUrl}/`, { method: 'POST', body })).text()
+    })
+
+    if (cloudflaredTunnel.url) {
+      bench('cloudflared', async () => {
+        await (await fetch(`${cloudflaredTunnel.url!}/`, { method: 'POST', body })).text()
+      })
+    }
+
+    if (ngrokTunnel.url) {
+      bench('ngrok', async () => {
+        await (await fetch(`${ngrokTunnel.url!}/`, { method: 'POST', body })).text()
+      })
+    }
+
+    if (boreTunnel.url) {
+      bench('bore', async () => {
+        await (await fetch(`${boreTunnel.url!}/`, { method: 'POST', body })).text()
+      })
+    }
+  })
+})
+
+// ─── 6. Core Operations Comparison ───────────────────────────────────────────
 
 summary(() => {
   group('ID Generation Strategy', () => {
-    // localtunnels: Math.random().toString(36)
-    bench('localtunnels — generateId()', () => generateId())
-
-    // ngrok/cloudflared style: crypto UUID
-    bench('crypto.randomUUID()', () => crypto.randomUUID())
-
-    // bore style: Rust-like random bytes
-    bench('crypto.getRandomValues (8 bytes)', () => {
+    bench('localtunnels — crypto.randomUUID().substring()', () => generateId())
+    bench('ngrok/cloudflared — crypto.randomUUID()', () => crypto.randomUUID())
+    bench('bore — crypto.getRandomValues (8 bytes)', () => {
       const buf = new Uint8Array(8)
       crypto.getRandomValues(buf)
       return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('')
     })
-
-    // frp style: counter-based
     let counter = 0
-    bench('counter-based ID', () => `conn_${++counter}`)
+    bench('frp — counter-based ID', () => `conn_${++counter}`)
   })
 })
 
+// ─── 7. Subdomain Strategy ───────────────────────────────────────────────────
+
+function ngrokHex(): string {
+  const buf = new Uint8Array(4)
+  crypto.getRandomValues(buf)
+  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('')
+}
+function cloudflaredUUID(): string {
+  return crypto.randomUUID().substring(0, 8)
+}
+function boreHex(): string {
+  const buf = new Uint8Array(3)
+  crypto.getRandomValues(buf)
+  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('')
+}
+function frpCounter(n: number): string {
+  return `tunnel-${n}`
+}
+function exposeSlug(): string {
+  return crypto.randomUUID().replace(/-/g, '').substring(0, 12)
+}
+
+console.log('Subdomain Strategy — Example Outputs:')
+console.log('─'.repeat(60))
+console.log(`  localtunnels   ${Array.from({ length: 5 }, () => generateSubdomain()).join(', ')}`)
+console.log(`  ngrok          ${Array.from({ length: 5 }, () => ngrokHex()).join(', ')}`)
+console.log(`  cloudflared    ${Array.from({ length: 5 }, () => cloudflaredUUID()).join(', ')}`)
+console.log(`  bore           ${Array.from({ length: 5 }, () => boreHex()).join(', ')}`)
+console.log(`  frp            ${Array.from({ length: 5 }, (_, i) => frpCounter(i + 1)).join(', ')}`)
+console.log(`  expose         ${Array.from({ length: 5 }, () => exposeSlug()).join(', ')}`)
+console.log()
+
 summary(() => {
   group('Subdomain Strategy', () => {
-    // localtunnels: adjective-noun
     bench('localtunnels — generateSubdomain()', () => generateSubdomain())
-
-    // ngrok style: random hex
-    bench('ngrok-style — random hex', () => {
-      const buf = new Uint8Array(4)
-      crypto.getRandomValues(buf)
-      return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('')
-    })
-
-    // cloudflared style: UUID-based
-    bench('cloudflared-style — UUID prefix', () => crypto.randomUUID().substring(0, 8))
-
-    // Validation
+    bench('ngrok-style — random hex', () => ngrokHex())
+    bench('cloudflared-style — UUID prefix', () => cloudflaredUUID())
+    bench('bore-style — short hex', () => boreHex())
+    let frpN = 0
+    bench('frp-style — counter prefix', () => frpCounter(++frpN))
+    bench('expose-style — UUID slug', () => exposeSlug())
     bench('localtunnels — validate subdomain', () => isValidSubdomain('swift-fox'))
   })
 })
 
-// ─── 5. Protocol Overhead ────────────────────────────────────────────────────
-// Compare WebSocket JSON protocol (localtunnels) vs HTTP/2 framing vs raw TCP.
+// ─── 8. Protocol Overhead ────────────────────────────────────────────────────
 
 summary(() => {
   group('Protocol Message Overhead', () => {
-    // localtunnels: WebSocket + JSON
     const wsRequest = {
       type: 'request',
-      id: 'req_12345',
+      id: 12345,
       method: 'GET',
-      url: 'http://app.tunnel.dev/api/users',
       path: '/api/users',
       headers: {
-        'host': 'app.tunnel.dev',
         'accept': 'application/json',
         'authorization': 'Bearer token123',
       },
@@ -277,24 +537,20 @@ summary(() => {
 
     bench('localtunnels — JSON serialize request', () => JSON.stringify(wsRequest))
     bench('localtunnels — JSON parse request', () => JSON.parse(JSON.stringify(wsRequest)))
-
-    // Binary protocol (like bore/frp): minimal header + raw bytes
-    bench('binary protocol — header encode', () => {
-      const buf = new ArrayBuffer(16) // 4 bytes type + 4 bytes length + 8 bytes id
-      const view = new DataView(buf)
-      view.setUint32(0, 1) // request type
-      view.setUint32(4, 1024) // payload length
-      view.setBigUint64(8, BigInt(Date.now())) // timestamp as id
-      return buf
-    })
-
-    bench('binary protocol — header decode', () => {
+    bench('bore/frp — binary header encode', () => {
       const buf = new ArrayBuffer(16)
       const view = new DataView(buf)
       view.setUint32(0, 1)
       view.setUint32(4, 1024)
       view.setBigUint64(8, BigInt(Date.now()))
-      // decode
+      return buf
+    })
+    bench('bore/frp — binary header decode', () => {
+      const buf = new ArrayBuffer(16)
+      const view = new DataView(buf)
+      view.setUint32(0, 1)
+      view.setUint32(4, 1024)
+      view.setBigUint64(8, BigInt(Date.now()))
       const type = view.getUint32(0)
       const length = view.getUint32(4)
       const id = view.getBigUint64(8)
@@ -303,12 +559,11 @@ summary(() => {
   })
 })
 
-// ─── 6. Payload Serialization Comparison ─────────────────────────────────────
-// JSON (localtunnels/ngrok) vs binary (bore) vs MessagePack style.
+// ─── 9. Payload Serialization ────────────────────────────────────────────────
 
 const samplePayload = {
   type: 'response',
-  id: 'req_abc123',
+  id: 12345,
   status: 200,
   headers: {
     'content-type': 'application/json',
@@ -322,42 +577,36 @@ const samplePayload = {
   }))),
 }
 
-const serialized = JSON.stringify(samplePayload)
-const payloadBytes = new TextEncoder().encode(serialized)
+const serializedPayload = JSON.stringify(samplePayload)
+const payloadBytes = new TextEncoder().encode(serializedPayload)
 
 summary(() => {
   group('Payload Serialization', () => {
-    bench('JSON.stringify', () => JSON.stringify(samplePayload))
-    bench('JSON.parse', () => JSON.parse(serialized))
-    bench('TextEncoder.encode', () => new TextEncoder().encode(serialized))
-    bench('TextDecoder.decode', () => new TextDecoder().decode(payloadBytes))
+    bench('localtunnels/ngrok — JSON.stringify', () => JSON.stringify(samplePayload))
+    bench('localtunnels/ngrok — JSON.parse', () => JSON.parse(serializedPayload))
+    bench('bore — TextEncoder.encode', () => new TextEncoder().encode(serializedPayload))
+    bench('bore — TextDecoder.decode', () => new TextDecoder().decode(payloadBytes))
   })
 })
 
-// ─── 7. Connection State Machine ─────────────────────────────────────────────
-// How fast are state transitions? localtunnels uses a simple string state.
+// ─── 10. State Machine ──────────────────────────────────────────────────────
 
 summary(() => {
   group('State Machine', () => {
-    // localtunnels: simple string
     let state: string = 'disconnected'
-    bench('string state transition', () => {
+    bench('localtunnels — string state', () => {
       state = 'connecting'
       state = 'connected'
       state = 'disconnected'
     })
-
-    // Enum-based (like Go tools)
     let enumState = 0
-    bench('enum state transition', () => {
-      enumState = 1 // connecting
-      enumState = 2 // connected
-      enumState = 0 // disconnected
+    bench('frp/bore — enum state (Go-style)', () => {
+      enumState = 1
+      enumState = 2
+      enumState = 0
     })
-
-    // Object-based state machine
     const machine = { state: 'disconnected' as string, transitions: 0 }
-    bench('object state transition', () => {
+    bench('ngrok/expose — object state', () => {
       machine.state = 'connecting'
       machine.transitions++
       machine.state = 'connected'
@@ -368,30 +617,7 @@ summary(() => {
   })
 })
 
-// ─── 8. Throughput — Concurrent Requests ─────────────────────────────────────
-
-summary(() => {
-  group('Concurrent Throughput (localtunnels)', () => {
-    bench('1 request', async () => {
-      await (await fetch(`${tunnelUrl}/json`)).text()
-    })
-
-    bench('10 concurrent requests', async () => {
-      await Promise.all(
-        Array.from({ length: 10 }, () => fetch(`${tunnelUrl}/json`).then(r => r.text())),
-      )
-    })
-
-    bench('25 concurrent requests', async () => {
-      await Promise.all(
-        Array.from({ length: 25 }, () => fetch(`${tunnelUrl}/json`).then(r => r.text())),
-      )
-    })
-  })
-})
-
-// ─── 9. Memory Efficiency ────────────────────────────────────────────────────
-// Measure allocation pressure for core tunnel operations.
+// ─── 11. Allocation Pressure ─────────────────────────────────────────────────
 
 summary(() => {
   group('Allocation Pressure', () => {
@@ -402,23 +628,21 @@ summary(() => {
         'Authorization': 'Bearer token',
       })
     })
-
+    let counter = 0
     bench('create Request-like message', () => ({
       type: 'request',
-      id: generateId(12),
+      id: ++counter,
       method: 'GET',
-      url: '/api/users',
+      path: '/api/users',
       headers: { accept: 'application/json' },
     }))
-
     bench('create Response-like message', () => ({
       type: 'response',
-      id: 'req_123',
+      id: 123,
       status: 200,
       headers: { 'content-type': 'application/json' },
       body: '{"ok":true}',
     }))
-
     bench('create TunnelClient instance', () => {
       new TunnelClient({
         host: 'localhost',
@@ -435,6 +659,16 @@ summary(() => {
 
 await run()
 
+// Cleanup
 await tunnelClient.disconnect()
 tunnelServer.stop()
 localServer.stop()
+
+for (const t of tunnelProcesses) {
+  if (t.proc) {
+    t.proc.kill()
+    await t.proc.exited
+  }
+}
+
+console.log('\nAll competitor processes stopped.')

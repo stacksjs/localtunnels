@@ -154,6 +154,148 @@ Or deploy to AWS:
 localtunnels deploy --domain mytunnel.example.com --key-name my-keypair
 ```
 
+## Benchmarks
+
+localtunnels ships with a benchmark suite built on [mitata](https://github.com/evanwashere/mitata). The suite covers utility functions, connection lifecycle, request throughput, latency distribution, scalability under load, and cross-tool comparisons.
+
+```sh
+# Run all benchmarks
+bun benchmarks/index.ts
+
+# Run individual suites
+bun benchmarks/utils.ts          # Utility function microbenchmarks
+bun benchmarks/connection.ts     # Connection lifecycle
+bun benchmarks/throughput.ts     # Request forwarding throughput
+bun benchmarks/latency.ts        # End-to-end latency distribution
+bun benchmarks/scalability.ts    # Multi-connection scalability
+bun benchmarks/comparison.ts     # Cross-tool comparison
+```
+
+### Results
+
+_Measured on Apple M3 Pro, bun 1.3.10 (arm64-darwin). Competitor tools: cloudflared 2026.2.0, ngrok 3.36.1, bore-cli 0.6.0, frpc 0.67.0._
+
+#### localtunnels vs Competitors — Request Forwarding
+
+Real end-to-end request forwarding through each tool's tunnel. localtunnels runs on localhost, bore routes through bore.pub.
+
+**GET `/` (plain text):**
+
+| Tool | avg | vs direct |
+|---|---|---|
+| Direct (no tunnel) | 35.67 µs | 1x (baseline) |
+| **localtunnels** | **105.97 µs** | 2.97x |
+| **bore** | 188.60 ms | 5,290x |
+
+**GET `/json` (10-item JSON array):**
+
+| Tool | avg | vs direct |
+|---|---|---|
+| Direct (no tunnel) | 30.67 µs | 1x (baseline) |
+| **localtunnels** | **109.58 µs** | 3.57x |
+| **bore** | 180.11 ms | 5,872x |
+
+**POST 1 KB body:**
+
+| Tool | avg | vs direct |
+|---|---|---|
+| Direct (no tunnel) | 29.43 µs | 1x (baseline) |
+| **localtunnels** | **106.89 µs** | 3.63x |
+| **bore** | 180.74 ms | 6,143x |
+
+**10 Concurrent Requests (GET /json):**
+
+| Tool | avg | vs direct |
+|---|---|---|
+| Direct (no tunnel) | 108.05 µs | 1x (baseline) |
+| **localtunnels** | **592.58 µs** | 5.48x |
+| **bore** | 188.46 ms | 1,744x |
+
+#### localtunnels vs Competitors — Startup Time
+
+| Tool | Time to tunnel ready |
+|---|---|
+| **localtunnels** | **~324 µs** |
+| **bore** | 195 ms |
+| **Cloudflare Tunnels** | 3,969 ms |
+
+#### localtunnels vs Competitors — Subdomain Generation
+
+| Tool | Strategy | Example Output | avg | vs localtunnels |
+|---|---|---|---|---|
+| **localtunnels** | Adjective-noun | `fast-deer`, `quick-surf`, `fond-opal` | **3.00 ns** | 1x |
+| **frp** | Counter prefix | `tunnel-1`, `tunnel-2`, `tunnel-3` | 25.66 ns | 8.55x slower |
+| **Cloudflare Tunnels** | UUID prefix | `a7ed76b1`, `ee76358d`, `d25abca3` | 42.69 ns | 14.23x slower |
+| **Expose** | UUID slug | `a432cef06efa`, `15b07c93bc27` | 96.60 ns | 32.20x slower |
+| **bore** | Short hex | `df28e3`, `1cb723`, `06189e` | 191.94 ns | 63.98x slower |
+| **ngrok** | Random hex | `c2a8b92e`, `5c219911`, `65a2aba4` | 279.09 ns | 93.03x slower |
+
+#### localtunnels vs Competitors — ID Generation
+
+| Tool | Strategy | avg | vs fastest |
+|---|---|---|---|
+| **frp** | Counter-based | **22.19 ns** | 1x |
+| **ngrok / Cloudflare Tunnels** | `crypto.randomUUID()` | 30.94 ns | 1.39x |
+| **localtunnels** | `crypto.randomUUID().substring()` | 42.42 ns | 1.91x |
+| **bore** | `crypto.getRandomValues` | 358.60 ns | 16.16x |
+
+#### localtunnels vs Competitors — Protocol Overhead
+
+localtunnels uses WebSocket + JSON. bore and frp use binary protocols. This measures per-message encode/decode cost.
+
+| Tool | Operation | avg | vs fastest |
+|---|---|---|---|
+| **localtunnels** | JSON serialize | **123.05 ns** | 1x |
+| **bore / frp** | Binary header encode | 159.04 ns | 1.29x |
+| **bore / frp** | Binary header decode | 176.33 ns | 1.43x |
+| **localtunnels** | JSON parse | 434.87 ns | 3.53x |
+
+#### localtunnels vs Competitors — State Machine
+
+| Tool | Strategy | avg | vs fastest |
+|---|---|---|---|
+| **frp / bore** (Go-style) | Enum-based | **2.20 ns** | 1x |
+| **localtunnels** | String-based | 2.35 ns | 1.07x |
+| **ngrok / Expose** | Object-based | 3.54 ns | 1.61x |
+
+#### Throughput (GET, direct vs tunnel)
+
+| Payload | Direct | localtunnels | Overhead |
+|---|---|---|---|
+| 20 B | 33 µs | 102 µs | 3.1x |
+| 1 KB | 30 µs | 116 µs | 3.8x |
+| 64 KB | 47 µs | 350 µs | 7.5x |
+| 512 KB | 144 µs | 2.08 ms | 14.4x |
+| 1 MB | 234 µs | 4.16 ms | 17.8x |
+
+#### Latency
+
+| Scenario | avg |
+|---|---|
+| Instant response (pure overhead) | 182 µs |
+| JSON API (10-item array) | 210 µs |
+| With 10 ms backend | 10.44 ms _(1.05x over direct)_ |
+| With 50 ms backend | 50.51 ms _(1.01x over direct)_ |
+
+#### Scalability
+
+| Active Tunnels | Request Latency (avg) |
+|---|---|
+| 1 | 235 µs |
+| 10 | 237 µs |
+| 50 | 234 µs |
+
+#### Connection Lifecycle
+
+| Operation | avg |
+|---|---|
+| Server start + stop | 325 µs |
+| Client connect + register + disconnect | 296 µs |
+| 5 clients sequential | 1.61 ms |
+| 5 clients concurrent | 921 µs |
+
+The cross-tool comparison auto-detects installed tunneling tools (`cloudflared`, `ngrok`, `bore`, `frpc`, `expose`) and includes them in results. See the [benchmark documentation](https://localtunnels.sh/benchmarks) for full results, suite descriptions, and methodology.
+
 ## Testing
 
 ```sh

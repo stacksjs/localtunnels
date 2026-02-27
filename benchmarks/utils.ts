@@ -149,13 +149,11 @@ summary(() => {
 const readyMessage = { type: 'ready', subdomain: 'swift-fox' }
 const requestMessage = {
   type: 'request',
-  id: 'req_abc123',
+  id: 1,
   method: 'POST',
-  url: 'https://swift-fox.localtunnel.dev/api/webhook',
   path: '/api/webhook',
   headers: {
     'content-type': 'application/json',
-    'host': 'swift-fox.localtunnel.dev',
     'x-github-event': 'push',
     'x-github-delivery': 'a1b2c3d4',
     'authorization': 'Bearer token123',

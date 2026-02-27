@@ -43,6 +43,7 @@ const config: BunpressConfig = {
           { text: 'Configuration', link: '/advanced/configuration' },
           { text: 'Server Setup', link: '/advanced/server-setup' },
           { text: 'Performance', link: '/advanced/performance' },
+          { text: 'Benchmarks', link: '/benchmarks' },
           { text: 'CI/CD Integration', link: '/advanced/ci-cd-integration' },
         ],
       },

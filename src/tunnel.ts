@@ -2,7 +2,7 @@ import type { ServerWebSocket } from 'bun'
 import type { ClientState, ServerStats, TunnelOptions, TunnelRequest } from './types'
 import { EventEmitter } from 'node:events'
 import { canSystemConnect, cleanupMacOSResolver, ensureMacOSResolver, resolveHostname } from './hosts'
-import { calculateBackoff, debugLog, delay, generateId, generateSubdomain, isValidSubdomain } from './utils'
+import { calculateBackoff, debugLog, delay, generateSubdomain, isValidSubdomain } from './utils'
 
 // Internal options type with ssl being optional
 type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl' | 'manageHosts'> & { ssl?: TunnelOptions['ssl'], manageHosts: boolean }
@@ -13,6 +13,42 @@ const MAX_TOTAL_CONNECTIONS = 10_000
 const IDLE_TIMEOUT_MS = 60 * 1000 // 1 minute
 const IDLE_CLEANUP_INTERVAL_MS = 15 * 1000 // check every 15 seconds
 const MAX_PAYLOAD_SIZE = 64 * 1024 * 1024 // 64MB
+
+// Pre-cached JSON strings for static control messages (avoid JSON.stringify on every call)
+const MSG_PONG = '{"type":"pong"}'
+const MSG_CONNECTED = '{"type":"connected"}'
+const MSG_PING = '{"type":"ping"}'
+const MSG_ERR_INVALID_SUBDOMAIN = '{"type":"error","message":"Invalid subdomain format"}'
+const MSG_ERR_CONN_LIMIT = '{"type":"error","message":"Connection limit reached"}'
+
+// Header names to skip when forwarding requests (Set for O(1) lookup)
+const SKIP_REQUEST_HEADERS = new Set(['host', 'connection', 'upgrade', 'content-length'])
+
+// Header names to skip when forwarding responses
+const SKIP_RESPONSE_HEADERS = new Set(['content-encoding', 'transfer-encoding', 'connection', 'content-length'])
+
+// Binary content-type detection — shared between server and client
+function isBinaryContentType(contentType: string): boolean {
+  return contentType.includes('application/octet-stream')
+    || contentType.includes('image/')
+    || contentType.includes('audio/')
+    || contentType.includes('video/')
+    || contentType.includes('application/pdf')
+}
+
+// Fast path extraction from a full URL string (avoids new URL() ~230ns overhead)
+// Input: "http://host:port/path?query" → "/path?query"
+function extractPath(url: string): string {
+  // Skip past the protocol + "://" and the host portion to find the path
+  const pathStart = url.indexOf('/', url.indexOf('//') + 2)
+  return pathStart === -1 ? '/' : url.substring(pathStart)
+}
+
+// Fast subdomain extraction (avoids split('.') array allocation)
+function extractSubdomain(host: string): string {
+  const dotIdx = host.indexOf('.')
+  return dotIdx === -1 ? host : host.substring(0, dotIdx)
+}
 
 interface WebSocketData {
   subdomain: string
@@ -32,8 +68,9 @@ interface InternalStats extends ServerStats {
 export class TunnelServer extends EventEmitter {
   private server: ReturnType<typeof Bun.serve> | null = null
   private options: ResolvedTunnelOptions
-  private responseHandlers: Map<string, (response: any) => void> = new Map()
-  private responseTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map()
+  private requestCounter = 0
+  private responseHandlers: Map<number, (response: any) => void> = new Map()
+  private responseTimeouts: Map<number, ReturnType<typeof setTimeout>> = new Map()
   private subdomainSockets: Map<string, Set<ServerWebSocket<WebSocketData>>> = new Map()
   private idleCleanupInterval: ReturnType<typeof setInterval> | null = null
   private activeConnections = 0
@@ -119,8 +156,8 @@ export class TunnelServer extends EventEmitter {
     return first
   }
 
-  private async forwardRequest(req: Request, url: URL, subdomain: string): Promise<Response> {
-    const requestId = generateId(12)
+  private async forwardRequest(req: Request, path: string, subdomain: string): Promise<Response> {
+    const requestId = ++this.requestCounter
     const startTime = Date.now()
 
     // Read request body if present
@@ -129,11 +166,7 @@ export class TunnelServer extends EventEmitter {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       try {
         const contentType = req.headers.get('content-type') || ''
-        // Check if binary content
-        if (contentType.includes('application/octet-stream')
-          || contentType.includes('image/')
-          || contentType.includes('audio/')
-          || contentType.includes('video/')) {
+        if (isBinaryContentType(contentType)) {
           const buffer = await req.arrayBuffer()
           body = Buffer.from(buffer).toString('base64')
           isBase64Encoded = true
@@ -149,16 +182,23 @@ export class TunnelServer extends EventEmitter {
       }
     }
 
+    // Build headers inline, skipping hop-by-hop headers during conversion
+    const headers: Record<string, string> = {}
+    req.headers.forEach((value, key) => {
+      if (!SKIP_REQUEST_HEADERS.has(key)) {
+        headers[key] = value
+      }
+    })
+
     const message: TunnelRequest = {
       type: 'request',
       id: requestId,
       method: req.method,
-      url: url.toString(),
-      path: url.pathname + url.search,
-      headers: Object.fromEntries(req.headers),
+      path,
+      headers,
       body,
-      isBase64Encoded,
     }
+    if (isBase64Encoded) message.isBase64Encoded = true
 
     const socket = this.getSocketForSubdomain(subdomain)
     if (!socket) {
@@ -175,17 +215,11 @@ export class TunnelServer extends EventEmitter {
           this.responseTimeouts.delete(requestId)
         }
 
-        const headers = new Headers(responseData.headers || {})
-        // Remove headers that will be incorrect after body transformation
-        headers.delete('content-encoding')
-        headers.delete('transfer-encoding')
-        headers.delete('content-length')
-
         // Track response size
         const bodySize = responseData.body?.length || 0
         this.stats.bytesOut += bodySize
 
-        debugLog('server', `Response for ${requestId}: ${responseData.status} (${bodySize} bytes, ${Date.now() - startTime}ms)`, this.options.verbose)
+        if (this.options.verbose) debugLog('server', `Response for ${requestId}: ${responseData.status} (${bodySize} bytes, ${Date.now() - startTime}ms)`, true)
 
         // Handle binary responses
         let responseBody: string | Uint8Array = responseData.body || ''
@@ -193,9 +227,10 @@ export class TunnelServer extends EventEmitter {
           responseBody = Buffer.from(responseBody, 'base64')
         }
 
+        // Pass response headers directly — already filtered by client
         resolve(new Response(responseBody, {
           status: responseData.status,
-          headers,
+          headers: responseData.headers,
         }))
       })
 
@@ -205,7 +240,7 @@ export class TunnelServer extends EventEmitter {
       }
       catch (err) {
         this.responseHandlers.delete(requestId)
-        debugLog('server', `Failed to send request ${requestId}: ${err}`, this.options.verbose, 'error')
+        if (this.options.verbose) debugLog('server', `Failed to send request ${requestId}: ${err}`, true, 'error')
         resolve(new Response('Tunnel client disconnected', { status: 502 }))
         return
       }
@@ -251,12 +286,12 @@ export class TunnelServer extends EventEmitter {
       ...(tlsConfig ? { tls: tlsConfig } : {}),
 
       fetch: async (req, server) => {
-        const url = new URL(req.url)
+        const path = extractPath(req.url)
         const host = req.headers.get('host') || ''
-        const subdomain = host.split('.')[0]
+        const subdomain = extractSubdomain(host)
 
         // Handle status endpoint
-        if (url.pathname === '/status' || url.pathname === '/_status') {
+        if (path === '/status' || path === '/_status') {
           const stats = this.getStats()
           return new Response(JSON.stringify({
             status: 'ok',
@@ -275,12 +310,12 @@ export class TunnelServer extends EventEmitter {
         }
 
         // Handle health check
-        if (url.pathname === '/health' || url.pathname === '/_health') {
+        if (path === '/health' || path === '/_health') {
           return new Response('OK', { status: 200 })
         }
 
         // Handle metrics endpoint (Prometheus format)
-        if (url.pathname === '/metrics' || url.pathname === '/_metrics') {
+        if (path === '/metrics' || path === '/_metrics') {
           const uptime = Math.floor((Date.now() - this.stats.startTime.getTime()) / 1000)
           const metrics = [
             `# HELP tunnel_connections_active Current active connections`,
@@ -313,7 +348,7 @@ export class TunnelServer extends EventEmitter {
           })
         }
 
-        debugLog('server', `Received request for subdomain: ${subdomain}, path: ${url.pathname}`, this.options.verbose)
+        if (this.options.verbose) debugLog('server', `Received request for subdomain: ${subdomain}, path: ${path}`, true)
 
         // Handle WebSocket upgrade
         if (req.headers.get('upgrade') === 'websocket') {
@@ -331,9 +366,9 @@ export class TunnelServer extends EventEmitter {
         // Forward HTTP request to connected client
         if (subdomain && this.subdomainSockets.has(subdomain)) {
           this.stats.requests++
-          debugLog('server', `Publishing HTTP request to subdomain: ${subdomain}`, this.options.verbose)
+          if (this.options.verbose) debugLog('server', `Publishing HTTP request to subdomain: ${subdomain}`, true)
 
-          return this.forwardRequest(req, url, subdomain)
+          return this.forwardRequest(req, path, subdomain)
         }
 
         // No tunnel client for this subdomain
@@ -350,31 +385,25 @@ export class TunnelServer extends EventEmitter {
       websocket: {
         maxPayloadLength: MAX_PAYLOAD_SIZE,
         idleTimeout: 30, // seconds - Bun auto-pings, closes if no pong in 30s
-        perMessageDeflate: true,
+        perMessageDeflate: false,
 
         message: (ws, message) => {
           try {
             const data = JSON.parse(String(message))
-            debugLog('server', `Received WebSocket message: ${data.type}`, this.options.verbose)
+            if (this.options.verbose) debugLog('server', `Received WebSocket message: ${data.type}`, true)
 
             if (data.type === 'ready') {
               const subdomain = data.subdomain
 
               // Validate subdomain
               if (!subdomain || !isValidSubdomain(subdomain)) {
-                ws.send(JSON.stringify({
-                  type: 'error',
-                  message: 'Invalid subdomain format',
-                }))
+                ws.send(MSG_ERR_INVALID_SUBDOMAIN)
                 return
               }
 
               // Check if subdomain is already in use by another client
               if (this.subdomainSockets.has(subdomain) && this.subdomainSockets.get(subdomain)!.size > 0) {
-                ws.send(JSON.stringify({
-                  type: 'subdomain_taken',
-                  subdomain,
-                }))
+                ws.send(`{"type":"subdomain_taken","subdomain":"${subdomain}"}`)
                 debugLog('server', `Subdomain ${subdomain} already in use, notifying client`, this.options.verbose)
                 return
               }
@@ -382,21 +411,15 @@ export class TunnelServer extends EventEmitter {
               ws.data.subdomain = subdomain
               const accepted = this.addSocket(subdomain, ws)
               if (!accepted) {
-                ws.send(JSON.stringify({
-                  type: 'error',
-                  message: 'Connection limit reached',
-                }))
+                ws.send(MSG_ERR_CONN_LIMIT)
                 ws.close(1013, 'Connection limit reached')
                 return
               }
               debugLog('server', `Client ${subdomain} is ready (${this.activeConnections} total connections)`, this.options.verbose)
 
               // Confirm registration
-              ws.send(JSON.stringify({
-                type: 'registered',
-                subdomain,
-                url: `${this.options.secure ? 'https' : 'http'}://${subdomain}.${this.options.host}`,
-              }))
+              const proto = this.options.secure ? 'https' : 'http'
+              ws.send(`{"type":"registered","subdomain":"${subdomain}","url":"${proto}://${subdomain}.${this.options.host}"}`)
             }
             else if (data.type === 'response') {
               const handler = this.responseHandlers.get(data.id)
@@ -417,7 +440,7 @@ export class TunnelServer extends EventEmitter {
             }
             else if (data.type === 'ping') {
               ws.data.lastSeen = Date.now()
-              ws.send(JSON.stringify({ type: 'pong' }))
+              ws.send(MSG_PONG)
             }
           }
           catch (err) {
@@ -427,7 +450,7 @@ export class TunnelServer extends EventEmitter {
 
         open: (ws) => {
           debugLog('server', `WebSocket opened`, this.options.verbose)
-          ws.send(JSON.stringify({ type: 'connected' }))
+          ws.send(MSG_CONNECTED)
         },
 
         close: (ws) => {
@@ -527,6 +550,7 @@ export class TunnelServer extends EventEmitter {
 export class TunnelClient extends EventEmitter {
   private ws: WebSocket | null = null
   private options: ResolvedTunnelOptions
+  private localUrlPrefix: string
   private reconnectAttempts = 0
   private shouldReconnect = true
   private state: ClientState = 'disconnected'
@@ -549,6 +573,8 @@ export class TunnelClient extends EventEmitter {
       apiKey: options.apiKey || '',
       manageHosts: options.manageHosts !== false,
     }
+    // Cache the local URL prefix to avoid building it on every request
+    this.localUrlPrefix = `http://${this.options.localHost}:${this.options.localPort}`
   }
 
   public getState(): ClientState {
@@ -641,7 +667,7 @@ export class TunnelClient extends EventEmitter {
       this.ws.addEventListener('message', async (event) => {
         try {
           const data = JSON.parse(event.data as string)
-          debugLog('client', `Received message: ${data.type}`, this.options.verbose)
+          if (this.options.verbose) debugLog('client', `Received message: ${data.type}`, true)
 
           if (data.type === 'registered') {
             // Server confirmed our subdomain — now we're truly ready
@@ -740,7 +766,7 @@ export class TunnelClient extends EventEmitter {
     this.stopPing()
     this.pingInterval = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'ping' }))
+        this.ws.send(MSG_PING)
       }
     }, 25000)
   }
@@ -753,37 +779,26 @@ export class TunnelClient extends EventEmitter {
   }
 
   private async handleRequest(data: TunnelRequest) {
-    const requestUrl = new URL(data.url)
-    const localUrl = `http://${this.options.localHost}:${this.options.localPort}${data.path || requestUrl.pathname + requestUrl.search}`
+    const localUrl = this.localUrlPrefix + data.path
     const startTime = Date.now()
 
-    debugLog('client', `Forwarding ${data.method} ${data.path || requestUrl.pathname} to: ${localUrl}`, this.options.verbose)
+    if (this.options.verbose) debugLog('client', `Forwarding ${data.method} ${data.path} to: ${localUrl}`, true)
 
     this.emit('request', {
       method: data.method,
-      url: data.path || requestUrl.pathname,
+      url: data.path,
       path: data.path,
     })
 
     try {
-      // Prepare headers, removing problematic ones
-      const headers = new Headers()
-      for (const [key, value] of Object.entries(data.headers || {})) {
-        // Skip headers that shouldn't be forwarded
-        if (['host', 'connection', 'upgrade', 'content-length'].includes(key.toLowerCase())) {
-          continue
-        }
-        headers.set(key, value as string)
-      }
-
+      // Server already filters hop-by-hop headers, so pass directly
       const fetchOptions: RequestInit = {
         method: data.method,
-        headers,
+        headers: data.headers,
       }
 
       // Add body for non-GET/HEAD requests
       if (data.method !== 'GET' && data.method !== 'HEAD' && data.body) {
-        // Handle base64 encoded binary data
         if (data.isBase64Encoded) {
           fetchOptions.body = Buffer.from(data.body, 'base64')
         }
@@ -799,11 +814,7 @@ export class TunnelClient extends EventEmitter {
       let responseBody: string
       let isBase64Encoded = false
 
-      if (contentType.includes('application/octet-stream')
-        || contentType.includes('image/')
-        || contentType.includes('audio/')
-        || contentType.includes('video/')
-        || contentType.includes('application/pdf')) {
+      if (isBinaryContentType(contentType)) {
         const buffer = await response.arrayBuffer()
         responseBody = Buffer.from(buffer).toString('base64')
         isBase64Encoded = true
@@ -813,25 +824,25 @@ export class TunnelClient extends EventEmitter {
       }
 
       const duration = Date.now() - startTime
-      debugLog('client', `Response: ${response.status} (${responseBody.length} bytes, ${duration}ms)`, this.options.verbose)
+      if (this.options.verbose) debugLog('client', `Response: ${response.status} (${responseBody.length} bytes, ${duration}ms)`, true)
 
-      // Convert headers to plain object
+      // Convert headers to plain object, filtering with Set (O(1) lookup)
       const responseHeaders: Record<string, string> = {}
       response.headers.forEach((value, key) => {
-        // Skip headers that will be incorrect after body transformation
-        if (!['content-encoding', 'transfer-encoding', 'connection', 'content-length'].includes(key.toLowerCase())) {
+        if (!SKIP_RESPONSE_HEADERS.has(key)) {
           responseHeaders[key] = value
         }
       })
 
-      this.ws?.send(JSON.stringify({
+      const responseMsg: any = {
         type: 'response',
         id: data.id,
         status: response.status,
         headers: responseHeaders,
         body: responseBody,
-        isBase64Encoded,
-      }))
+      }
+      if (isBase64Encoded) responseMsg.isBase64Encoded = true
+      this.ws?.send(JSON.stringify(responseMsg))
 
       this.emit('response', {
         status: response.status,

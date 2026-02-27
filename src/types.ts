@@ -101,10 +101,9 @@ export interface TunnelConnection {
  * Request forwarded through the tunnel
  */
 export interface TunnelRequest {
-  id: string
+  id: string | number
   type: 'request'
   method: string
-  url: string
   path: string
   headers: Record<string, string>
   body?: string
@@ -115,7 +114,7 @@ export interface TunnelRequest {
  * Response from the local server
  */
 export interface TunnelResponse {
-  id: string
+  id: string | number
   type: 'response'
   status: number
   headers: Record<string, string>

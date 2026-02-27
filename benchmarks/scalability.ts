@@ -159,20 +159,19 @@ if (setups[50]) {
 
 const messages = {
   ready: JSON.stringify({ type: 'ready', subdomain: 'bench-test' }),
-  ping: JSON.stringify({ type: 'ping' }),
-  pong: JSON.stringify({ type: 'pong' }),
+  ping: '{"type":"ping"}',
+  pong: '{"type":"pong"}',
   registered: JSON.stringify({ type: 'registered', subdomain: 'bench-test', url: 'http://bench-test.localhost:3000' }),
   request: JSON.stringify({
     type: 'request',
-    id: 'req_12345',
+    id: 12345,
     method: 'GET',
-    url: 'http://bench-test.localhost:3000/api/users',
     path: '/api/users',
-    headers: { host: 'bench-test.localhost:3000', accept: 'application/json' },
+    headers: { accept: 'application/json' },
   }),
   response: JSON.stringify({
     type: 'response',
-    id: 'req_12345',
+    id: 12345,
     status: 200,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(Array.from({ length: 50 }, (_, i) => ({ id: i, name: `User ${i}` }))),
