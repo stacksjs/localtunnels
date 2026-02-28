@@ -48,7 +48,8 @@
   },
   "files": [
     "README.md",
-    "dist"
+    "dist",
+    "src"
   ],
   "scripts": {
     "build": "bun build.ts && bun run compile",
@@ -77,14 +78,19 @@
     "zip:windows-x64": "zip -j bin/localtunnels-windows-x64.zip bin/localtunnels-windows-x64.exe",
     "zip:darwin-x64": "zip -j bin/localtunnels-darwin-x64.zip bin/localtunnels-darwin-x64",
     "zip:darwin-arm64": "zip -j bin/localtunnels-darwin-arm64.zip bin/localtunnels-darwin-arm64",
-    "deploy": "bun run bin/cli.ts deploy",
+    "deploy": "bun run deploy:site && bun run deploy:tunnel && bun run deploy:analytics",
+    "deploy:site": "bun run build:docs && bun run bin/cli.ts deploy:site",
+    "deploy:tunnel": "bun run bin/cli.ts deploy:tunnel",
+    "deploy:analytics": "bun run bin/cli.ts deploy:analytics",
     "destroy": "bun run bin/cli.ts destroy",
+    "destroy:analytics": "bun run bin/cli.ts destroy:analytics",
     "server": "bun run bin/cli.ts server",
     "client": "bun run bin/cli.ts start",
     "format": "bunx --bun pickier format .",
     "format:fix": "bunx --bun pickier format . --write"
   },
   "dependencies": {
+    "@stacksjs/ts-analytics": "^0.1.0",
     "bunfig": "^0.15.6"
   },
   "devDependencies": {

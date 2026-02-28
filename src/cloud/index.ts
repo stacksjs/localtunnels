@@ -11,6 +11,8 @@
 // Export Lambda handlers for reference
 export { handler as connectHandler } from './connect'
 // Export deployment utilities
+export { deployAnalytics, destroyAnalytics } from './deploy-analytics'
+export type { AnalyticsDeployConfig, AnalyticsDeployResult } from './deploy-analytics'
 export { deployTunnelInfrastructure, destroyTunnelInfrastructure } from './deploy'
 export type { TunnelDeployConfig, TunnelDeployResult } from './deploy'
 export { handler as disconnectHandler } from './disconnect'

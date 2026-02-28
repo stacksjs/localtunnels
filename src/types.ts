@@ -81,6 +81,13 @@ export interface TunnelOptions {
    * @default true
    */
   manageHosts?: boolean
+
+  /**
+   * Domain for tunnel URLs (e.g. 'localtunnel.dev') when different from host.
+   * When host is 'api.localtunnel.dev', tunnel URLs should use 'localtunnel.dev'.
+   * If not specified, derived from host by stripping 'api.' prefix.
+   */
+  domain?: string
 }
 
 /**

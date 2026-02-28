@@ -739,5 +739,20 @@
       }
     })
   </script>
+
+  <script data-site="localtunnel-dev">
+  (function(){
+    'use strict';
+    var s='localtunnel-dev',e='https://analytics.stacksjs.com/collect';
+    if(navigator.doNotTrack==='1')return;
+    var sid=sessionStorage.getItem('sa_s')||Math.random().toString(36).slice(2);
+    sessionStorage.setItem('sa_s',sid);
+    navigator.sendBeacon(e,JSON.stringify({
+      s:s,sid:sid,e:'pageview',
+      u:location.href,r:document.referrer,t:document.title,
+      sw:screen.width,sh:screen.height
+    }));
+  })();
+  </script>
 </body>
 </html>

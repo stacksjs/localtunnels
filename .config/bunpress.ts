@@ -3,7 +3,7 @@ import type { BunpressConfig } from 'bunpress'
 const config: BunpressConfig = {
   name: 'localtunnels',
   description: 'A simple and smart tunneling alternative',
-  url: 'https://localtunnels.sh',
+  url: 'https://localtunnel.dev',
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
@@ -52,6 +52,22 @@ const config: BunpressConfig = {
     socialLinks: [
       { icon: 'github', link: 'https://github.com/stacksjs/localtunnels' },
     ],
+  },
+
+  analytics: {
+    enabled: true,
+    siteId: 'localtunnel-dev',
+    apiEndpoint: 'https://analytics.stacksjs.com',
+    trackOutboundLinks: true,
+    honorDNT: true,
+  },
+
+  cloud: {
+    region: 'us-east-1',
+    domain: 'localtunnel.dev',
+    dnsProvider: {
+      provider: 'porkbun',
+    },
   },
 }
 

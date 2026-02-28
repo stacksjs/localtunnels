@@ -44,7 +44,7 @@ interface DestroyOptions {
 }
 
 // Default tunnel server
-const DEFAULT_SERVER = 'localtunnel.dev'
+const DEFAULT_SERVER = 'api.localtunnel.dev'
 
 cli
   .command('start', 'Start a local tunnel to expose your local server')
@@ -74,7 +74,7 @@ cli
 
     try {
       const serverHost = options.server?.replace(/^(wss?|https?):\/\//, '') || DEFAULT_SERVER
-      const secure = options.secure || options.server?.startsWith('wss://') || options.server?.startsWith('https://') || serverHost === DEFAULT_SERVER
+      const secure = options.secure || options.server?.startsWith('wss://') || options.server?.startsWith('https://') || serverHost === DEFAULT_SERVER || serverHost === 'localtunnel.dev'
 
       console.log('')
       console.log(`  Connecting to ${serverHost}...`)
@@ -226,7 +226,7 @@ cli
   })
 
 cli
-  .command('deploy', 'Deploy tunnel server to AWS EC2 using ts-cloud')
+  .command('deploy:tunnel', 'Deploy tunnel server to AWS EC2 using ts-cloud')
   .option('--region <region>', 'AWS region', { default: 'us-east-1' })
   .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
   .option('--domain <domain>', 'Domain for tunnel URLs (sets up Route53 DNS)')
@@ -289,7 +289,7 @@ cli
       }
       console.log('')
       console.log('Connect with:')
-      console.log(`  localtunnels start --port 3000 --server ${result.domain || result.publicIp}`)
+      console.log(`  localtunnels start --port 3000 --server ${result.domain ? `api.${result.domain}` : result.publicIp}`)
       console.log('')
     }
     catch (error: any) {
@@ -342,6 +342,184 @@ cli
     }
     catch (error: any) {
       console.error(`Destruction failed: ${error.message}`)
+      if (options.verbose) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  })
+
+interface SiteDeployOptions {
+  region?: string
+  domain?: string
+  sourceDir?: string
+  verbose?: boolean
+}
+
+cli
+  .command('deploy:site', 'Deploy marketing site to S3+CloudFront')
+  .option('--region <region>', 'AWS region', { default: 'us-east-1' })
+  .option('--domain <domain>', 'Domain for the site', { default: 'localtunnel.dev' })
+  .option('--source-dir <dir>', 'Source directory for static files', { default: './dist/.bunpress' })
+  .option('--verbose', 'Enable verbose logging')
+  .action(async (options: SiteDeployOptions) => {
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║              localtunnels site deployment                    ║
+╚══════════════════════════════════════════════════════════════╝
+`)
+
+    console.log(`Region:          ${options.region}`)
+    console.log(`Domain:          ${options.domain}`)
+    console.log(`Source:          ${options.sourceDir}`)
+    console.log('')
+    console.log('Deploying static site to S3+CloudFront...')
+    console.log('')
+
+    try {
+      const siteModule = '../src/cloud/deploy-site'
+      const { deploySite } = await import(/* @vite-ignore */ siteModule) as any
+
+      const result = await deploySite({
+        region: options.region,
+        domain: options.domain,
+        sourceDir: options.sourceDir,
+        verbose: options.verbose,
+      })
+
+      console.log('')
+      console.log('╔══════════════════════════════════════════════════════════════╗')
+      console.log('║                   DEPLOYMENT COMPLETE                        ║')
+      console.log('╚══════════════════════════════════════════════════════════════╝')
+      console.log('')
+      console.log('Resources:')
+      console.log(`  Domain:          ${result.domain}`)
+      console.log(`  Bucket:          ${result.bucket}`)
+      if (result.distributionId) {
+        console.log(`  Distribution:    ${result.distributionId}`)
+      }
+      if (result.distributionDomain) {
+        console.log(`  CloudFront:      ${result.distributionDomain}`)
+      }
+      if (result.filesUploaded) {
+        console.log(`  Files uploaded:  ${result.filesUploaded}`)
+      }
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`Site deployment failed: ${error.message}`)
+      if (options.verbose) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  })
+
+interface AnalyticsDeployOptions {
+  region?: string
+  tableName?: string
+  serviceName?: string
+  verbose?: boolean
+}
+
+cli
+  .command('deploy:analytics', 'Deploy ts-analytics backend (DynamoDB + Lambda API)')
+  .option('--region <region>', 'AWS region', { default: 'us-east-1' })
+  .option('--table-name <name>', 'DynamoDB table name', { default: 'ts-analytics' })
+  .option('--service-name <name>', 'Service name prefix', { default: 'localtunnel-analytics' })
+  .option('--verbose', 'Enable verbose logging')
+  .action(async (options: AnalyticsDeployOptions) => {
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║              localtunnels analytics deployment                ║
+╚══════════════════════════════════════════════════════════════╝
+`)
+
+    console.log(`Region:          ${options.region}`)
+    console.log(`Table:           ${options.tableName}`)
+    console.log(`Service:         ${options.serviceName}`)
+    console.log('')
+    console.log('Deploying analytics backend (DynamoDB + Lambda + API Gateway)...')
+    console.log('')
+
+    try {
+      const analyticsModule = '../src/cloud/deploy-analytics'
+      const { deployAnalytics } = await import(/* @vite-ignore */ analyticsModule) as any
+
+      const result = await deployAnalytics({
+        region: options.region,
+        tableName: options.tableName,
+        serviceName: options.serviceName,
+        verbose: options.verbose,
+      })
+
+      console.log('')
+      console.log('╔══════════════════════════════════════════════════════════════╗')
+      console.log('║                   DEPLOYMENT COMPLETE                        ║')
+      console.log('╚══════════════════════════════════════════════════════════════╝')
+      console.log('')
+      console.log('Resources:')
+      console.log(`  API Endpoint:    ${result.apiEndpoint}`)
+      console.log(`  DynamoDB Table:  ${result.tableName}`)
+      console.log(`  Region:          ${result.region}`)
+      console.log('')
+      console.log('Collect endpoint:')
+      console.log(`  ${result.apiEndpoint}/collect`)
+      console.log('')
+      console.log('Update your bunpress.config.ts:')
+      console.log(`  analytics: {`)
+      console.log(`    apiEndpoint: '${result.apiEndpoint}',`)
+      console.log(`  }`)
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`Analytics deployment failed: ${error.message}`)
+      if (options.verbose) {
+        console.error(error.stack)
+      }
+      process.exit(1)
+    }
+  })
+
+cli
+  .command('destroy:analytics', 'Tear down analytics infrastructure')
+  .option('--region <region>', 'AWS region', { default: 'us-east-1' })
+  .option('--table-name <name>', 'DynamoDB table name', { default: 'ts-analytics' })
+  .option('--service-name <name>', 'Service name prefix', { default: 'localtunnel-analytics' })
+  .option('--verbose', 'Enable verbose logging')
+  .action(async (options: AnalyticsDeployOptions) => {
+    console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║              localtunnels analytics destruction               ║
+╚══════════════════════════════════════════════════════════════╝
+`)
+
+    console.log(`Region:          ${options.region}`)
+    console.log(`Table:           ${options.tableName}`)
+    console.log(`Service:         ${options.serviceName}`)
+    console.log('')
+    console.log('Destroying analytics infrastructure...')
+    console.log('')
+
+    try {
+      const analyticsModuleD = '../src/cloud/deploy-analytics'
+      const { destroyAnalytics } = await import(/* @vite-ignore */ analyticsModuleD) as any
+
+      await destroyAnalytics({
+        region: options.region,
+        tableName: options.tableName,
+        serviceName: options.serviceName,
+        verbose: options.verbose,
+      })
+
+      console.log('')
+      console.log('╔══════════════════════════════════════════════════════════════╗')
+      console.log('║                  DESTRUCTION COMPLETE                        ║')
+      console.log('╚══════════════════════════════════════════════════════════════╝')
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`Analytics destruction failed: ${error.message}`)
       if (options.verbose) {
         console.error(error.stack)
       }
@@ -417,8 +595,11 @@ USAGE:
 COMMANDS:
   start              Start a tunnel client (default)
   server             Start a self-hosted tunnel server
-  deploy             Deploy to AWS using ts-cloud
+  deploy:tunnel      Deploy tunnel server to AWS EC2
+  deploy:site        Deploy marketing site to S3+CloudFront
+  deploy:analytics   Deploy analytics backend (DynamoDB + Lambda)
   destroy            Remove AWS infrastructure
+  destroy:analytics  Tear down analytics infrastructure
   status             Check tunnel server status
   info               Show this information
 
@@ -439,10 +620,13 @@ EXAMPLES:
   localtunnels server --port 8080 --domain mytunnel.example.com
 
   # Deploy tunnel server to EC2
-  localtunnels deploy --region us-east-1 --domain localtunnel.dev
+  localtunnels deploy:tunnel --region us-east-1 --domain localtunnel.dev
+
+  # Deploy marketing site to S3+CloudFront
+  localtunnels deploy:site --domain localtunnel.dev
 
   # Deploy with SSH access
-  localtunnels deploy --domain localtunnel.dev --key-name my-keypair
+  localtunnels deploy:tunnel --domain localtunnel.dev --key-name my-keypair
 
   # Destroy deployed infrastructure
   localtunnels destroy --domain localtunnel.dev

@@ -1048,48 +1048,9 @@
   </div>
 
   <script type="module">
-    // Sample data
-    const sampleRequests = [
-      { id: 1, method: 'GET', path: '/', status: 200, size: '4.2 KB', time: '12ms', ts: '10:42:03', headers: { 'Host': 'swift-fox.localtunnel.dev', 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html', 'Accept-Encoding': 'gzip, deflate, br', 'Connection': 'keep-alive', 'Cache-Control': 'no-cache' }, body: null, response: '<!DOCTYPE html><html>...</html>' },
-      { id: 2, method: 'GET', path: '/assets/style.css', status: 200, size: '8.1 KB', time: '3ms', ts: '10:42:03', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'text/css', 'Referer': 'https://swift-fox.localtunnel.dev/' }, body: null, response: '/* CSS content */' },
-      { id: 3, method: 'GET', path: '/api/users', status: 200, size: '1.8 KB', time: '45ms', ts: '10:42:05', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: null, response: JSON.stringify([{ id: 1, name: 'Alice', role: 'admin' }, { id: 2, name: 'Bob', role: 'editor' }], null, 2) },
-      { id: 4, method: 'POST', path: '/api/webhook', status: 201, size: '0.3 KB', time: '89ms', ts: '10:42:08', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'X-GitHub-Event': 'push', 'X-GitHub-Delivery': 'a1b2c3d4' }, body: JSON.stringify({ ref: 'refs/heads/main', repository: { full_name: 'stacksjs/localtunnels' }, pusher: { name: 'chrisbreuer' } }, null, 2), response: JSON.stringify({ received: true, processed: true }, null, 2) },
-      { id: 5, method: 'GET', path: '/api/users/1', status: 200, size: '0.5 KB', time: '22ms', ts: '10:42:10', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json' }, body: null, response: JSON.stringify({ id: 1, name: 'Alice', email: 'alice@example.com', role: 'admin', created_at: '2025-12-01' }, null, 2) },
-      { id: 6, method: 'PUT', path: '/api/users/1', status: 200, size: '0.4 KB', time: '67ms', ts: '10:42:12', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: JSON.stringify({ name: 'Alice Smith', role: 'admin' }, null, 2), response: JSON.stringify({ id: 1, name: 'Alice Smith', role: 'admin', updated: true }, null, 2) },
-      { id: 7, method: 'GET', path: '/api/settings', status: 401, size: '0.1 KB', time: '8ms', ts: '10:42:15', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json' }, body: null, response: JSON.stringify({ error: 'Unauthorized', message: 'Invalid or expired token' }, null, 2) },
-      { id: 8, method: 'DELETE', path: '/api/users/99', status: 404, size: '0.1 KB', time: '15ms', ts: '10:42:18', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Authorization': 'Bearer eyJhbG...' }, body: null, response: JSON.stringify({ error: 'Not Found', message: 'User 99 does not exist' }, null, 2) },
-      { id: 9, method: 'GET', path: '/favicon.ico', status: 304, size: '0 B', time: '1ms', ts: '10:42:18', headers: { 'Host': 'swift-fox.localtunnel.dev', 'If-None-Match': '"abc123"' }, body: null, response: '' },
-      { id: 10, method: 'POST', path: '/api/upload', status: 500, size: '0.2 KB', time: '234ms', ts: '10:42:22', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'multipart/form-data' }, body: '[binary data]', response: JSON.stringify({ error: 'Internal Server Error', message: 'File processing failed', stack: 'Error: ENOSPC...' }, null, 2) },
-      { id: 11, method: 'GET', path: '/api/health', status: 200, size: '0.1 KB', time: '2ms', ts: '10:42:25', headers: { 'Host': 'swift-fox.localtunnel.dev' }, body: null, response: JSON.stringify({ status: 'ok', uptime: 9257 }, null, 2) },
-      { id: 12, method: 'PATCH', path: '/api/users/2/settings', status: 200, size: '0.3 KB', time: '34ms', ts: '10:42:28', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: JSON.stringify({ theme: 'dark', notifications: true }, null, 2), response: JSON.stringify({ updated: true }, null, 2) },
-      { id: 13, method: 'OPTIONS', path: '/api/users', status: 204, size: '0 B', time: '1ms', ts: '10:42:28', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Origin': 'https://app.example.com', 'Access-Control-Request-Method': 'POST' }, body: null, response: '' },
-      { id: 14, method: 'GET', path: '/api/users?page=2&limit=10', status: 200, size: '2.1 KB', time: '52ms', ts: '10:42:31', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json', 'Authorization': 'Bearer eyJhbG...' }, body: null, response: JSON.stringify({ data: [{ id: 11, name: 'User 11' }, { id: 12, name: 'User 12' }], total: 47, page: 2 }, null, 2) },
-      { id: 15, method: 'POST', path: '/api/auth/login', status: 200, size: '0.4 KB', time: '112ms', ts: '10:42:35', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'alice@example.com', password: '***' }, null, 2), response: JSON.stringify({ token: 'eyJhbGciOiJIUzI1NiIs...', expiresIn: 3600 }, null, 2) },
-      { id: 16, method: 'GET', path: '/api/metrics', status: 200, size: '1.4 KB', time: '18ms', ts: '10:42:38', headers: { 'Host': 'swift-fox.localtunnel.dev' }, body: null, response: JSON.stringify({ requests_total: 1847, active_connections: 12, avg_response_time_ms: 23 }, null, 2) },
-      { id: 17, method: 'POST', path: '/api/webhook', status: 502, size: '0.2 KB', time: '5001ms', ts: '10:42:44', headers: { 'Host': 'swift-fox.localtunnel.dev', 'Content-Type': 'application/json', 'X-Stripe-Signature': 'whsec_...' }, body: JSON.stringify({ type: 'payment_intent.succeeded', data: { object: { amount: 2000 } } }, null, 2), response: JSON.stringify({ error: 'Bad Gateway', message: 'Upstream timeout' }, null, 2) },
-    ]
-
-    const sampleWsMessages = [
-      { dir: 'outgoing', type: 'ready', payload: '{"type":"ready","subdomain":"swift-fox"}', time: '10:41:58' },
-      { dir: 'incoming', type: 'connected', payload: '{"type":"connected","message":"WebSocket connected"}', time: '10:41:58' },
-      { dir: 'incoming', type: 'registered', payload: '{"type":"registered","subdomain":"swift-fox","url":"https://swift-fox.localtunnel.dev"}', time: '10:41:59' },
-      { dir: 'outgoing', type: 'ping', payload: '{"type":"ping"}', time: '10:42:00' },
-      { dir: 'incoming', type: 'pong', payload: '{"type":"pong"}', time: '10:42:00' },
-      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_1","method":"GET","url":"/","headers":{...}}', time: '10:42:03' },
-      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_1","status":200,"headers":{...},"body":"..."}', time: '10:42:03' },
-      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_2","method":"GET","url":"/assets/style.css"}', time: '10:42:03' },
-      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_2","status":200}', time: '10:42:03' },
-      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_3","method":"GET","url":"/api/users"}', time: '10:42:05' },
-      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_3","status":200,"body":"[{...}]"}', time: '10:42:05' },
-      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_4","method":"POST","url":"/api/webhook"}', time: '10:42:08' },
-      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_4","status":201}', time: '10:42:08' },
-      { dir: 'outgoing', type: 'ping', payload: '{"type":"ping"}', time: '10:42:30' },
-      { dir: 'incoming', type: 'pong', payload: '{"type":"pong"}', time: '10:42:30' },
-      { dir: 'incoming', type: 'request', payload: '{"type":"request","id":"req_10","method":"POST","url":"/api/upload"}', time: '10:42:22' },
-      { dir: 'outgoing', type: 'response', payload: '{"type":"response","id":"req_10","status":500,"body":"Error: ENOSPC"}', time: '10:42:22' },
-      { dir: 'outgoing', type: 'ping', payload: '{"type":"ping"}', time: '10:43:00' },
-      { dir: 'incoming', type: 'pong', payload: '{"type":"pong"}', time: '10:43:00' },
-    ]
+    // Live data from server API
+    let allRequests = []
+    const tunnelUrl = window.TUNNEL_URL || window.location.origin
 
     // DOM refs
     const requestList = document.getElementById('request-list')
@@ -1120,20 +1081,10 @@
       })
     }
 
-    // Render WebSocket messages
+    // Render WebSocket messages (placeholder - live WS tracing not yet available)
     function renderWsMessages() {
       const container = document.getElementById('tab-websocket')
-      container.innerHTML = ''
-      sampleWsMessages.forEach(msg => {
-        const div = document.createElement('div')
-        div.className = 'ws-message'
-        div.innerHTML = `
-          <span class="ws-direction ${msg.dir}">${msg.dir === 'outgoing' ? '\u2191 OUT' : '\u2193 IN'}</span>
-          <span class="ws-payload">${escapeHtml(msg.payload)}</span>
-          <span class="ws-time">${msg.time}</span>
-        `
-        container.appendChild(div)
-      })
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-text">WebSocket tracing</div><div class="empty-state-hint">Live WebSocket message tracing coming soon</div></div>'
     }
 
     // Select request
@@ -1152,7 +1103,7 @@
           <div class="inspector-group-title">General</div>
           <div class="inspector-row">
             <span class="inspector-key">URL</span>
-            <span class="inspector-value">https://swift-fox.localtunnel.dev${escapeHtml(req.path)}</span>
+            <span class="inspector-value">${tunnelUrl}${escapeHtml(req.path)}</span>
           </div>
           <div class="inspector-row">
             <span class="inspector-key">Method</span>
@@ -1266,7 +1217,7 @@
     // Filter
     filterInput.addEventListener('input', () => {
       const q = filterInput.value.toLowerCase()
-      const filtered = sampleRequests.filter(r =>
+      const filtered = allRequests.filter(r =>
         r.path.toLowerCase().includes(q)
         || r.method.toLowerCase().includes(q)
         || String(r.status).includes(q)
@@ -1296,8 +1247,8 @@
       })
     })
 
-    // Uptime counter
-    let uptimeSeconds = 9257
+    // Uptime counter (updated from stats API)
+    let uptimeSeconds = 0
     setInterval(() => {
       uptimeSeconds++
       const h = String(Math.floor(uptimeSeconds / 3600)).padStart(2, '0')
@@ -1306,77 +1257,73 @@
       document.getElementById('uptime').textContent = `${h}:${m}:${s}`
     }, 1000)
 
-    // Simulate new requests arriving
-    let requestId = sampleRequests.length + 1
-    const paths = ['/api/users', '/api/health', '/api/metrics', '/api/webhook', '/api/settings', '/api/upload', '/']
-    const methods = ['GET', 'GET', 'GET', 'POST', 'GET', 'PUT', 'DELETE']
-    const statuses = [200, 200, 200, 201, 304, 200, 404, 500]
+    // Update stats counters from server data
+    function updateStats(stats) {
+      if (stats.uptime) uptimeSeconds = stats.uptime
+      document.getElementById('total-requests').textContent = stats.totalRequests || 0
+      document.getElementById('stat-2xx').textContent = stats.s2xx || 0
+      document.getElementById('stat-3xx').textContent = stats.s3xx || 0
+      document.getElementById('stat-4xx').textContent = stats.s4xx || 0
+      document.getElementById('stat-5xx').textContent = stats.s5xx || 0
+    }
 
-    function simulateRequest() {
-      const method = methods[Math.floor(Math.random() * methods.length)]
-      const path = paths[Math.floor(Math.random() * paths.length)]
-      const status = statuses[Math.floor(Math.random() * statuses.length)]
-      const time = Math.floor(Math.random() * 200) + 1
-      const size = (Math.random() * 10).toFixed(1) + ' KB'
-      const now = new Date()
-      const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+    // Poll server for live request data
+    let lastSeenId = 0
 
-      const req = {
-        id: requestId++,
-        method, path, status, size, time: `${time}ms`, ts,
-        headers: { 'Host': 'swift-fox.localtunnel.dev', 'Accept': 'application/json' },
-        body: method === 'POST' || method === 'PUT' ? '{"data": "..."}' : null,
-        response: JSON.stringify({ ok: true }, null, 2)
-      }
+    async function pollRequests() {
+      try {
+        const [reqRes, statsRes] = await Promise.all([
+          fetch('/devtools/api/requests'),
+          fetch('/devtools/api/stats'),
+        ])
+        if (reqRes.ok) {
+          const requests = await reqRes.json()
+          // Find new requests since last poll
+          const newRequests = requests.filter(r => r.id > lastSeenId)
+          if (newRequests.length > 0) {
+            allRequests.push(...newRequests)
+            lastSeenId = Math.max(...requests.map(r => r.id))
 
-      sampleRequests.push(req)
+            // Append new rows without full re-render
+            for (const req of newRequests) {
+              const statusClass = req.status < 300 ? 's2xx' : req.status < 400 ? 's3xx' : req.status < 500 ? 's4xx' : 's5xx'
+              const row = document.createElement('div')
+              row.className = 'request-row'
+              row.dataset.id = req.id
+              row.innerHTML = `
+                <span class="method ${req.method.toLowerCase()}">${req.method}</span>
+                <span class="request-path">${escapeHtml(req.path)}</span>
+                <span class="status-code ${statusClass}">${req.status}</span>
+                <span class="request-size">${req.size}</span>
+                <span class="request-time">${req.time}</span>
+                <span class="request-timestamp">${req.ts}</span>
+              `
+              row.addEventListener('click', () => selectRequest(req, row))
+              requestList.appendChild(row)
+            }
 
-      const statusClass = status < 300 ? 's2xx' : status < 400 ? 's3xx' : status < 500 ? 's4xx' : 's5xx'
-      const row = document.createElement('div')
-      row.className = 'request-row'
-      row.dataset.id = req.id
-      row.innerHTML = `
-        <span class="method ${method.toLowerCase()}">${method}</span>
-        <span class="request-path">${path}</span>
-        <span class="status-code ${statusClass}">${status}</span>
-        <span class="request-size">${size}</span>
-        <span class="request-time">${time}ms</span>
-        <span class="request-timestamp">${ts}</span>
-      `
-      row.addEventListener('click', () => selectRequest(req, row))
-      requestList.appendChild(row)
+            document.getElementById('request-count').textContent = allRequests.length
 
-      // Update counters
-      document.getElementById('request-count').textContent = sampleRequests.length
-      document.getElementById('total-requests').textContent = sampleRequests.length
-
-      const s2xx = sampleRequests.filter(r => r.status >= 200 && r.status < 300).length
-      const s3xx = sampleRequests.filter(r => r.status >= 300 && r.status < 400).length
-      const s4xx = sampleRequests.filter(r => r.status >= 400 && r.status < 500).length
-      const s5xx = sampleRequests.filter(r => r.status >= 500).length
-      document.getElementById('stat-2xx').textContent = s2xx
-      document.getElementById('stat-3xx').textContent = s3xx
-      document.getElementById('stat-4xx').textContent = s4xx
-      document.getElementById('stat-5xx').textContent = s5xx
-
-      // Auto-scroll if near bottom
-      if (requestList.scrollHeight - requestList.scrollTop - requestList.clientHeight < 100) {
-        requestList.scrollTop = requestList.scrollHeight
+            // Auto-scroll if near bottom
+            if (requestList.scrollHeight - requestList.scrollTop - requestList.clientHeight < 100) {
+              requestList.scrollTop = requestList.scrollHeight
+            }
+          }
+        }
+        if (statsRes.ok) {
+          updateStats(await statsRes.json())
+        }
+      } catch (err) {
+        console.debug('DevTools poll error:', err)
       }
     }
 
-    // Start with sample data
-    renderRequests(sampleRequests)
+    // Initial load
+    await pollRequests()
+    renderRequests(allRequests)
 
-    // Simulate live requests every 3-8 seconds
-    function scheduleNext() {
-      const delay = 3000 + Math.random() * 5000
-      setTimeout(() => {
-        simulateRequest()
-        scheduleNext()
-      }, delay)
-    }
-    scheduleNext()
+    // Poll every 2 seconds
+    setInterval(pollRequests, 2000)
   </script>
 </body>
 </html>

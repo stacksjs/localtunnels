@@ -5,7 +5,7 @@ import { canSystemConnect, cleanupMacOSResolver, ensureMacOSResolver, resolveHos
 import { calculateBackoff, debugLog, delay, generateSubdomain, isValidSubdomain } from './utils'
 
 // Internal options type with ssl being optional
-type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl' | 'manageHosts'> & { ssl?: TunnelOptions['ssl'], manageHosts: boolean }
+type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl' | 'manageHosts' | 'domain'> & { ssl?: TunnelOptions['ssl'], manageHosts: boolean, domain: string }
 
 // Scalability limits
 const MAX_CONNECTIONS_PER_SUBDOMAIN = 5
@@ -50,6 +50,21 @@ function extractSubdomain(host: string): string {
   return dotIdx === -1 ? host : host.substring(0, dotIdx)
 }
 
+interface RequestLogEntry {
+  id: number
+  method: string
+  path: string
+  status: number
+  size: string
+  time: string
+  ts: string
+  headers: Record<string, string>
+  body: string | null
+  response: string
+}
+
+const MAX_REQUEST_LOG = 100
+
 interface WebSocketData {
   subdomain: string
   connectedAt: number
@@ -72,9 +87,11 @@ export class TunnelServer extends EventEmitter {
   private responseHandlers: Map<number, (response: any) => void> = new Map()
   private responseTimeouts: Map<number, ReturnType<typeof setTimeout>> = new Map()
   private subdomainSockets: Map<string, Set<ServerWebSocket<WebSocketData>>> = new Map()
+  private subdomainRequestLogs: Map<string, RequestLogEntry[]> = new Map()
   private idleCleanupInterval: ReturnType<typeof setInterval> | null = null
   private activeConnections = 0
   private totalConnections = 0
+  private devtoolsHtml: string | null = null
   private stats: InternalStats = {
     connections: 0,
     requests: 0,
@@ -87,9 +104,10 @@ export class TunnelServer extends EventEmitter {
 
   constructor(options: TunnelOptions = {}) {
     super()
+    const host = options.host || '0.0.0.0'
     this.options = {
       port: options.port || 3000,
-      host: options.host || '0.0.0.0',
+      host,
       secure: options.secure || false,
       verbose: options.verbose || false,
       localPort: options.localPort || 8000,
@@ -99,6 +117,7 @@ export class TunnelServer extends EventEmitter {
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
       manageHosts: false,
+      domain: options.domain || (host.startsWith('api.') ? host.slice(4) : host),
       ...(options.ssl ? { ssl: options.ssl } : {}),
     }
   }
@@ -135,6 +154,7 @@ export class TunnelServer extends EventEmitter {
       sockets.delete(socket)
       if (sockets.size === 0) {
         this.subdomainSockets.delete(subdomain)
+        this.subdomainRequestLogs.delete(subdomain)
       }
     }
     this.activeConnections = Math.max(0, this.activeConnections - 1)
@@ -219,7 +239,25 @@ export class TunnelServer extends EventEmitter {
         const bodySize = responseData.body?.length || 0
         this.stats.bytesOut += bodySize
 
-        if (this.options.verbose) debugLog('server', `Response for ${requestId}: ${responseData.status} (${bodySize} bytes, ${Date.now() - startTime}ms)`, true)
+        const duration = Date.now() - startTime
+        if (this.options.verbose) debugLog('server', `Response for ${requestId}: ${responseData.status} (${bodySize} bytes, ${duration}ms)`, true)
+
+        // Log request for devtools
+        const now = new Date()
+        const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+        const sizeStr = bodySize > 1024 ? `${(bodySize / 1024).toFixed(1)} KB` : `${bodySize} B`
+        this.logRequest(subdomain, {
+          id: requestId,
+          method: req.method,
+          path,
+          status: responseData.status,
+          size: sizeStr,
+          time: `${duration}ms`,
+          ts,
+          headers: headers,
+          body: body || null,
+          response: typeof responseData.body === 'string' ? responseData.body.slice(0, 4096) : '',
+        })
 
         // Handle binary responses
         let responseBody: string | Uint8Array = responseData.body || ''
@@ -254,6 +292,63 @@ export class TunnelServer extends EventEmitter {
         }
       }, this.options.timeout)
       this.responseTimeouts.set(requestId, tid)
+    })
+  }
+
+  private logRequest(subdomain: string, entry: RequestLogEntry): void {
+    let logs = this.subdomainRequestLogs.get(subdomain)
+    if (!logs) {
+      logs = []
+      this.subdomainRequestLogs.set(subdomain, logs)
+    }
+    logs.push(entry)
+    if (logs.length > MAX_REQUEST_LOG) {
+      logs.shift()
+    }
+  }
+
+  private getSubdomainStats(subdomain: string): Record<string, unknown> {
+    const logs = this.subdomainRequestLogs.get(subdomain) || []
+    const s2xx = logs.filter(r => r.status >= 200 && r.status < 300).length
+    const s3xx = logs.filter(r => r.status >= 300 && r.status < 400).length
+    const s4xx = logs.filter(r => r.status >= 400 && r.status < 500).length
+    const s5xx = logs.filter(r => r.status >= 500).length
+    const avgTime = logs.length > 0
+      ? Math.round(logs.reduce((sum, r) => sum + Number.parseInt(r.time), 0) / logs.length)
+      : 0
+    return {
+      totalRequests: logs.length,
+      s2xx,
+      s3xx,
+      s4xx,
+      s5xx,
+      avgResponseTime: avgTime,
+      uptime: Math.floor((Date.now() - this.stats.startTime.getTime()) / 1000),
+    }
+  }
+
+  private async serveDevtools(subdomain: string): Promise<Response> {
+    if (!this.devtoolsHtml) {
+      try {
+        this.devtoolsHtml = await Bun.file(new URL('./ui/devtools/index.stx', import.meta.url).pathname).text()
+      }
+      catch {
+        return new Response('DevTools not available', { status: 404 })
+      }
+    }
+
+    // Inject context variables into the HTML
+    const proto = this.options.secure ? 'https' : 'http'
+    const contextScript = `<script>
+    window.TUNNEL_SUBDOMAIN = '${subdomain}';
+    window.TUNNEL_SERVER = '${this.options.domain}';
+    window.TUNNEL_SECURE = ${this.options.secure};
+    window.TUNNEL_URL = '${proto}://${subdomain}.${this.options.domain}';
+    </script>`
+
+    const html = this.devtoolsHtml.replace('</head>', `${contextScript}\n</head>`)
+    return new Response(html, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
     })
   }
 
@@ -363,6 +458,19 @@ export class TunnelServer extends EventEmitter {
           return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 400 })
         }
 
+        // Serve devtools page
+        if ((path === '/devtools' || path === '/devtools/') && subdomain && this.subdomainSockets.has(subdomain)) {
+          return this.serveDevtools(subdomain)
+        }
+
+        // Serve devtools API endpoints
+        if (path === '/devtools/api/requests' && subdomain) {
+          return Response.json(this.subdomainRequestLogs.get(subdomain) || [])
+        }
+        if (path === '/devtools/api/stats' && subdomain) {
+          return Response.json(this.getSubdomainStats(subdomain))
+        }
+
         // Forward HTTP request to connected client
         if (subdomain && this.subdomainSockets.has(subdomain)) {
           this.stats.requests++
@@ -419,7 +527,7 @@ export class TunnelServer extends EventEmitter {
 
               // Confirm registration
               const proto = this.options.secure ? 'https' : 'http'
-              ws.send(`{"type":"registered","subdomain":"${subdomain}","url":"${proto}://${subdomain}.${this.options.host}"}`)
+              ws.send(`{"type":"registered","subdomain":"${subdomain}","url":"${proto}://${subdomain}.${this.options.domain}"}`)
             }
             else if (data.type === 'response') {
               const handler = this.responseHandlers.get(data.id)
@@ -560,9 +668,10 @@ export class TunnelClient extends EventEmitter {
 
   constructor(options: TunnelOptions = {}) {
     super()
+    const host = options.host || 'localhost'
     this.options = {
       port: options.port || 3000,
-      host: options.host || 'localhost',
+      host,
       secure: options.secure || false,
       verbose: options.verbose || false,
       localPort: options.localPort || 8000,
@@ -572,6 +681,7 @@ export class TunnelClient extends EventEmitter {
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
       manageHosts: options.manageHosts !== false,
+      domain: options.domain || (host.startsWith('api.') ? host.slice(4) : host),
     }
     // Cache the local URL prefix to avoid building it on every request
     this.localUrlPrefix = `http://${this.options.localHost}:${this.options.localPort}`
@@ -588,7 +698,7 @@ export class TunnelClient extends EventEmitter {
       // with direct IP, but browsers need system DNS to work.
       if (!this.resolverCreated) {
         try {
-          this.resolverCreated = await ensureMacOSResolver(this.options.host, this.options.verbose)
+          this.resolverCreated = await ensureMacOSResolver(this.options.domain, this.options.verbose)
         }
         catch (err) {
           debugLog('client', `macOS resolver setup failed (non-fatal): ${err}`, this.options.verbose, 'warn')
@@ -675,7 +785,7 @@ export class TunnelClient extends EventEmitter {
             debugLog('client', `Registered with subdomain: ${data.subdomain}`, this.options.verbose)
 
             this.emit('connected', {
-              url: `${this.options.secure ? 'https' : 'http'}://${this.options.subdomain}.${this.options.host}`,
+              url: `${this.options.secure ? 'https' : 'http'}://${this.options.subdomain}.${this.options.domain}`,
               subdomain: this.options.subdomain,
               tunnelServer: this.options.host,
             })
@@ -911,7 +1021,7 @@ export class TunnelClient extends EventEmitter {
 
     // Clean up macOS resolver file
     if (this.resolverCreated) {
-      await cleanupMacOSResolver(this.options.host, this.options.verbose).catch(() => {})
+      await cleanupMacOSResolver(this.options.domain, this.options.verbose).catch(() => {})
     }
   }
 
@@ -924,7 +1034,7 @@ export class TunnelClient extends EventEmitter {
   }
 
   public getTunnelUrl(): string {
-    return `${this.options.secure ? 'https' : 'http'}://${this.options.subdomain}.${this.options.host}`
+    return `${this.options.secure ? 'https' : 'http'}://${this.options.subdomain}.${this.options.domain}`
   }
 }
 
@@ -951,9 +1061,10 @@ export async function startLocalTunnel(options: {
   onError?: (error: Error) => void
   onReconnecting?: (info: { attempt: number, delay: number }) => void
 }): Promise<TunnelClient> {
-  const serverHost = options.server?.replace(/^(wss?|https?):\/\//, '') || 'localtunnel.dev'
+  const serverHost = options.server?.replace(/^(wss?|https?):\/\//, '') || 'api.localtunnel.dev'
   const secure = options.server?.startsWith('wss://')
     || options.server?.startsWith('https://')
+    || serverHost === 'api.localtunnel.dev'
     || serverHost === 'localtunnel.dev'
 
   const client = new TunnelClient({

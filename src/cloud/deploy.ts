@@ -564,18 +564,18 @@ export async function deployTunnelInfrastructure(
       try {
         const porkbun = new PorkbunProvider(porkbunApiKey, porkbunSecretKey)
 
-        // Upsert root A record
-        const rootResult = await porkbun.upsertRecord(config.domain, {
-          name: '',
+        // Upsert api subdomain A record (root is now managed by CloudFront/site deploy)
+        const apiResult = await porkbun.upsertRecord(config.domain, {
+          name: 'api',
           type: 'A',
           content: publicIp,
           ttl: 300,
         })
-        if (rootResult.success) {
-          log(`Set A record: ${config.domain} -> ${publicIp}`)
+        if (apiResult.success) {
+          log(`Set A record: api.${config.domain} -> ${publicIp}`)
         }
         else {
-          log(`Warning: Could not set root A record: ${rootResult.message}`)
+          log(`Warning: Could not set api A record: ${apiResult.message}`)
         }
 
         // Upsert wildcard A record
@@ -611,11 +611,11 @@ export async function deployTunnelInfrastructure(
         if (hostedZoneId) {
           await route53.createARecord({
             HostedZoneId: hostedZoneId,
-            Name: config.domain,
+            Name: `api.${config.domain}`,
             Value: publicIp,
             TTL: 300,
           })
-          log(`Created A record: ${config.domain} -> ${publicIp}`)
+          log(`Created A record: api.${config.domain} -> ${publicIp}`)
 
           await route53.createARecord({
             HostedZoneId: hostedZoneId,
@@ -643,7 +643,7 @@ export async function deployTunnelInfrastructure(
 
   const protocol = config.enableSsl ? 'https' : 'http'
   const wsProtocol = config.enableSsl ? 'wss' : 'ws'
-  const serverHost = config.domain || publicIp
+  const serverHost = config.domain ? `api.${config.domain}` : publicIp
   const serverUrl = `${protocol}://${serverHost}`
   const wsUrl = `${wsProtocol}://${serverHost}`
 
@@ -901,6 +901,7 @@ function generateUserData(opts: {
     'const server = new TunnelServer({',
     `  port: ${internalPort},`,
     '  host: \'0.0.0.0\',',
+    `  domain: '${domain || 'localhost'}',`,
     '  verbose: true,',
     ...sslLines,
     '})',
