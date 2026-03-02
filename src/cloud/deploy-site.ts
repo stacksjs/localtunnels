@@ -120,7 +120,7 @@ export async function deploySite(config: SiteDeployConfig = {}): Promise<SiteDep
           count += await rewriteDocsLinks(fullPath)
         }
         else if (entry.name.endsWith('.html')) {
-          let html = await readFile(fullPath, 'utf-8')
+          const html = await readFile(fullPath, 'utf-8')
           // Rewrite href="/..." to href="/docs/..." (skip external and anchor links)
           // Also rewrite src="/..." for any root-relative assets
           const rewritten = html
