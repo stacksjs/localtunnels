@@ -90,7 +90,7 @@
     "format:fix": "bunx --bun pickier . --format --write"
   },
   "dependencies": {
-    "@stacksjs/ts-analytics": "^0.1.0",
+    "@stacksjs/ts-analytics": "github:stacksjs/ts-analytics",
     "bunfig": "^0.15.6"
   },
   "devDependencies": {
