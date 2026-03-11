@@ -9,7 +9,7 @@ await Bun.build({
   target: 'bun',
   minify: true,
   splitting: true,
-  external: ['ts-cloud', '@stacksjs/ts-cloud', '@stacksjs/ts-cloud/*'],
+  external: ['ts-cloud', '@stacksjs/ts-cloud', '@stacksjs/ts-cloud/*', '@stacksjs/ts-analytics'],
   plugins: [dts()],
 })
 
