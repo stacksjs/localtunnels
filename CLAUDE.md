@@ -2,7 +2,7 @@
 
 ## About
 
-A simple and smart tunneling solution. Expose your localhost to the world.
+localtunnels is a zero-config local tunnel that exposes your localhost to the internet over HTTPS. It features smart subdomain resolution (explicit, APP_NAME-based, or random memorable names with auto-collision handling), automatic DNS resolution for macOS `.dev` TLD issues, and self-hosting support via AWS. Available as both a CLI (`localtunnels start`) and a library (`startLocalTunnel()` / `TunnelClient`).
 
 ## Linting
 
