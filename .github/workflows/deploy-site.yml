@@ -37,7 +37,7 @@ jobs:
         run: bun install
 
       - name: Deploy Site
-        run: bun run deploy:site
+        run: bun run build:docs && bun run bin/cli.ts deploy:site --source-dir docs/.bunpress
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
