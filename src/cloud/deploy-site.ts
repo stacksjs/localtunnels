@@ -143,6 +143,16 @@ export async function deploySite(config: SiteDeployConfig = {}): Promise<SiteDep
     if (await marketingFile.exists()) {
       await Bun.write(join(stageDir, 'index.html'), marketingFile)
       log('Copied marketing page as root index.html')
+
+      // Copy marketing fonts to /fonts/
+      const fontsDir = new URL('../ui/marketing/fonts', import.meta.url).pathname
+      try {
+        await cp(fontsDir, join(stageDir, 'fonts'), { recursive: true })
+        log('Copied marketing fonts to /fonts/')
+      }
+      catch {
+        log('Warning: No marketing fonts directory found — skipping font copy')
+      }
     }
     else {
       log('Warning: Marketing page not found at src/ui/marketing/index.stx — using docs index as root')

@@ -4,9 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>localtunnels - Expose your localhost to the world</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    @font-face {
+      font-family: 'Lilex';
+      src: url('/fonts/Lilex.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'Lilex';
+      src: url('/fonts/Lilex-Italic.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: italic;
+      font-display: swap;
+    }
+  </style>
 
   <script>
     const version = '0.2.7'
@@ -41,7 +54,7 @@
       height: 100%;
       background: var(--bg);
       color: var(--green);
-      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
+      font-family: 'Lilex', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
       font-size: 14px;
       line-height: 1.6;
       overflow: hidden;
