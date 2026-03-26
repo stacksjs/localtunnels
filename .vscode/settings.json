@@ -6,6 +6,10 @@
     "source.fixAll.eslint": "explicit",
     "source.organizeImports": "never"
   },
+
+  "[stx]": {
+    "editor.defaultFormatter": "pickier.pickier-vscode"
+  },
   "eslint.rules.customizations": [
     { "rule": "style/*", "severity": "off", "fixable": true },
     { "rule": "format/*", "severity": "off", "fixable": true },
