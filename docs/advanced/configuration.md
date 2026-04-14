@@ -87,56 +87,72 @@ const client = new TunnelClient({
 ```typescript
 interface TunnelOptions {
   /**
-   * The tunnel server port
-   * @default 3000
+
+   _ The tunnel server port
+   _ @default 3000
+
    */
   port?: number
 
   /**
-   * The tunnel server hostname
-   * @default 'localhost'
+
+   _ The tunnel server hostname
+   _ @default 'localhost'
+
    */
   host?: string
 
   /**
-   * Enable secure WebSocket connection (wss://)
-   * @default false
+
+   _ Enable secure WebSocket connection (wss://)
+   _ @default false
+
    */
   secure?: boolean
 
   /**
-   * Enable verbose logging
-   * @default false
+
+   _ Enable verbose logging
+   _ @default false
+
    */
   verbose?: boolean
 
   /**
-   * The local port to forward traffic to
-   * @default 8000
+
+   _ The local port to forward traffic to
+   _ @default 8000
+
    */
   localPort?: number
 
   /**
-   * The local hostname
-   * @default 'localhost'
+
+   _ The local hostname
+   _ @default 'localhost'
+
    */
   localHost?: string
 
   /**
-   * Custom subdomain for the tunnel URL
-   * If not provided, a random subdomain is generated
+
+   _ Custom subdomain for the tunnel URL
+   _ If not provided, a random subdomain is generated
+
    */
   subdomain?: string
 
   /**
-   * SSL certificate configuration
-   */
+
+   _ SSL certificate configuration
+
+   _/
   ssl?: {
     /** Path to the private key file */
     key: string
     /** Path to the certificate file */
     cert: string
-    /** Path to the CA certificate (optional) */
+    /** Path to the CA certificate (optional) _/
     ca?: string
   }
 }
@@ -403,6 +419,6 @@ const server = createTunnel('server', { port: 3000 })
 
 ## Next Steps
 
-- Learn about [Server Setup](/advanced/server-setup) for self-hosted deployments
-- Optimize [Performance](/advanced/performance) for production use
-- Set up [CI/CD Integration](/advanced/ci-cd-integration)
+_ Learn about [Server Setup](/advanced/server-setup) for self-hosted deployments
+_ Optimize [Performance](/advanced/performance) for production use
+_ Set up [CI/CD Integration](/advanced/ci-cd-integration)

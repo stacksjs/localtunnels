@@ -184,7 +184,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 35.67 µs | 1x (baseline) |
-| **localtunnels** | **105.97 µs** | 2.97x |
+| **localtunnels**|**105.97 µs** | 2.97x |
 | **bore** | 188.60 ms | 5,290x |
 
 **GET `/json` (10-item JSON array):**
@@ -192,7 +192,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 30.67 µs | 1x (baseline) |
-| **localtunnels** | **109.58 µs** | 3.57x |
+| **localtunnels**|**109.58 µs** | 3.57x |
 | **bore** | 180.11 ms | 5,872x |
 
 **POST 1 KB body:**
@@ -200,7 +200,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 29.43 µs | 1x (baseline) |
-| **localtunnels** | **106.89 µs** | 3.63x |
+| **localtunnels**|**106.89 µs** | 3.63x |
 | **bore** | 180.74 ms | 6,143x |
 
 **10 Concurrent Requests (GET /json):**
@@ -208,14 +208,14 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 108.05 µs | 1x (baseline) |
-| **localtunnels** | **592.58 µs** | 5.48x |
+| **localtunnels**|**592.58 µs** | 5.48x |
 | **bore** | 188.46 ms | 1,744x |
 
 #### localtunnels vs Alternatives — Startup Time
 
 | Tool | Time to tunnel ready |
 |---|---|
-| **localtunnels** | **~324 µs** |
+| **localtunnels**|**~324 µs** |
 | **bore** | 195 ms |
 | **Cloudflare Tunnels** | 3,969 ms |
 
@@ -223,7 +223,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 
 | Tool | Strategy | Example Output | avg | vs localtunnels |
 |---|---|---|---|---|
-| **localtunnels** | Adjective-noun | `fast-deer`, `quick-surf`, `fond-opal` | **3.00 ns** | 1x |
+| **localtunnels**| Adjective-noun | `fast-deer`, `quick-surf`, `fond-opal` |**3.00 ns** | 1x |
 | **frp** | Counter prefix | `tunnel-1`, `tunnel-2`, `tunnel-3` | 25.66 ns | 8.55x slower |
 | **Cloudflare Tunnels** | UUID prefix | `a7ed76b1`, `ee76358d`, `d25abca3` | 42.69 ns | 14.23x slower |
 | **Expose** | UUID slug | `a432cef06efa`, `15b07c93bc27` | 96.60 ns | 32.20x slower |
@@ -234,7 +234,7 @@ Real end-to-end request forwarding through each tool's tunnel. localtunnels runs
 
 | Tool | Strategy | avg | vs fastest |
 |---|---|---|---|
-| **frp** | Counter-based | **22.19 ns** | 1x |
+| **frp**| Counter-based |**22.19 ns** | 1x |
 | **ngrok / Cloudflare Tunnels** | `crypto.randomUUID()` | 30.94 ns | 1.39x |
 | **localtunnels** | `crypto.randomUUID().substring()` | 42.42 ns | 1.91x |
 | **bore** | `crypto.getRandomValues` | 358.60 ns | 16.16x |
@@ -245,7 +245,7 @@ localtunnels uses WebSocket + JSON. bore and frp use binary protocols. This meas
 
 | Tool | Operation | avg | vs fastest |
 |---|---|---|---|
-| **localtunnels** | JSON serialize | **123.05 ns** | 1x |
+| **localtunnels**| JSON serialize |**123.05 ns** | 1x |
 | **bore / frp** | Binary header encode | 159.04 ns | 1.29x |
 | **bore / frp** | Binary header decode | 176.33 ns | 1.43x |
 | **localtunnels** | JSON parse | 434.87 ns | 3.53x |
@@ -254,7 +254,7 @@ localtunnels uses WebSocket + JSON. bore and frp use binary protocols. This meas
 
 | Tool | Strategy | avg | vs fastest |
 |---|---|---|---|
-| **frp / bore** (Go-style) | Enum-based | **2.20 ns** | 1x |
+| **frp / bore**(Go-style) | Enum-based |**2.20 ns** | 1x |
 | **localtunnels** | String-based | 2.35 ns | 1.07x |
 | **ngrok / Expose** | Object-based | 3.54 ns | 1.61x |
 

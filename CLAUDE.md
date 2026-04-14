@@ -12,7 +12,7 @@ localtunnels is a zero-config local tunnel that exposes your localhost to the in
 
 ## Frontend
 
-- Use **stx** for templating — never write vanilla JS (`var`, `document.*`, `window.*`) in stx templates
+- Use **stx** for templating — never write vanilla JS (`var`, `document._`, `window._`) in stx templates
 - Use **crosswind** as the default CSS framework which enables standard Tailwind-like utility classes
 - stx `<script>` tags should only contain stx-compatible code (signals, composables, directives)
 

@@ -68,7 +68,7 @@ Returns the actual subdomain assigned by the server (may differ from the request
 public getTunnelUrl(): string
 ```
 
-Returns the full public tunnel URL (e.g. `https://myapp.localtunnel.dev`).
+Returns the full public tunnel URL (e.g. `<https://myapp.localtunnel.dev>`).
 
 #### `isConnected()`
 

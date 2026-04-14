@@ -101,7 +101,7 @@ sudo apt install certbot
 # Obtain certificate
 sudo certbot certonly --standalone -d tunnels.yourdomain.com
 
-# Certificates are stored at:
+# Certificates are stored at
 # /etc/letsencrypt/live/tunnels.yourdomain.com/privkey.pem
 # /etc/letsencrypt/live/tunnels.yourdomain.com/fullchain.pem
 ```

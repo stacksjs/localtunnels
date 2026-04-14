@@ -397,7 +397,7 @@ Real end-to-end request forwarding through each tool's tunnel.
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 35.67 µs | 1x (baseline) |
-| **localtunnels** | **105.97 µs** | 2.97x |
+| **localtunnels**|**105.97 µs** | 2.97x |
 | **bore** | 188.60 ms | 5,290x |
 
 **GET `/json` — 10-item JSON array:**
@@ -405,7 +405,7 @@ Real end-to-end request forwarding through each tool's tunnel.
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 30.67 µs | 1x (baseline) |
-| **localtunnels** | **109.58 µs** | 3.57x |
+| **localtunnels**|**109.58 µs** | 3.57x |
 | **bore** | 180.11 ms | 5,872x |
 
 **POST 1 KB body:**
@@ -413,7 +413,7 @@ Real end-to-end request forwarding through each tool's tunnel.
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 29.43 µs | 1x (baseline) |
-| **localtunnels** | **106.89 µs** | 3.63x |
+| **localtunnels**|**106.89 µs** | 3.63x |
 | **bore** | 180.74 ms | 6,143x |
 
 **10 Concurrent Requests (GET /json):**
@@ -421,7 +421,7 @@ Real end-to-end request forwarding through each tool's tunnel.
 | Tool | avg | vs direct |
 |---|---|---|
 | Direct (no tunnel) | 108.05 µs | 1x (baseline) |
-| **localtunnels** | **592.58 µs** | 5.48x |
+| **localtunnels**|**592.58 µs** | 5.48x |
 | **bore** | 188.46 ms | 1,744x |
 
 Note: bore's numbers include the round trip to bore.pub over the public internet. localtunnels runs entirely on localhost in self-hosted mode. cloudflared and ngrok tunnel URLs were not reachable during this benchmark run (cloudflared's quick tunnel URL had a DNS propagation delay; ngrok required auth token configuration). Install and configure these tools to include them in your own benchmark runs.
@@ -432,7 +432,7 @@ Time from process start to tunnel ready and accepting connections.
 
 | Tool | Time to tunnel ready |
 |---|---|
-| **localtunnels** | **~324 µs** |
+| **localtunnels**|**~324 µs** |
 | **bore** | 195 ms |
 | **Cloudflare Tunnels** | 3,969 ms |
 
@@ -457,7 +457,7 @@ Each tool uses a different strategy to generate tunnel subdomains.
 
 | Tool | Strategy | avg | vs localtunnels |
 |---|---|---|---|
-| **localtunnels** | Adjective-noun | **3.00 ns** | 1x |
+| **localtunnels**| Adjective-noun |**3.00 ns** | 1x |
 | localtunnels | Subdomain validation | 3.07 ns | 1.02x |
 | **frp** | Counter prefix | 25.66 ns | 8.55x slower |
 | **Cloudflare Tunnels** | UUID prefix | 42.69 ns | 14.23x slower |
@@ -471,7 +471,7 @@ Each tool uses a different strategy to generate connection/request IDs.
 
 | Tool | Strategy | avg | vs fastest |
 |---|---|---|---|
-| **frp** | Counter-based (`conn_1`, `conn_2`) | **22.19 ns** | 1x |
+| **frp**| Counter-based (`conn_1`, `conn_2`) |**22.19 ns** | 1x |
 | **ngrok / Cloudflare Tunnels** | `crypto.randomUUID()` | 30.94 ns | 1.39x |
 | **localtunnels** | `crypto.randomUUID().substring()` | 42.42 ns | 1.91x |
 | **bore** | `crypto.getRandomValues` (8 bytes) | 358.60 ns | 16.16x |
@@ -482,7 +482,7 @@ localtunnels uses WebSocket + JSON. bore and frp use binary protocols with fixed
 
 | Tool | Protocol | Operation | avg | vs fastest |
 |---|---|---|---|---|
-| **localtunnels** | WebSocket + JSON | Serialize request | **123.05 ns** | 1x |
+| **localtunnels**| WebSocket + JSON | Serialize request |**123.05 ns** | 1x |
 | **bore / frp** | Raw TCP + binary | Header encode (16 bytes) | 159.04 ns | 1.29x |
 | **bore / frp** | Raw TCP + binary | Header decode (16 bytes) | 176.33 ns | 1.43x |
 | **localtunnels** | WebSocket + JSON | Parse request | 434.87 ns | 3.53x |
@@ -495,7 +495,7 @@ localtunnels and ngrok use JSON for payload framing. bore uses raw binary. This 
 
 | Tool | Method | avg | vs fastest |
 |---|---|---|---|
-| **bore** (binary approach) | `TextDecoder.decode` | **195.55 ns** | 1x |
+| **bore**(binary approach) | `TextDecoder.decode` |**195.55 ns** | 1x |
 | **bore** (binary approach) | `TextEncoder.encode` | 287.59 ns | 1.47x |
 | **localtunnels / ngrok** (JSON approach) | `JSON.parse` | 2.49 µs | 12.75x |
 | **localtunnels / ngrok** (JSON approach) | `JSON.stringify` | 2.56 µs | 13.09x |
@@ -506,7 +506,7 @@ Each tool manages connection state differently. localtunnels uses simple string 
 
 | Tool | Strategy | avg | vs fastest |
 |---|---|---|---|
-| **frp / bore** (Go-style) | Enum-based (integers) | **2.20 ns** | 1x |
+| **frp / bore**(Go-style) | Enum-based (integers) |**2.20 ns** | 1x |
 | **localtunnels** | String-based | 2.35 ns | 1.07x |
 | **ngrok / Expose** | Object-based (with transition count) | 3.54 ns | 1.61x |
 

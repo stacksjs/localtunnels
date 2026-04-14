@@ -31,5 +31,3 @@ features:
     icon: "🛠"
     details: "Use the CLI or the library in your own project."
 ---
-
-<Home />

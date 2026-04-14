@@ -88,7 +88,7 @@ const server = new TunnelServer({
 const server = new TunnelServer({
   port: 3000,
   rateLimit: {
-    windowMs: 15 * 60 * 1000, // 15 minutes
+    windowMs: 15 _ 60 _ 1000, // 15 minutes
     max: 100 // limit each IP to 100 requests per windowMs
   }
 })

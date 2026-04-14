@@ -1,6 +1,5 @@
 # Changelog
 
-
 ## v0.2.6...main
 
 [compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.6...main)
@@ -188,7 +187,6 @@
 
 ## ...main
 
-
 ### 🏡 Chore
 
 - Initial commit ([75da79b](https://github.com/stacksjs/localtunnels/commit/75da79b))
@@ -201,4 +199,3 @@
 ### ❤️ Contributors
 
 - Chris ([@chrisbbreuer](http://github.com/chrisbbreuer))
-

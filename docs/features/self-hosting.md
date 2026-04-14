@@ -2,7 +2,7 @@
 
 localtunnels can be self-hosted on your own infrastructure, giving you complete control over your tunneling setup. This is ideal for teams that need custom domains, enhanced security, or want to avoid dependency on third-party services.
 
-## Why Self-Host?
+## Why Self-Host
 
 - **Custom Domains**: Use your own domain for tunnel URLs
 - **Data Privacy**: Keep all traffic within your infrastructure
@@ -119,10 +119,14 @@ services:
   tunnel-server:
     build: .
     ports:
+
       - "3000:3000"
+
     environment:
+
       - PORT=3000
       - VERBOSE=true
+
     restart: unless-stopped
 ```
 
@@ -160,18 +164,18 @@ Configure wildcard DNS to route all subdomains to your server:
 ```nginx
 server {
     listen 443 ssl;
-    server_name *.tunnels.yourcompany.com;
+    server*name *.tunnels.yourcompany.com;
 
-    ssl_certificate /etc/letsencrypt/live/tunnels.yourcompany.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/tunnels.yourcompany.com/privkey.pem;
+    ssl*certificate /etc/letsencrypt/live/tunnels.yourcompany.com/fullchain.pem;
+    ssl*certificate*key /etc/letsencrypt/live/tunnels.yourcompany.com/privkey.pem;
 
     location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy*pass http://localhost:3000;
+        proxy*http*version 1.1;
+        proxy*set*header Upgrade $http*upgrade;
+        proxy*set*header Connection "upgrade";
+        proxy*set*header Host $host;
+        proxy*set*header X-Real-IP $remote_addr;
     }
 }
 ```
@@ -233,6 +237,7 @@ const server = new TunnelServer({
 ```
 
 Verbose mode logs:
+
 - Incoming WebSocket connections
 - Request forwarding events
 - Connection closures

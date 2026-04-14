@@ -9,7 +9,7 @@ Common issues and their solutions when using localtunnels.
 **Symptoms:**
 
 - `localtunnels start` hangs at "Connecting..." then fails with "Connection timeout"
-- `dig localtunnel.dev` works, but `curl https://localtunnel.dev` times out
+- `dig localtunnel.dev` works, but `curl <https://localtunnel.dev>` times out
 - Only happens on macOS
 
 **Cause:**
@@ -33,16 +33,16 @@ localtunnels start --port 3000
 To verify your system has this issue:
 
 ```bash
-# This works (uses its own resolver):
+# This works (uses its own resolver)
 dig localtunnel.dev
 
-# This times out (uses system resolver):
+# This times out (uses system resolver)
 curl -sk https://localtunnel.dev/status
 
-# This works (bypasses DNS):
+# This works (bypasses DNS)
 curl -sk --resolve 'localtunnel.dev:443:18.210.211.229' https://localtunnel.dev/status
 
-# Check for resolver override:
+# Check for resolver override
 cat /etc/resolver/dev
 ```
 
@@ -191,6 +191,7 @@ localtunnels start --port 3000 --verbose
 ```
 
 This shows:
+
 - DNS resolution attempts and results
 - WebSocket connection lifecycle
 - All HTTP requests/responses forwarded through the tunnel

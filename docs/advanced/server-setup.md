@@ -113,12 +113,16 @@ services:
   tunnel-server:
     build: .
     ports:
+
       - "3000:3000"
+
     environment:
+
       - NODE_ENV=production
       - PORT=3000
       - HOST=0.0.0.0
       - VERBOSE=false
+
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -134,13 +138,19 @@ services:
   nginx:
     image: nginx:alpine
     ports:
+
       - "80:80"
       - "443:443"
+
     volumes:
+
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
+
     depends_on:
+
       - tunnel-server
+
     restart: unless-stopped
 ```
 
@@ -163,14 +173,22 @@ spec:
         app: tunnel-server
     spec:
       containers:
+
       - name: tunnel-server
+
         image: your-registry/tunnel-server:latest
         ports:
+
         - containerPort: 3000
+
         env:
+
         - name: NODE_ENV
+
           value: "production"
+
         - name: PORT
+
           value: "3000"
         resources:
           limits:
@@ -200,7 +218,9 @@ spec:
   selector:
     app: tunnel-server
   ports:
+
   - port: 80
+
     targetPort: 3000
   type: LoadBalancer
 ```
@@ -211,10 +231,10 @@ localtunnels includes AWS CDK support for infrastructure as code:
 
 ```typescript
 // deploy.ts
-import * as cdk from 'aws-cdk-lib'
-import * as ec2 from 'aws-cdk-lib/aws-ec2'
-import * as ecs from 'aws-cdk-lib/aws-ecs'
-import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2'
+import _ as cdk from 'aws-cdk-lib'
+import _ as ec2 from 'aws-cdk-lib/aws-ec2'
+import _ as ecs from 'aws-cdk-lib/aws-ecs'
+import _ as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2'
 
 class TunnelStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
@@ -284,13 +304,13 @@ upstream tunnel_server {
 
 server {
     listen 80;
-    server_name *.tunnels.example.com;
+    server_name _.tunnels.example.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name *.tunnels.example.com;
+    server_name _.tunnels.example.com;
 
     ssl_certificate /etc/nginx/certs/fullchain.pem;
     ssl_certificate_key /etc/nginx/certs/privkey.pem;
@@ -298,7 +318,7 @@ server {
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
     ssl_prefer_server_ciphers off;
 
-    # WebSocket support
+# WebSocket support
     location / {
         proxy_pass http://tunnel_server;
         proxy_http_version 1.1;
@@ -309,7 +329,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Timeouts
+# Timeouts
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
@@ -320,12 +340,12 @@ server {
 ### Caddy
 
 ```caddyfile
-*.tunnels.example.com {
+_.tunnels.example.com {
     reverse_proxy localhost:3000
 
-    # Enable WebSocket
+# Enable WebSocket
     @websocket {
-        header Connection *Upgrade*
+        header Connection _Upgrade_
         header Upgrade websocket
     }
     reverse_proxy @websocket localhost:3000
@@ -345,7 +365,7 @@ sudo certbot certonly \
   --manual \
   --preferred-challenges dns \
   -d "tunnels.example.com" \
-  -d "*.tunnels.example.com" \
+  -d "_.tunnels.example.com" \
   --email admin@example.com \
   --agree-tos
 
@@ -357,7 +377,7 @@ sudo certbot renew --dry-run
 
 ```bash
 # /etc/cron.d/certbot-renewal
-0 0,12 * * * root certbot renew --quiet --deploy-hook "systemctl reload nginx"
+0 0,12 _ _ * root certbot renew --quiet --deploy-hook "systemctl reload nginx"
 ```
 
 ## Monitoring
@@ -440,7 +460,7 @@ sudo ufw enable
 limit_req_zone $binary_remote_addr zone=tunnel_limit:10m rate=10r/s;
 
 server {
-    # Apply rate limiting
+# Apply rate limiting
     location / {
         limit_req zone=tunnel_limit burst=20 nodelay;
         proxy_pass http://tunnel_server;

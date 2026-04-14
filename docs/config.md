@@ -9,33 +9,47 @@ These options apply to both `TunnelClient` and the `startLocalTunnel()` convenie
 ```ts
 interface TunnelOptions {
   /** Port to connect to (for server) or listen on (for client)
+
    * @default 3000 */
+
   port?: number
 
   /** Tunnel server hostname
+
    * @default 'localhost' for client, '0.0.0.0' for server */
+
   host?: string
 
   /** Use secure WebSocket (wss://) and HTTPS
+
    * @default false */
+
   secure?: boolean
 
   /** Enable verbose logging
+
    * @default false */
+
   verbose?: boolean
 
   /** Local port to forward requests to
+
    * @default 8000 */
+
   localPort?: number
 
   /** Local host to forward requests to
+
    * @default 'localhost' */
+
   localHost?: string
 
   /** Subdomain to use for the tunnel.
-   * Resolution order: explicit value > APP_NAME env var > random name
-   * If not specified, checks APP_NAME env var (slugified),
+
+   * Resolution order: explicit value > APP*NAME env var > random name
+   * If not specified, checks APP*NAME env var (slugified),
    * then falls back to a random adjective-noun combo. */
+
   subdomain?: string
 
   /** SSL/TLS options for secure connections */
@@ -46,20 +60,26 @@ interface TunnelOptions {
   }
 
   /** Connection timeout in milliseconds
+
    * @default 10000 */
+
   timeout?: number
 
   /** Maximum reconnection attempts
+
    * @default 10 */
+
   maxReconnectAttempts?: number
 
   /** API key for authentication (if required by server) */
   apiKey?: string
 
   /** Auto-resolve DNS for tunnel server connectivity.
+
    * When the system resolver can't reach the server (common on macOS
    * with .dev TLD), resolves the IP via DoH/dig and connects directly.
    * @default true */
+
   manageHosts?: boolean
 }
 ```
@@ -68,8 +88,8 @@ interface TunnelOptions {
 
 | Variable | Description |
 |----------|-------------|
-| `APP_NAME` | Used as the default subdomain (slugified). e.g. `My Cool App` becomes `my-cool-app` |
-| `TUNNEL_SERVER` | Default tunnel server URL |
+| `APP*NAME` | Used as the default subdomain (slugified). e.g. `My Cool App` becomes `my-cool-app` |
+| `TUNNEL*SERVER` | Default tunnel server URL |
 | `TUNNEL_SUBDOMAIN` | Default subdomain to request |
 
 ## CLI Flags

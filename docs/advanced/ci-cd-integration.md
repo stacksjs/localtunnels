@@ -25,31 +25,38 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v4
 
       - name: Setup Bun
+
         uses: oven-sh/setup-bun@v1
         with:
           bun-version: latest
 
       - name: Install dependencies
+
         run: bun install
 
       - name: Start application
+
         run: bun run start &
         env:
           PORT: 3000
 
       - name: Wait for server
+
         run: sleep 5
 
       - name: Start tunnel
+
         run: |
           bun add -g localtunnels
           localtunnel start --from localhost:3000 --subdomain pr-${{ github.event.pull_request.number }} &
           sleep 3
 
       - name: Run E2E tests
+
         run: bun run test:e2e
         env:
           BASE_URL: https://pr-${{ github.event.pull_request.number }}.tunnels.dev
@@ -69,20 +76,25 @@ jobs:
   webhook-tests:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v4
 
       - name: Setup Bun
+
         uses: oven-sh/setup-bun@v1
 
       - name: Install dependencies
+
         run: bun install
 
       - name: Start webhook receiver
+
         run: |
           bun run webhook-server &
           sleep 2
 
       - name: Create tunnel
+
         id: tunnel
         run: |
           bun add -g localtunnels
@@ -92,15 +104,18 @@ jobs:
           echo "url=https://$SUBDOMAIN.tunnels.dev" >> $GITHUB_OUTPUT
 
       - name: Configure webhook
+
         run: |
           curl -X POST https://api.service.com/webhooks \
             -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
             -d '{"url": "${{ steps.tunnel.outputs.url }}/webhook"}'
 
       - name: Trigger webhook
+
         run: bun run trigger-webhook-test
 
       - name: Verify webhook received
+
         run: bun run verify-webhook
 ```
 
@@ -118,22 +133,27 @@ jobs:
   preview:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v4
 
       - name: Setup Bun
+
         uses: oven-sh/setup-bun@v1
 
       - name: Install and build
+
         run: |
           bun install
           bun run build
 
       - name: Start preview server
+
         run: |
           bun run preview &
           sleep 5
 
       - name: Create preview tunnel
+
         id: tunnel
         run: |
           bun add -g localtunnels
@@ -143,6 +163,7 @@ jobs:
           echo "url=https://$SUBDOMAIN.tunnels.dev" >> $GITHUB_OUTPUT
 
       - name: Comment PR with preview URL
+
         uses: actions/github-script@v7
         with:
           script: |
@@ -161,6 +182,7 @@ jobs:
 ```yaml
 # .gitlab-ci.yml
 stages:
+
   - test
   - preview
 
@@ -168,13 +190,17 @@ e2e-tests:
   stage: test
   image: oven/bun:latest
   services:
+
     - name: your-app:latest
+
       alias: app
   script:
+
     - bun add -g localtunnels
     - localtunnel start --from app:3000 --subdomain gitlab-$CI_PIPELINE_ID &
     - sleep 5
     - bun run test:e2e
+
   variables:
     BASE_URL: https://gitlab-$CI_PIPELINE_ID.tunnels.dev
 
@@ -182,6 +208,7 @@ preview:
   stage: preview
   image: oven/bun:latest
   script:
+
     - bun install
     - bun run build
     - bun run preview &
@@ -190,8 +217,11 @@ preview:
     - localtunnel start --from localhost:4173 --subdomain preview-$CI_MERGE_REQUEST_IID &
     - echo "Preview URL: https://preview-$CI_MERGE_REQUEST_IID.tunnels.dev"
     - sleep 3600  # Keep alive for 1 hour
+
   rules:
+
     - if: $CI_MERGE_REQUEST_IID
+
 ```
 
 ## CircleCI
@@ -203,24 +233,31 @@ version: 2.1
 jobs:
   e2e-tests:
     docker:
+
       - image: oven/bun:latest
+
     steps:
+
       - checkout
 
       - run:
+
           name: Install dependencies
           command: bun install
 
       - run:
+
           name: Start application
           command: bun run start
           background: true
 
       - run:
+
           name: Wait for app
           command: sleep 5
 
       - run:
+
           name: Start tunnel
           command: |
             bun add -g localtunnels
@@ -228,10 +265,12 @@ jobs:
           background: true
 
       - run:
+
           name: Wait for tunnel
           command: sleep 5
 
       - run:
+
           name: Run E2E tests
           command: bun run test:e2e
           environment:
@@ -240,7 +279,9 @@ jobs:
 workflows:
   test:
     jobs:
+
       - e2e-tests
+
 ```
 
 ## Jenkins
@@ -392,12 +433,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v4
 
       - name: Setup Bun
+
         uses: oven-sh/setup-bun@v1
 
       - name: Create tunnel to self-hosted server
+
         run: |
           bun add -g localtunnels
           localtunnel start \
@@ -411,6 +455,7 @@ jobs:
           TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
 
       - name: Run tests
+
         run: bun run test:e2e
         env:
           BASE_URL: https://ci-${{ github.run_id }}.tunnels.yourcompany.com
@@ -436,7 +481,9 @@ Always clean up tunnels after tests:
 ```yaml
 post:
   always:
+
     - name: Cleanup tunnel
+
       run: pkill -f localtunnel || true
 ```
 
@@ -445,7 +492,9 @@ post:
 Set appropriate timeouts:
 
 ```yaml
+
 - name: Run tests with timeout
+
   timeout-minutes: 10
   run: bun run test:e2e
 ```
@@ -464,7 +513,9 @@ env:
 ### Tunnel Not Starting
 
 ```yaml
+
 - name: Start tunnel with retry
+
   run: |
     for i in 1 2 3; do
       localtunnel start --from localhost:3000 --subdomain test-${{ github.run_id }} &
@@ -477,7 +528,9 @@ env:
 ### Connection Timeouts
 
 ```yaml
+
 - name: Increase timeouts
+
   run: |
     localtunnel start \
       --from localhost:3000 \

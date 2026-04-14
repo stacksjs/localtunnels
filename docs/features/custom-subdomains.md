@@ -2,7 +2,7 @@
 
 Custom subdomains let you choose a consistent, memorable URL for your tunnel instead of using a randomly generated one.
 
-## Why Custom Subdomains?
+## Why Custom Subdomains
 
 - **Consistent URLs**: Keep the same URL across tunnel sessions
 - **Easy to remember**: Use meaningful names like `myapp.localtunnel.dev`
