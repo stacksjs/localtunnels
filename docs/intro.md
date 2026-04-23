@@ -74,5 +74,5 @@ Made with 💙
 
 <!-- Badges -->
 
-<!-- [codecov-src]: https://img.shields.io/codecov/c/gh/stacksjs/localtunnels/main?style=flat-square
-[codecov-href]: https://codecov.io/gh/stacksjs/localtunnels -->
+<!-- [codecov-src]: https://img.shields.io/codecov/c/gh/stacksjs/localtunnels/main?style=flat-square -->
+<!-- [codecov-href]: https://codecov.io/gh/stacksjs/localtunnels -->

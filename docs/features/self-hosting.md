@@ -18,7 +18,7 @@ A self-hosted localtunnels setup consists of:
 2. **DNS Configuration**: Routes subdomains to your server
 3. **SSL Certificates**: Provides HTTPS for secure connections
 
-```
+```text
 Users → Your Domain (*.tunnels.yourcompany.com)
          ↓
      Tunnel Server

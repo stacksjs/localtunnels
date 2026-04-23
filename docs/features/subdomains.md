@@ -24,7 +24,7 @@ You can always override with an explicit subdomain via `--subdomain` or the `sub
 
 When no `APP_NAME` is set and no `--subdomain` is specified, localtunnels generates a memorable adjective-noun combination from a dictionary of ~40,000 unique combos:
 
-```
+```text
 bold-comet    lazy-elk      nifty-lark    extra-storm
 rocky-plum    wise-frog     brisk-stag    mint-reef
 ```

@@ -11,7 +11,7 @@ The localtunnels server handles:
 - Subdomain routing
 - Connection management
 
-```
+```text
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Internet      │────▶│  Tunnel Server  │────▶│  Local Client   │
 │   (Requests)    │◀────│  (WebSocket)    │◀────│  (Developer)    │

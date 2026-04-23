@@ -6,7 +6,7 @@ Local tunneling is the core feature of localtunnels. It allows you to expose you
 
 localtunnels creates a bidirectional tunnel between your local machine and a publicly accessible server. When someone accesses your tunnel URL, the request is forwarded through the WebSocket connection to your local server, and the response is sent back the same way.
 
-```
+```text
 Internet Request → Tunnel Server → WebSocket → Local Server
                                       ↓
 Internet Response ← Tunnel Server ← WebSocket ← Local Response
