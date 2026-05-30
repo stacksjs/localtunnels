@@ -179,6 +179,7 @@ cli
       const server = new TunnelServer({
         port,
         host: options.host,
+        domain: options.domain,
         verbose: options.verbose,
       })
 
