@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun'
-import type { ClientState, ServerStats, TunnelOptions, TunnelRequest } from './types'
-import { EventEmitter } from 'node:events'
+import type { ClientState, ServerStats, TunnelClientEvents, TunnelOptions, TunnelRequest, TunnelServerEvents } from './types'
+import { TypedEventEmitter } from './types'
 import { canSystemConnect, cleanupMacOSResolver, ensureMacOSResolver, resolveHostname } from './hosts'
 import { calculateBackoff, debugLog, delay, generateSubdomain, isValidSubdomain } from './utils'
 
@@ -80,7 +80,7 @@ interface InternalStats extends ServerStats {
 // TunnelServer - Self-hosted server mode
 // ============================================
 
-export class TunnelServer extends EventEmitter {
+export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
   private server: ReturnType<typeof Bun.serve> | null = null
   private options: ResolvedTunnelOptions
   private requestCounter = 0
@@ -106,7 +106,9 @@ export class TunnelServer extends EventEmitter {
     super()
     const host = options.host || '0.0.0.0'
     this.options = {
-      port: options.port || 3000,
+      // Use ?? so an explicit `port: 0` (request an OS-assigned port) is honored
+      // instead of collapsing to the default.
+      port: options.port ?? 3000,
       host,
       secure: options.secure || false,
       verbose: options.verbose || false,
@@ -352,6 +354,46 @@ export class TunnelServer extends EventEmitter {
     })
   }
 
+  /**
+   * Determine whether `host` is a host this server is willing to terminate TLS for.
+   *
+   * Used by the on-demand TLS `ask` endpoint so a reverse proxy (e.g. Caddy)
+   * only issues certificates for live tunnel subdomains and the apex/api hosts.
+   *
+   * Accepts:
+   *  - the apex domain (e.g. `localtunnel.dev`)
+   *  - the `api.` host for the apex (e.g. `api.localtunnel.dev`)
+   *  - `<subdomain>.<apex>` where `<subdomain>` is an active tunnel
+   */
+  public isKnownHost(host: string): boolean {
+    if (!host)
+      return false
+
+    // Strip any port suffix (e.g. "sub.localtunnel.dev:443")
+    const colonIdx = host.indexOf(':')
+    const hostname = (colonIdx === -1 ? host : host.slice(0, colonIdx)).toLowerCase()
+
+    const apex = this.options.domain.toLowerCase()
+
+    // Apex and api host always qualify.
+    if (hostname === apex || hostname === `api.${apex}`)
+      return true
+
+    // Must be a direct subdomain of the apex: "<sub>.<apex>".
+    const suffix = `.${apex}`
+    if (!hostname.endsWith(suffix))
+      return false
+
+    const subdomain = hostname.slice(0, hostname.length - suffix.length)
+
+    // Reject nested subdomains (e.g. "a.b.localtunnel.dev"); only one label.
+    if (subdomain.length === 0 || subdomain.includes('.'))
+      return false
+
+    // O(1) lookup against the in-memory registry of active tunnels.
+    return this.subdomainSockets.has(subdomain)
+  }
+
   public getStats(includeSubdomains = false): ServerStats {
     return {
       connections: this.activeConnections,
@@ -407,6 +449,21 @@ export class TunnelServer extends EventEmitter {
         // Handle health check
         if (path === '/health' || path === '/_health') {
           return new Response('OK', { status: 200 })
+        }
+
+        // On-demand TLS authorization endpoint (Caddy `ask`).
+        // Caddy issues a GET to this URL with `?domain=<host>` before obtaining a
+        // certificate; respond 200 to allow, 404 to refuse. This ensures certs are
+        // only minted for live tunnel subdomains and the apex/api hosts.
+        if (path === '/tls-check' || path === '/_tls-check' || path.startsWith('/tls-check?') || path.startsWith('/_tls-check?')) {
+          const queryIdx = req.url.indexOf('?')
+          const query = queryIdx === -1 ? '' : req.url.slice(queryIdx + 1)
+          const requestedDomain = new URLSearchParams(query).get('domain') || ''
+
+          if (this.isKnownHost(requestedDomain))
+            return new Response('OK', { status: 200 })
+
+          return new Response('Unknown host', { status: 404 })
         }
 
         // Handle metrics endpoint (Prometheus format)
@@ -655,7 +712,7 @@ export class TunnelServer extends EventEmitter {
 // TunnelClient - Connects to tunnel server
 // ============================================
 
-export class TunnelClient extends EventEmitter {
+export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
   private ws: WebSocket | null = null
   private options: ResolvedTunnelOptions
   private localUrlPrefix: string
@@ -860,9 +917,10 @@ export class TunnelClient extends EventEmitter {
         this.ws = null
       })
 
-      this.ws.addEventListener('error', (error) => {
+      this.ws.addEventListener('error', (event) => {
         clearTimeout(timeout)
-        debugLog('client', `WebSocket error: ${error}`, this.options.verbose, 'error')
+        debugLog('client', `WebSocket error: ${event}`, this.options.verbose, 'error')
+        const error = event instanceof Error ? event : new Error('WebSocket connection error')
         this.emit('error', error)
         if (this.state === 'connecting') {
           this.state = 'error'

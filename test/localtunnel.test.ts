@@ -321,4 +321,63 @@ describe('localtunnels', () => {
       expect(text).toBe('OK')
     })
   })
+
+  // ============================================
+  // On-demand TLS `ask` endpoint
+  // ============================================
+
+  describe('on-demand TLS check', () => {
+    it('isKnownHost recognizes apex, api host, and active subdomains', async () => {
+      const server = new TunnelServer({ port: 0, domain: 'localtunnel.dev', verbose: false })
+      await server.start()
+
+      try {
+        // Apex + api host always allowed.
+        expect(server.isKnownHost('localtunnel.dev')).toBe(true)
+        expect(server.isKnownHost('api.localtunnel.dev')).toBe(true)
+        // Strips port suffixes and is case-insensitive.
+        expect(server.isKnownHost('LocalTunnel.dev:443')).toBe(true)
+
+        // No tunnel registered yet → unknown subdomain refused.
+        expect(server.isKnownHost('myapp.localtunnel.dev')).toBe(false)
+
+        // Register a fake active subdomain in the in-memory registry.
+        ;(server as any).subdomainSockets.set('myapp', new Set([{}]))
+        expect(server.isKnownHost('myapp.localtunnel.dev')).toBe(true)
+
+        // Nested subdomains and unrelated hosts are refused.
+        expect(server.isKnownHost('a.myapp.localtunnel.dev')).toBe(false)
+        expect(server.isKnownHost('evil.com')).toBe(false)
+        expect(server.isKnownHost('')).toBe(false)
+      }
+      finally {
+        server.stop()
+      }
+    })
+
+    it('responds 200/404 over HTTP for the Caddy ask endpoint', async () => {
+      const server = new TunnelServer({ port: 0, domain: 'localtunnel.dev', verbose: false })
+      await server.start()
+      const port = (server as any).server?.port
+
+      try {
+        ;(server as any).subdomainSockets.set('live', new Set([{}]))
+
+        const ok = await fetch(`http://localhost:${port}/tls-check?domain=live.localtunnel.dev`)
+        expect(ok.status).toBe(200)
+
+        const apex = await fetch(`http://localhost:${port}/tls-check?domain=localtunnel.dev`)
+        expect(apex.status).toBe(200)
+
+        const missing = await fetch(`http://localhost:${port}/tls-check?domain=ghost.localtunnel.dev`)
+        expect(missing.status).toBe(404)
+
+        const noParam = await fetch(`http://localhost:${port}/tls-check`)
+        expect(noParam.status).toBe(404)
+      }
+      finally {
+        server.stop()
+      }
+    })
+  })
 })

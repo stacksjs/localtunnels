@@ -1,5 +1,38 @@
 import type { Socket } from 'node:net'
 import type { TLSSocket } from 'node:tls'
+import { EventEmitter } from 'node:events'
+
+/**
+ * Map of event name -> listener signature.
+ *
+ * `interface`-typed event maps (which lack an implicit index signature) satisfy
+ * this constraint, unlike `Record<string, ...>`.
+ */
+export type EventMap<T> = { [K in keyof T]: (...args: any[]) => void }
+
+/**
+ * A strongly-typed wrapper around Node's EventEmitter.
+ *
+ * Restricts `on`/`once`/`off`/`emit` to the events declared in `Events`, so
+ * listeners receive correctly-typed arguments instead of `any`.
+ */
+export class TypedEventEmitter<Events extends EventMap<Events>> extends EventEmitter {
+  override on<E extends keyof Events & string>(event: E, listener: Events[E]): this {
+    return super.on(event, listener)
+  }
+
+  override once<E extends keyof Events & string>(event: E, listener: Events[E]): this {
+    return super.once(event, listener)
+  }
+
+  override off<E extends keyof Events & string>(event: E, listener: Events[E]): this {
+    return super.off(event, listener)
+  }
+
+  override emit<E extends keyof Events & string>(event: E, ...args: Parameters<Events[E]>): boolean {
+    return super.emit(event, ...args)
+  }
+}
 
 /**
  * Options for configuring the tunnel
