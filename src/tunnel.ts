@@ -375,8 +375,8 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
 
     const apex = this.options.domain.toLowerCase()
 
-    // Apex and api host always qualify.
-    if (hostname === apex || hostname === `api.${apex}`)
+    // Apex and the reserved service hosts (api., www.) always qualify.
+    if (hostname === apex || hostname === `api.${apex}` || hostname === `www.${apex}`)
       return true
 
     // Must be a direct subdomain of the apex: "<sub>.<apex>".
