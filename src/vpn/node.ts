@@ -12,6 +12,13 @@ export interface VpnNodeOptions {
   listenPort?: number
   /** Optional preshared key applied to every peer. */
   presharedKey?: Uint8Array
+  /**
+   * Transport policy for reaching peers:
+   *  - `auto` (default): try a direct UDP path, fall back to the relay.
+   *  - `always`: always tunnel through the coordinator relay.
+   *  - `never`: direct only; fail if unreachable.
+   */
+  relay?: 'auto' | 'always' | 'never'
 }
 
 export interface VpnNodeEvents {
@@ -43,6 +50,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   private readonly listenPort: number
   private readonly linked = new Set<string>()
   private readonly connecting = new Set<string>()
+  private readonly relayPolicy: 'auto' | 'always' | 'never'
   assignedIp: string | null = null
 
   constructor(options: VpnNodeOptions) {
@@ -50,6 +58,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     this.keyPair = options.keyPair
     this.coordinatorUrl = options.coordinatorUrl
     this.listenPort = options.listenPort ?? 0
+    this.relayPolicy = options.relay ?? 'auto'
     this.publicKeyB64 = encodeKey(options.keyPair.publicKey)
     this.peer = new VpnPeer({
       keyPair: options.keyPair,
@@ -78,6 +87,10 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     // A peer asked us to punch toward it: open our NAT mapping so its handshake
     // (or ours) can traverse.
     this.client.on('punch', (_from, endpoint) => this.peer.punch(endpoint.host, endpoint.port))
+    // Relay path: hand outbound relayed frames to the coordinator, and feed
+    // inbound relayed frames back into the datapath.
+    this.peer.setRelay((toPub, frame) => this.client?.sendRelay(toPub, frame))
+    this.client.on('relayFrame', (from, frame) => this.peer.receiveRelayFrame(from, frame))
     this.client.on('error', err => this.emit('error', err))
 
     const info = await this.client.connect()
@@ -100,16 +113,37 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
         continue
 
       this.connecting.add(rec.publicKey)
-      // NAT traversal: open our mapping toward the peer and ask it (via the
-      // coordinator) to punch back, so its NAT admits our handshake. Then dial.
-      this.peer.punch(rec.endpoint.host, rec.endpoint.port)
-      this.client?.requestPunch(rec.publicKey)
-      this.peer.connect(decodeKey(rec.publicKey), rec.endpoint.host, rec.endpoint.port)
-        .catch((err) => {
-          this.connecting.delete(rec.publicKey)
-          this.emit('error', err instanceof Error ? err : new Error(String(err)))
-        })
+      this.dial(rec)
     }
+  }
+
+  private dial(rec: { publicKey: string, endpoint: { host: string, port: number } }): void {
+    const pub = decodeKey(rec.publicKey)
+
+    if (this.relayPolicy === 'always') {
+      this.peer.connectViaRelay(pub).catch(err => this.onDialFailed(rec.publicKey, err))
+      return
+    }
+
+    // NAT traversal: open our mapping toward the peer and ask it (via the
+    // coordinator) to punch back, so its NAT admits our handshake. Then dial.
+    this.peer.punch(rec.endpoint.host, rec.endpoint.port)
+    this.client?.requestPunch(rec.publicKey)
+    this.peer.connect(pub, rec.endpoint.host, rec.endpoint.port)
+      .catch((err) => {
+        if (this.relayPolicy === 'auto') {
+          // Direct path failed (likely symmetric NAT) — fall back to the relay.
+          this.peer.connectViaRelay(pub).catch(e => this.onDialFailed(rec.publicKey, e))
+        }
+        else {
+          this.onDialFailed(rec.publicKey, err)
+        }
+      })
+  }
+
+  private onDialFailed(peerPublicKey: string, err: unknown): void {
+    this.connecting.delete(peerPublicKey)
+    this.emit('error', err instanceof Error ? err : new Error(String(err)))
   }
 
   stop(): void {

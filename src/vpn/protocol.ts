@@ -39,7 +39,15 @@ export interface PunchRequestMessage {
   target: string
 }
 
-export type ClientMessage = RegisterMessage | HeartbeatMessage | PunchRequestMessage
+/** Relay an opaque encrypted frame to `to` (coordinator can't read `data`). */
+export interface RelayMessage {
+  t: 'relay'
+  to: string
+  /** base64-encoded ciphertext frame */
+  data: string
+}
+
+export type ClientMessage = RegisterMessage | HeartbeatMessage | PunchRequestMessage | RelayMessage
 
 // ── coordinator → client ─────────────────────────────────────────────────────
 
@@ -67,7 +75,14 @@ export interface PunchSignalMessage {
   endpoint: Endpoint
 }
 
-export type ServerMessage = RegisteredMessage | PeersMessage | ErrorMessage | PunchSignalMessage
+/** A relayed frame delivered from peer `from`. */
+export interface RelayDeliveryMessage {
+  t: 'relay'
+  from: string
+  data: string
+}
+
+export type ServerMessage = RegisteredMessage | PeersMessage | ErrorMessage | PunchSignalMessage | RelayDeliveryMessage
 
 /** Parse a JSON frame into a known message, or return null if malformed. */
 export function parseMessage<T>(raw: string): T | null {

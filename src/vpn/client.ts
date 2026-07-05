@@ -20,6 +20,8 @@ export interface VpnCoordinatorClientEvents {
   peers: (peers: PeerRecord[]) => void
   /** A peer asked us to hole-punch toward it. */
   punch: (from: string, endpoint: { host: string, port: number }) => void
+  /** A relayed ciphertext frame arrived from peer `from`. */
+  relayFrame: (from: string, frame: Uint8Array) => void
   error: (error: Error) => void
   close: () => void
 }
@@ -108,6 +110,9 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
       case 'punch':
         this.emit('punch', msg.from, msg.endpoint)
         break
+      case 'relay':
+        this.emit('relayFrame', msg.from, new Uint8Array(Buffer.from(msg.data, 'base64')))
+        break
       case 'error':
         this.emit('error', new Error(msg.message))
         break
@@ -118,6 +123,12 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
   requestPunch(targetPublicKey: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN)
       this.ws.send(JSON.stringify({ t: 'punch', target: targetPublicKey }))
+  }
+
+  /** Relay an opaque ciphertext frame to a peer through the coordinator. */
+  sendRelay(toPublicKey: string, frame: Uint8Array): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN)
+      this.ws.send(JSON.stringify({ t: 'relay', to: toPublicKey, data: Buffer.from(frame).toString('base64') }))
   }
 
   private startHeartbeat(): void {

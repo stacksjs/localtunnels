@@ -129,6 +129,15 @@ export class VpnCoordinator {
         }
         break
       }
+      case 'relay': {
+        // Forward an opaque encrypted frame to the target. The coordinator
+        // never inspects `data` — it is WireGuard ciphertext.
+        const from = ws.data.publicKey
+        const target = this.peers.get(msg.to)
+        if (from && target)
+          send(target.ws, { t: 'relay', from, data: msg.data })
+        break
+      }
     }
   }
 

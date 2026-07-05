@@ -127,11 +127,22 @@ pub const HandshakeState = struct {
     /// Initiator → responder, first message (type 1).
     pub fn createInitiation(self: *HandshakeState, sender_index: u32, unix_sec: u64, nano: u32, out: *[initiation_len]u8) Error!void {
         if (self.role != .initiator or self.state != .fresh) return error.WrongState;
+        var eph_priv: [32]u8 = undefined;
+        var eph_pub: [32]u8 = undefined;
+        try keys.generate(&eph_priv, &eph_pub);
+        try self.createInitiationWithEphemeral(sender_index, &eph_priv, unix_sec, nano, out);
+        std.crypto.secureZero(u8, &eph_priv);
+    }
+
+    /// As `createInitiation`, but with a caller-supplied ephemeral key. For
+    /// deterministic test vectors only — production code must use a fresh
+    /// random ephemeral via `createInitiation`.
+    pub fn createInitiationWithEphemeral(self: *HandshakeState, sender_index: u32, eph_priv: *const [32]u8, unix_sec: u64, nano: u32, out: *[initiation_len]u8) Error!void {
+        if (self.role != .initiator or self.state != .fresh) return error.WrongState;
         self.local_index = sender_index;
 
-        var eph_pub: [32]u8 = undefined;
-        try keys.generate(&self.eph_priv, &eph_pub);
-        self.eph_pub = eph_pub;
+        self.eph_priv = eph_priv.*;
+        keys.publicFromPrivate(&self.eph_priv, &self.eph_pub) catch return error.WeakKey;
 
         @memset(out[0..4], 0);
         out[0] = message_type_initiation;
@@ -218,11 +229,21 @@ pub const HandshakeState = struct {
     /// Responder → initiator, second message (type 2).
     pub fn createResponse(self: *HandshakeState, sender_index: u32, out: *[response_len]u8) Error!void {
         if (self.role != .responder or self.state != .consumed_initiation) return error.WrongState;
+        var eph_priv: [32]u8 = undefined;
+        var eph_pub: [32]u8 = undefined;
+        try keys.generate(&eph_priv, &eph_pub);
+        try self.createResponseWithEphemeral(sender_index, &eph_priv, out);
+        std.crypto.secureZero(u8, &eph_priv);
+    }
+
+    /// As `createResponse`, but with a caller-supplied ephemeral key. For
+    /// deterministic test vectors only.
+    pub fn createResponseWithEphemeral(self: *HandshakeState, sender_index: u32, eph_priv: *const [32]u8, out: *[response_len]u8) Error!void {
+        if (self.role != .responder or self.state != .consumed_initiation) return error.WrongState;
         self.local_index = sender_index;
 
-        var eph_pub: [32]u8 = undefined;
-        try keys.generate(&self.eph_priv, &eph_pub);
-        self.eph_pub = eph_pub;
+        self.eph_priv = eph_priv.*;
+        keys.publicFromPrivate(&self.eph_priv, &self.eph_pub) catch return error.WeakKey;
 
         @memset(out[0..4], 0);
         out[0] = message_type_response;

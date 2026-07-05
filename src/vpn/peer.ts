@@ -62,6 +62,8 @@ interface Pending {
   resolve: (link: VpnLink) => void
   reject: (err: Error) => void
   initiation: Uint8Array
+  /** Frames go through the coordinator relay rather than direct UDP. */
+  relayed: boolean
 }
 
 interface Established {
@@ -73,7 +75,14 @@ interface Established {
   /** True when this node initiated the handshake (and thus drives rekeys). */
   initiatedByUs: boolean
   rekeyTimer: ReturnType<typeof setTimeout> | null
+  /** Frames go through the coordinator relay rather than direct UDP. */
+  relayed: boolean
 }
+
+/** Where an inbound frame came from — direct UDP or the relay. */
+type Via
+  = { relayed: false, addr: string, port: number }
+  | { relayed: true, peer: string }
 
 /** Grace period an old session keeps decrypting after a rekey, in ms. */
 const REKEY_GRACE_MS = 10_000
@@ -115,6 +124,9 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   /** Newest local session index to send on, per peer public key. */
   private readonly sendIndex = new Map<string, number>()
   private punchCount = 0
+  /** Optional relay sink for frames when a direct path isn't available. */
+  // eslint-disable-next-line no-unused-vars
+  private relaySend: ((toPeerPublicKey: string, frame: Uint8Array) => void) | null = null
 
   constructor(options: VpnPeerOptions) {
     super()
@@ -166,15 +178,17 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
    * link is up. If `host`/`port` are omitted, the peer's registered endpoint
    * is used.
    */
-  connect(peerPublicKey: Uint8Array, host?: string, port?: number): Promise<VpnLink> {
+  connect(peerPublicKey: Uint8Array, host?: string, port?: number, relayed = false): Promise<VpnLink> {
     if (!this.socket)
       throw new Error('peer not started')
     const pubB64 = encodeKey(peerPublicKey)
     const known = this.allowed.get(pubB64)
-    const dialHost = host ?? known?.endpoint?.host
-    const dialPort = port ?? known?.endpoint?.port
-    if (!dialHost || dialPort === undefined)
+    const dialHost = host ?? known?.endpoint?.host ?? ''
+    const dialPort = port ?? known?.endpoint?.port ?? 0
+    if (!relayed && (!dialHost || dialPort === 0))
       throw new Error('no endpoint to dial: pass host/port or register the peer with an endpoint')
+    if (relayed && !this.relaySend)
+      throw new Error('no relay configured: call setRelay() before a relayed connect')
 
     // Ensure the peer is authorized so its response is accepted.
     if (!known)
@@ -196,11 +210,36 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
         resolve,
         reject,
         initiation,
+        relayed,
       }
       this.pending.set(localIndex, pending)
-      this.sendRaw(initiation, dialHost, dialPort)
+      this.sendHandshake(pending, initiation)
       this.scheduleRetransmit(pending)
     })
+  }
+
+  /** Establish an encrypted link that tunnels frames through the relay. */
+  connectViaRelay(peerPublicKey: Uint8Array): Promise<VpnLink> {
+    return this.connect(peerPublicKey, undefined, undefined, true)
+  }
+
+  /**
+   * Provide a relay sink. Frames destined for a peer over a relayed link are
+   * handed to `fn`; inbound relayed frames are fed back via
+   * {@link receiveRelayFrame}. The relay only ever sees ciphertext.
+   */
+  setRelay(fn: (toPeerPublicKey: string, frame: Uint8Array) => void): void {
+    this.relaySend = fn
+  }
+
+  /** Feed a frame that arrived over the relay from `fromPeerPublicKey`. */
+  receiveRelayFrame(fromPeerPublicKey: string, frame: Uint8Array): void {
+    try {
+      this.dispatch(frame, { relayed: true, peer: fromPeerPublicKey })
+    }
+    catch (err) {
+      this.emit('error', err instanceof Error ? err : new Error(String(err)))
+    }
   }
 
   /**
@@ -259,28 +298,34 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   // ── internals ──────────────────────────────────────────────────────────
 
   private onDatagram(buf: Uint8Array, addr: string, port: number): void {
+    this.dispatch(buf, { relayed: false, addr, port })
+  }
+
+  private dispatch(buf: Uint8Array, via: Via): void {
     if (buf.length < 4)
       return
     switch (buf[0]) {
       case MSG_INITIATION:
-        this.handleInitiation(buf, addr, port)
+        this.handleInitiation(buf, via)
         break
       case MSG_RESPONSE:
-        this.handleResponse(buf, addr, port)
+        this.handleResponse(buf, via)
         break
       case MSG_DATA:
-        this.handleData(buf, addr, port)
+        this.handleData(buf, via)
         break
       case MSG_PUNCH:
-        this.punchCount += 1
-        this.emit('punch', addr, port)
+        if (!via.relayed) {
+          this.punchCount += 1
+          this.emit('punch', via.addr, via.port)
+        }
         break
       default:
         // Unknown/cookie messages are ignored for now.
     }
   }
 
-  private handleInitiation(buf: Uint8Array, addr: string, port: number): void {
+  private handleInitiation(buf: Uint8Array, via: Via): void {
     const handshake = Handshake.responder(this.privateKey, this.psk)
     let learnedPub: string
     try {
@@ -310,13 +355,19 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
       this.emit('error', err instanceof Error ? err : new Error(String(err)))
       return
     }
-    this.sendRaw(response, addr, port)
+
+    const host = via.relayed ? '' : via.addr
+    const port = via.relayed ? 0 : via.port
+    if (via.relayed)
+      this.relaySend?.(learnedPub, response)
+    else
+      this.sendRaw(response, host, port)
 
     const session = handshake.intoSession(localIndex)
-    this.establish(localIndex, session, learnedPub, addr, port, false)
+    this.establish(localIndex, session, learnedPub, host, port, false, via.relayed)
   }
 
-  private handleResponse(buf: Uint8Array, addr: string, port: number): void {
+  private handleResponse(buf: Uint8Array, _via: Via): void {
     // Response receiver index (our localIndex) sits at bytes 8..12.
     const localIndex = new DataView(buf.buffer, buf.byteOffset).getUint32(8, true)
     const pending = this.pending.get(localIndex)
@@ -337,11 +388,11 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
 
     const peerIndex = pending.handshake.peerIndex()
     const session = pending.handshake.intoSession(localIndex)
-    const link = this.establish(localIndex, session, pending.peerPublicKey, pending.host, pending.port, true)
+    const link = this.establish(localIndex, session, pending.peerPublicKey, pending.host, pending.port, true, pending.relayed)
     pending.resolve({ ...link, peerIndex })
   }
 
-  private handleData(buf: Uint8Array, addr: string, port: number): void {
+  private handleData(buf: Uint8Array, via: Via): void {
     // Data receiver index (our localIndex) sits at bytes 4..8.
     const localIndex = new DataView(buf.buffer, buf.byteOffset).getUint32(4, true)
     const established = this.sessions.get(localIndex)
@@ -358,9 +409,12 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
       return
     }
 
-    // Roaming: remember the source we last authenticated a packet from.
-    established.host = addr
-    established.port = port
+    // Roaming: remember the direct source we last authenticated a packet from
+    // (relayed links have no meaningful UDP endpoint to update).
+    if (!via.relayed && !established.relayed) {
+      established.host = via.addr
+      established.port = via.port
+    }
 
     if (plain.length < LENGTH_PREFIX)
       return // malformed
@@ -373,13 +427,13 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     this.emit('message', message, established.peerPublicKey)
   }
 
-  private establish(localIndex: number, session: Session, peerPublicKey: string, host: string, port: number, initiatedByUs: boolean): VpnLink {
+  private establish(localIndex: number, session: Session, peerPublicKey: string, host: string, port: number, initiatedByUs: boolean, relayed: boolean): VpnLink {
     const collision = this.sessions.get(localIndex)
     if (collision) {
       this.retireSession(localIndex, 0)
     }
 
-    const established: Established = { session, peerPublicKey, host, port, keepalive: null, initiatedByUs, rekeyTimer: null }
+    const established: Established = { session, peerPublicKey, host, port, keepalive: null, initiatedByUs, rekeyTimer: null, relayed }
     if (this.keepaliveInterval > 0) {
       established.keepalive = setInterval(() => {
         try {
@@ -446,7 +500,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     const cfg = this.allowed.get(peerPublicKey)
     if (!link || !cfg)
       return
-    this.connect(cfg.publicKey, link.host, link.port).catch((err) => {
+    this.connect(cfg.publicKey, link.host, link.port, link.relayed).catch((err) => {
       this.emit('error', err instanceof Error ? err : new Error(String(err)))
     })
   }
@@ -456,7 +510,18 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     new DataView(framed.buffer).setUint16(0, data.length, true)
     framed.set(data, LENGTH_PREFIX)
     const wire = link.session.encrypt(framed)
-    this.sendRaw(wire, link.host, link.port)
+    if (link.relayed)
+      this.relaySend?.(link.peerPublicKey, wire)
+    else
+      this.sendRaw(wire, link.host, link.port)
+  }
+
+  /** Send a handshake message over the pending link's chosen transport. */
+  private sendHandshake(pending: Pending, frame: Uint8Array): void {
+    if (pending.relayed)
+      this.relaySend?.(pending.peerPublicKey, frame)
+    else
+      this.sendRaw(frame, pending.host, pending.port)
   }
 
   private scheduleRetransmit(pending: Pending): void {
@@ -470,7 +535,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
         pending.reject(new Error(`handshake with ${pending.peerPublicKey} timed out after ${HANDSHAKE_RETRIES} attempts`))
         return
       }
-      this.sendRaw(pending.initiation, pending.host, pending.port)
+      this.sendHandshake(pending, pending.initiation)
       this.scheduleRetransmit(pending)
     }, HANDSHAKE_RETRY_MS)
   }

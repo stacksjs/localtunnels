@@ -261,6 +261,7 @@ test {
     _ = tun;
     _ = pump;
     _ = cookie;
+    _ = @import("vectors.zig");
 }
 
 test "C ABI end-to-end: keypair → handshake → transport" {
