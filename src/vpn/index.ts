@@ -29,6 +29,18 @@ export {
   VpnProtocolError,
 } from './session'
 
+export {
+  peerPublicKey,
+  VpnPeer,
+} from './peer'
+
+export type {
+  PeerConfig,
+  VpnLink,
+  VpnPeerEvents,
+  VpnPeerOptions,
+} from './peer'
+
 export type {
   HandshakeResult,
   VpnKeyPair,

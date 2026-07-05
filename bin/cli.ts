@@ -649,6 +649,71 @@ cli
   })
 
 cli
+  .command('vpn:demo', 'Run two VPN peers over real UDP sockets and exchange encrypted traffic')
+  .option('--count <n>', 'Number of messages to exchange', { default: '100' })
+  .action(async (options: { count: string }) => {
+    try {
+      const { generateKeyPair, VpnPeer } = await import('../src/vpn')
+      const count = Number.parseInt(options.count) || 100
+
+      const alice = generateKeyPair()
+      const bob = generateKeyPair()
+      const a = new VpnPeer({ keyPair: alice, host: '127.0.0.1', keepaliveInterval: 0 })
+      const b = new VpnPeer({ keyPair: bob, host: '127.0.0.1', keepaliveInterval: 0 })
+      a.addPeer({ publicKey: bob.publicKey })
+      b.addPeer({ publicKey: alice.publicKey })
+      await a.start()
+      await b.start()
+
+      let received = 0
+      let echoed = 0
+      b.on('message', (data, from) => {
+        received++
+        b.send(from, data) // echo back
+      })
+      a.on('message', () => { echoed++ })
+
+      console.log('')
+      console.log(`  Alice :${a.port}  <-- encrypted UDP -->  Bob :${b.port}`)
+
+      const t0 = performance.now()
+      const link = await a.connect(bob.publicKey, '127.0.0.1', b.port)
+      const handshakeMs = performance.now() - t0
+      console.log(`  Handshake complete in ${handshakeMs.toFixed(1)}ms (localIndex ${link.localIndex}, peerIndex ${link.peerIndex})`)
+
+      const send0 = performance.now()
+      for (let i = 0; i < count; i++)
+        a.send(bob.publicKey, new TextEncoder().encode(`packet-${i}`))
+
+      const deadline = Date.now() + 5000
+      while (echoed < count && Date.now() < deadline)
+        await new Promise(r => setTimeout(r, 5))
+      const rttMs = performance.now() - send0
+
+      a.stop()
+      b.stop()
+
+      console.log('')
+      console.log(`  Bob received:    ${received}/${count}`)
+      console.log(`  Alice got echos: ${echoed}/${count}`)
+      console.log(`  Round trip:      ${rttMs.toFixed(1)}ms for ${count} messages (${(count / (rttMs / 1000)).toFixed(0)} msg/s)`)
+      console.log('')
+      if (received !== count || echoed !== count) {
+        console.error('  Demo FAILED: message loss detected')
+        process.exit(1)
+      }
+      console.log('  Encrypted datapath working end-to-end.')
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`\n  VPN demo failed: ${error.message}`)
+      if (error.name === 'VpnUnavailableError')
+        console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+cli
   .command('info', 'Show information about localtunnels')
   .action(() => {
     console.log(`
@@ -670,6 +735,7 @@ COMMANDS:
   server             Start a self-hosted tunnel server
   vpn:keygen         Generate this machine's WireGuard-style VPN identity
   vpn:selftest       Verify the native VPN core (handshake + encryption)
+  vpn:demo           Run two peers over real UDP and exchange encrypted traffic
   deploy:tunnel      Deploy tunnel server to AWS EC2
   deploy:site        Deploy marketing site to S3+CloudFront
   deploy:analytics   Deploy analytics backend (DynamoDB + Lambda)
