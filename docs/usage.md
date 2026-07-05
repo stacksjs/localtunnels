@@ -40,14 +40,16 @@ Output:
 ### All CLI Commands
 
 ```bash
-localtunnels start       # Start a tunnel client (default command)
-localtunnels server      # Start a self-hosted tunnel server
-localtunnels deploy      # Deploy tunnel server to AWS EC2
-localtunnels destroy     # Remove AWS infrastructure
-localtunnels status      # Check tunnel server status
-localtunnels info        # Show help information
-localtunnels version     # Show version
+localtunnels start           # Start a tunnel client (default command)
+localtunnels server          # Start a self-hosted tunnel server
+localtunnels deploy:tunnel   # Deploy tunnel server to AWS EC2 (via ts-cloud)
+localtunnels destroy         # Remove AWS infrastructure
+localtunnels status          # Check tunnel server status
+localtunnels info            # Show help information
+localtunnels version         # Show version
 ```
+
+A fully-automated Hetzner Cloud VPN / exit-node deployment (running the localtunnels WireGuard stack) also ships in [`deploy/hetzner-vpn`](https://github.com/stacksjs/localtunnels/tree/main/deploy/hetzner-vpn) — provisioned with ts-cloud, so more providers land as ts-cloud grows.
 
 ## Library
 

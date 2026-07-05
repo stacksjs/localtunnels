@@ -88,8 +88,8 @@ interface TunnelOptions {
 
 | Variable | Description |
 |----------|-------------|
-| `APP*NAME` | Used as the default subdomain (slugified). e.g. `My Cool App` becomes `my-cool-app` |
-| `TUNNEL*SERVER` | Default tunnel server URL |
+| `APP_NAME` | Used as the default subdomain (slugified). e.g. `My Cool App` becomes `my-cool-app` |
+| `TUNNEL_SERVER` | Default tunnel server URL |
 | `TUNNEL_SUBDOMAIN` | Default subdomain to request |
 
 ## CLI Flags

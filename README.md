@@ -14,9 +14,13 @@
 
 - Simple, lightweight local tunnel
 - Security built-in, including HTTPS
+- Binary-safe forwarding _(fonts, archives, media & uploads survive byte-for-byte)_
+- Standard proxy headers _(`X-Forwarded-For` / `-Host` / `-Proto` for your local app)_
 - Smart subdomains _(APP_NAME-aware, memorable random names, auto-collision handling)_
 - Auto DNS resolution _(bypasses broken system DNS on macOS `.dev` TLD)_
-- IAC, self-hostable _(via AWS)_
+- Built-in devtools & Prometheus metrics _(per-tunnel request log, `/metrics`, `/status`)_
+- WireGuard-style VPN mode _(private layer-3 mesh, powered by a Zig crypto core)_
+- Self-hostable anywhere, with IaC deploys via [ts-cloud](https://github.com/stacksjs/ts-cloud) _(AWS & Hetzner today, more providers as ts-cloud grows)_
 - CLI & Library
 
 ## Install
@@ -87,6 +91,9 @@ localtunnels start --port 3000 --no-manage-hosts
 
 # Show all requests
 localtunnels start --port 3000 --verbose
+
+# TUNNEL_SERVER and TUNNEL_SUBDOMAIN env vars set defaults for the flags
+TUNNEL_SERVER=mytunnel.example.com TUNNEL_SUBDOMAIN=myapp localtunnels start --port 3000
 ```
 
 Output:
@@ -114,7 +121,8 @@ If a subdomain is already in use by another client, localtunnels automatically a
 
 - `myapp` is taken -> tries `myapp-2`
 - `myapp-2` is taken -> tries `myapp-3`
-- and so on...
+
+After a few suffix attempts it switches to fresh random names, and it fails with a clear error (rather than retrying forever) if the server keeps rejecting.
 
 This happens transparently — no crashes, no manual intervention needed.
 
@@ -142,17 +150,31 @@ This is on by default. Disable with `--no-manage-hosts` or `manageHosts: false`.
 
 ## Self-Hosting
 
-Start your own tunnel server:
+The tunnel server runs anywhere Bun runs — a VPS, a homelab box, a container:
 
 ```sh
 localtunnels server --port 8080 --domain mytunnel.example.com
 ```
 
-Or deploy to AWS:
+Clients then connect with `--server mytunnel.example.com` (or set `TUNNEL_SERVER`).
 
-```sh
-localtunnels deploy --domain mytunnel.example.com --key-name my-keypair
-```
+### Infrastructure as Code
+
+Cloud deployments are powered by [ts-cloud](https://github.com/stacksjs/ts-cloud), so the list of supported providers grows with it:
+
+- **AWS EC2** — one-command tunnel server deploy, with optional Route53 DNS and on-demand TLS via Caddy:
+
+  ```sh
+  localtunnels deploy:tunnel --domain mytunnel.example.com --key-name my-keypair --enable-ssl
+  ```
+
+- **Hetzner Cloud** — a fully-automated, end-to-end-verified VPN / exit node running the localtunnels WireGuard stack (see [`deploy/hetzner-vpn`](deploy/hetzner-vpn)):
+
+  ```sh
+  bun run deploy/hetzner-vpn/deploy.ts
+  ```
+
+Tear down anytime with `localtunnels destroy` (AWS) or `bun run deploy/hetzner-vpn/destroy.ts` (Hetzner).
 
 ## VPN Mode
 

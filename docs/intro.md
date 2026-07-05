@@ -8,9 +8,13 @@
 
 - Simple, lightweight local tunnel
 - Security built-in, including HTTPS
+- Binary-safe forwarding _(fonts, archives, media & uploads survive byte-for-byte)_
+- Standard proxy headers _(`X-Forwarded-For` / `-Host` / `-Proto` for your local app)_
 - Smart subdomains _(APP_NAME-aware, memorable random names, auto-collision handling)_
 - Auto DNS resolution _(bypasses broken system DNS on macOS `.dev` TLD)_
-- IAC, self-hostable _(via AWS)_
+- Built-in devtools & Prometheus metrics _(per-tunnel request log, `/metrics`, `/status`)_
+- WireGuard-style VPN mode _(private layer-3 mesh, powered by a Zig crypto core)_
+- Self-hostable anywhere, with IaC deploys via [ts-cloud](https://github.com/stacksjs/ts-cloud) _(AWS & Hetzner today, more providers as ts-cloud grows)_
 - CLI & Library
 
 ## Quick Start
