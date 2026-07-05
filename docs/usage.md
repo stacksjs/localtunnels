@@ -42,14 +42,14 @@ Output:
 ```bash
 localtunnels start           # Start a tunnel client (default command)
 localtunnels server          # Start a self-hosted tunnel server
-localtunnels deploy:tunnel   # Deploy tunnel server to AWS EC2 (via ts-cloud)
-localtunnels destroy         # Remove AWS infrastructure
+localtunnels deploy:tunnel   # Deploy tunnel server (--provider aws|hetzner, via ts-cloud)
+localtunnels destroy         # Remove tunnel infrastructure (--provider aws|hetzner)
 localtunnels status          # Check tunnel server status
 localtunnels info            # Show help information
 localtunnels version         # Show version
 ```
 
-A fully-automated VPN / exit-node deployment (running the localtunnels WireGuard stack) also ships in [`deploy/`](https://github.com/stacksjs/localtunnels/tree/main/deploy) — run it with `bun run deploy:vpn`. Provisioning goes through ts-cloud (Hetzner today), so more providers land as ts-cloud grows.
+A fully-automated VPN / exit-node deployment (running the localtunnels WireGuard stack) also ships in [`deploy/`](https://github.com/stacksjs/localtunnels/tree/main/deploy) — run it with `bun run deploy:vpn` (Hetzner by default, `--provider aws` for EC2). Provisioning goes through ts-cloud, so more providers land as ts-cloud grows.
 
 ## Library
 

@@ -160,21 +160,27 @@ Clients then connect with `--server mytunnel.example.com` (or set `TUNNEL_SERVER
 
 ### Infrastructure as Code
 
-Cloud deployments are powered by [ts-cloud](https://github.com/stacksjs/ts-cloud), so the list of supported providers grows with it:
+Cloud deployments are powered by [ts-cloud](https://github.com/stacksjs/ts-cloud), and every deploy takes a provider flag — capabilities aren't tied to a vendor. AWS EC2 and Hetzner Cloud work today; more providers land as ts-cloud grows.
 
-- **AWS EC2** — one-command tunnel server deploy, with optional Route53 DNS and on-demand TLS via Caddy:
-
-  ```sh
-  localtunnels deploy:tunnel --domain mytunnel.example.com --key-name my-keypair --enable-ssl
-  ```
-
-- **Hetzner Cloud** — a fully-automated, end-to-end-verified VPN / exit node running the localtunnels WireGuard stack (see [`deploy/`](deploy)):
+- **Tunnel server** — one command, with optional wildcard Let's Encrypt TLS (Porkbun DNS-01) served by Bun's native TLS:
 
   ```sh
-  bun run deploy:vpn     # provision + ship + start (verify with `bun run verify:vpn`)
+  # AWS EC2 (also automates Route53 DNS)
+  localtunnels deploy:tunnel --domain mytunnel.example.com --enable-ssl
+
+  # Hetzner Cloud (prints the DNS records to create)
+  localtunnels deploy:tunnel --provider hetzner --domain mytunnel.example.com --enable-ssl
   ```
 
-Tear down anytime with `localtunnels destroy` (AWS) or `bun run destroy:vpn` (VPN).
+- **VPN / exit node** — fully-automated, end-to-end-verified, running the localtunnels WireGuard stack (see [`deploy/`](deploy)):
+
+  ```sh
+  bun run deploy:vpn                     # Hetzner (default)
+  bun run deploy:vpn -- --provider aws   # AWS EC2
+  bun run verify:vpn                     # e2e: handshake, tunnel ping, exit routing
+  ```
+
+Tear down anytime with `localtunnels destroy [--provider hetzner]` or `bun run destroy:vpn`.
 
 ## VPN Mode
 
