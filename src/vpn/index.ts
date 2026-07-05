@@ -43,6 +43,9 @@ export type {
 
 export {
   configureInterface,
+  configureInterfaceCommands,
+  enableExitNode,
+  exitNodeCommands,
   TunDevice,
   TunError,
 } from './tun'
@@ -85,6 +88,7 @@ export type {
 export {
   packetDestination,
   packetSource,
+  packetVersion,
   RoutingTable,
 } from './routing'
 

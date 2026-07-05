@@ -12,8 +12,8 @@ const ERRNO: Record<number, string> = {
 
 export class TunError extends Error {
   readonly code: number
-  constructor(code: number) {
-    super(`tun open failed: ${ERRNO[code] ?? `errno ${code}`}`)
+  constructor(code: number, message?: string) {
+    super(message ?? `tun open failed: ${ERRNO[code] ?? `errno ${code}`}`)
     this.name = 'TunError'
     this.code = code
   }
@@ -50,6 +50,11 @@ export class TunDevice extends TypedEventEmitter<TunDeviceEvents> {
 
   /** Open a new TUN device. Throws {@link TunError} on failure. */
   static open(): TunDevice {
+    if (process.platform === 'win32') {
+      throw new TunError(-95, 'TUN devices are not supported on Windows. The UDP '
+        + 'datapath (lt vpn demo/mesh-demo, VpnPeer/VpnNode) works; for a routed '
+        + 'interface, use a WireGuard client — the wire protocol is compatible.')
+    }
     const lib = loadNative()
     const nameBuf = new Uint8Array(32)
     const fd = lib.ltvpn_tun_open(nameBuf, BigInt(nameBuf.length))
@@ -116,20 +121,83 @@ export async function configureInterface(
   name: string,
   address: string,
   peer: string,
-  cidrPrefix = 16,
+  cidrPrefix?: number,
 ): Promise<void> {
-  const platform = process.platform
-  const runs: string[][] = platform === 'darwin'
-    ? [
-        ['ifconfig', name, address, peer, 'up'],
-        ['route', '-n', 'add', '-net', networkOf(address, cidrPrefix), '-interface', name],
-      ]
-    : [
-        ['ip', 'addr', 'add', `${address}/${cidrPrefix}`, 'dev', name],
-        ['ip', 'link', 'set', 'dev', name, 'up'],
-      ]
+  for (const cmd of configureInterfaceCommands(name, address, peer, cidrPrefix)) {
+    const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
+    const code = await proc.exited
+    if (code !== 0) {
+      const err = await new Response(proc.stderr).text()
+      throw new Error(`\`${cmd.join(' ')}\` failed (exit ${code}): ${err.trim()}`)
+    }
+  }
+}
 
-  for (const cmd of runs) {
+/**
+ * The platform commands `configureInterface` runs, as data (pure — testable
+ * without root). Handles both IPv4 and IPv6 (detected by a ':' in `address`).
+ */
+export function configureInterfaceCommands(
+  name: string,
+  address: string,
+  peer: string,
+  cidrPrefix?: number,
+): string[][] {
+  const v6 = address.includes(':')
+  const prefix = cidrPrefix ?? (v6 ? 64 : 16)
+
+  if (process.platform === 'darwin') {
+    if (v6) {
+      return [
+        ['ifconfig', name, 'inet6', address, 'prefixlen', String(prefix), 'up'],
+      ]
+    }
+    return [
+      ['ifconfig', name, address, peer, 'up'],
+      ['route', '-n', 'add', '-net', networkOf(address, prefix), '-interface', name],
+    ]
+  }
+
+  // Linux
+  if (v6) {
+    return [
+      ['ip', '-6', 'addr', 'add', `${address}/${prefix}`, 'dev', name],
+      ['ip', 'link', 'set', 'dev', name, 'up'],
+    ]
+  }
+  return [
+    ['ip', 'addr', 'add', `${address}/${prefix}`, 'dev', name],
+    ['ip', 'link', 'set', 'dev', name, 'up'],
+  ]
+}
+
+/**
+ * Commands that turn this host into an exit node for `tunName`: enable kernel
+ * IP forwarding and NAT (masquerade) outbound traffic to `wanInterface`. Pure
+ * (returns the commands) so it is testable; execute with {@link enableExitNode}.
+ * Requires root when run.
+ */
+export function exitNodeCommands(tunName: string, wanInterface: string): string[][] {
+  if (process.platform === 'darwin') {
+    // macOS uses pf; forwarding via sysctl, NAT via a pf anchor the caller loads.
+    return [
+      ['sysctl', '-w', 'net.inet.ip.forwarding=1'],
+      ['sysctl', '-w', 'net.inet6.ip6.forwarding=1'],
+    ]
+  }
+  // Linux: sysctl forwarding + iptables/ip6tables masquerade.
+  return [
+    ['sysctl', '-w', 'net.ipv4.ip_forward=1'],
+    ['sysctl', '-w', 'net.ipv6.conf.all.forwarding=1'],
+    ['iptables', '-t', 'nat', '-A', 'POSTROUTING', '-o', wanInterface, '-j', 'MASQUERADE'],
+    ['iptables', '-A', 'FORWARD', '-i', tunName, '-o', wanInterface, '-j', 'ACCEPT'],
+    ['iptables', '-A', 'FORWARD', '-i', wanInterface, '-o', tunName, '-m', 'state', '--state', 'RELATED,ESTABLISHED', '-j', 'ACCEPT'],
+  ]
+}
+
+/** Run {@link exitNodeCommands}. Requires root; throws on the first failure. */
+export async function enableExitNode(tunName: string, wanInterface: string): Promise<void> {
+  for (const cmd of exitNodeCommands(tunName, wanInterface)) {
     const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
     const code = await proc.exited
     if (code !== 0) {

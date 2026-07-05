@@ -788,7 +788,8 @@ cli
 
       await configureInterface(tun.name, options.address, options.peerAddress)
 
-      const peer = new VpnPeer({ keyPair: identity.keyPair, port: listenPort, presharedKey: options.psk ? decodeKey(options.psk) : undefined })
+      // Raw transport: the tunnel carries bare IP packets from the TUN device.
+      const peer = new VpnPeer({ keyPair: identity.keyPair, port: listenPort, presharedKey: options.psk ? decodeKey(options.psk) : undefined, raw: true })
 
       let peerPubB64: string | null = null
       if (options.peer) {

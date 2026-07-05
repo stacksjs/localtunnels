@@ -1,6 +1,7 @@
 import type { VpnKeyPair } from './types'
 import { TypedEventEmitter } from '../types'
 import { encodeKey, publicKeyFromPrivate } from './keys'
+import { ipPacketLength } from './routing'
 import { Handshake, Session } from './session'
 
 type UdpSocket = Bun.udp.Socket<'buffer'>
@@ -33,6 +34,13 @@ export interface VpnPeerOptions {
   presharedKey?: Uint8Array
   /** Seconds between keepalives on an idle link. 0 disables. Default 15. */
   keepaliveInterval?: number
+  /**
+   * Raw mode: the encrypted payload is a bare IP packet (length recovered from
+   * the IP header), exactly as WireGuard carries traffic — no length-prefix
+   * framing. Use this for TUN datapaths and WireGuard wire-compatibility. When
+   * false (default), payloads are length-framed application messages.
+   */
+  raw?: boolean
   /**
    * Seconds before an initiated link re-handshakes for fresh keys (WireGuard's
    * REKEY_AFTER_TIME). Only the side that initiated rekeys. 0 disables.
@@ -116,6 +124,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   private readonly bindHost?: string
   private readonly keepaliveInterval: number
   private readonly rekeyAfter: number
+  private readonly raw: boolean
 
   private socket: UdpSocket | null = null
   private readonly allowed = new Map<string, PeerConfig>()
@@ -137,6 +146,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     this.bindHost = options.host
     this.keepaliveInterval = options.keepaliveInterval ?? 15
     this.rekeyAfter = options.rekeyAfter ?? 120
+    this.raw = options.raw ?? false
   }
 
   /** The bound UDP port (valid after {@link start}). */
@@ -416,6 +426,15 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
       established.port = via.port
     }
 
+    if (this.raw) {
+      // Recover the true packet length from the IP header, dropping padding.
+      const len = ipPacketLength(plain)
+      if (len === 0 || len > plain.length)
+        return // keepalive or malformed
+      this.emit('message', plain.slice(0, len), established.peerPublicKey)
+      return
+    }
+
     if (plain.length < LENGTH_PREFIX)
       return // malformed
     const len = new DataView(plain.buffer, plain.byteOffset).getUint16(0, true)
@@ -506,10 +525,18 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   }
 
   private sendFramed(link: Established, data: Uint8Array): void {
-    const framed = new Uint8Array(LENGTH_PREFIX + data.length)
-    new DataView(framed.buffer).setUint16(0, data.length, true)
-    framed.set(data, LENGTH_PREFIX)
-    const wire = link.session.encrypt(framed)
+    // Raw mode carries the bare packet (WireGuard-style); framed mode prepends
+    // a 2-byte length so arbitrary message boundaries survive the padding.
+    let payload: Uint8Array
+    if (this.raw) {
+      payload = data
+    }
+    else {
+      payload = new Uint8Array(LENGTH_PREFIX + data.length)
+      new DataView(payload.buffer).setUint16(0, data.length, true)
+      payload.set(data, LENGTH_PREFIX)
+    }
+    const wire = link.session.encrypt(payload)
     if (link.relayed)
       this.relaySend?.(link.peerPublicKey, wire)
     else

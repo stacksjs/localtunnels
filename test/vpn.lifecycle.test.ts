@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+/* eslint-disable node/prefer-global/process */
 import {
+  configureInterfaceCommands,
+  exitNodeCommands,
   generateKeyPair,
   isVpnAvailable,
   packetDestination,
   packetSource,
+  packetVersion,
   RoutingTable,
   VpnPeer,
 } from '../src/vpn'
@@ -59,6 +63,73 @@ describe('vpn/routing', () => {
     expect(packetSource(pkt)).toBe('100.100.0.2')
     expect(packetDestination(pkt)).toBe('100.100.0.3')
     expect(packetSource(new Uint8Array(4))).toBeNull()
+  })
+
+  it('routes IPv6 by longest-prefix and keeps families separate', () => {
+    const t = new RoutingTable()
+    t.addPeer('peerA', ['fd7a::/16'])
+    t.addPeer('peerB', ['fd7a:1::/32'])
+    t.addPeer('v4', ['10.0.0.0/8'])
+    expect(t.route('fd7a:9::9')).toBe('peerA')
+    expect(t.route('fd7a:1::5')).toBe('peerB') // more specific wins
+    expect(t.route('2001:db8::1')).toBeNull()
+    // An IPv6 address must never match an IPv4 route and vice versa.
+    expect(t.route('10.1.2.3')).toBe('v4')
+    expect(t.route('fd00::1')).toBeNull()
+  })
+
+  it('treats 0.0.0.0/0 and ::/0 as exit-node default routes', () => {
+    const t = new RoutingTable()
+    t.addPeer('lan', ['10.0.0.0/8', 'fd7a::/16'])
+    t.addPeer('exit', ['0.0.0.0/0', '::/0'])
+    // Specific routes still win; everything else falls to the exit node.
+    expect(t.route('10.1.1.1')).toBe('lan')
+    expect(t.route('fd7a::2')).toBe('lan')
+    expect(t.route('8.8.8.8')).toBe('exit')
+    expect(t.route('2606:4700::1111')).toBe('exit')
+  })
+
+  it('parses and formats an IPv6 packet address (compressed)', () => {
+    const pkt = new Uint8Array(40)
+    pkt[0] = 0x60 // version 6
+    pkt.set([0xfd, 0x7a, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5], 24) // dst
+    expect(packetDestination(pkt)).toBe('fd7a:1::5')
+    expect(packetVersion(pkt)).toBe(6)
+    // The formatted address round-trips through routing.
+    const t = new RoutingTable()
+    t.addPeer('p', ['fd7a:1::/32'])
+    expect(t.route(packetDestination(pkt)!)).toBe('p')
+  })
+})
+
+describe('vpn/interface-config', () => {
+  const flat = (cmds: string[][]) => cmds.map(c => c.join(' '))
+
+  it('builds IPv4 interface config for the current platform', () => {
+    const cmds = flat(configureInterfaceCommands('tun9', '100.100.0.1', '100.100.0.2', 16))
+    expect(cmds.some(c => c.includes('100.100.0.1'))).toBe(true)
+    if (process.platform === 'darwin')
+      expect(cmds.some(c => c.startsWith('ifconfig'))).toBe(true)
+    else
+      expect(cmds.some(c => c.startsWith('ip addr add 100.100.0.1/16'))).toBe(true)
+  })
+
+  it('builds IPv6 interface config (inet6 / ip -6)', () => {
+    const cmds = flat(configureInterfaceCommands('tun9', 'fd7a::1', 'fd7a::2', 64))
+    if (process.platform === 'darwin')
+      expect(cmds.some(c => c.includes('inet6') && c.includes('fd7a::1'))).toBe(true)
+    else
+      expect(cmds.some(c => c.startsWith('ip -6 addr add fd7a::1/64'))).toBe(true)
+  })
+
+  it('builds exit-node forwarding + NAT commands', () => {
+    const cmds = flat(exitNodeCommands('tun9', 'eth0'))
+    // Kernel forwarding is enabled on every platform.
+    expect(cmds.some(c => c.includes('forward') && c.includes('1'))).toBe(true)
+    if (process.platform !== 'darwin') {
+      expect(cmds.some(c => c.includes('MASQUERADE') && c.includes('eth0'))).toBe(true)
+      expect(cmds.some(c => c.includes('FORWARD') && c.includes('tun9'))).toBe(true)
+    }
   })
 })
 

@@ -19,6 +19,8 @@ export interface VpnNodeOptions {
    *  - `never`: direct only; fail if unreachable.
    */
   relay?: 'auto' | 'always' | 'never'
+  /** Raw (unframed) transport — carry bare IP packets, for TUN datapaths. */
+  raw?: boolean
 }
 
 export interface VpnNodeEvents {
@@ -64,6 +66,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
       keyPair: options.keyPair,
       port: this.listenPort,
       presharedKey: options.presharedKey,
+      raw: options.raw ?? false,
     })
   }
 
