@@ -577,6 +577,78 @@ cli
   })
 
 cli
+  .command('vpn:keygen', 'Generate (or show) this machine\'s WireGuard-style VPN identity')
+  .option('--force', 'Overwrite an existing private key with a fresh one')
+  .action(async (options: { force?: boolean }) => {
+    try {
+      const { loadOrCreateIdentity } = await import('../src/vpn/store')
+      const { encodeKey } = await import('../src/vpn/keys')
+      const identity = loadOrCreateIdentity(options.force)
+
+      console.log('')
+      console.log(identity.created ? '  Generated new VPN identity' : '  Existing VPN identity')
+      console.log('')
+      console.log(`  Public key:   ${encodeKey(identity.keyPair.publicKey)}`)
+      console.log(`  Private key:  ${identity.privateKeyPath} (keep secret, mode 0600)`)
+      console.log('')
+      console.log('  Share the public key with peers to be added to their allowed list.')
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`\n  Could not generate VPN identity: ${error.message}`)
+      if (error.name === 'VpnUnavailableError')
+        console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+cli
+  .command('vpn:selftest', 'Verify the native VPN core: keygen, handshake, and an encrypted roundtrip')
+  .action(async () => {
+    try {
+      const { generateKeyPair, Handshake } = await import('../src/vpn')
+      const a = generateKeyPair()
+      const b = generateKeyPair()
+      const ini = Handshake.initiator(a.privateKey, b.publicKey)
+      const res = Handshake.responder(b.privateKey)
+      res.consumeInitiation(ini.createInitiation(1))
+      ini.consumeResponse(res.createResponse(2))
+      const si = ini.intoSession(1)
+      const sr = res.intoSession(2)
+      const msg = new TextEncoder().encode('localtunnels vpn selftest')
+      const wire = si.encrypt(msg)
+      const back = sr.decrypt(wire)
+      const ok = new TextDecoder().decode(back.subarray(0, msg.length)) === 'localtunnels vpn selftest'
+      let replayRejected = false
+      try {
+        sr.decrypt(wire)
+      }
+      catch {
+        replayRejected = true
+      }
+      si.free()
+      sr.free()
+
+      console.log('')
+      console.log(`  Key generation:      ok`)
+      console.log(`  Handshake (IKpsk2):  ok`)
+      console.log(`  Transport roundtrip: ${ok ? 'ok' : 'FAILED'}`)
+      console.log(`  Replay protection:   ${replayRejected ? 'ok' : 'FAILED'}`)
+      console.log('')
+      if (!ok || !replayRejected)
+        process.exit(1)
+      console.log('  VPN core is healthy.')
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`\n  VPN selftest failed: ${error.message}`)
+      if (error.name === 'VpnUnavailableError')
+        console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+cli
   .command('info', 'Show information about localtunnels')
   .action(() => {
     console.log(`
@@ -596,6 +668,8 @@ USAGE:
 COMMANDS:
   start              Start a tunnel client (default)
   server             Start a self-hosted tunnel server
+  vpn:keygen         Generate this machine's WireGuard-style VPN identity
+  vpn:selftest       Verify the native VPN core (handshake + encryption)
   deploy:tunnel      Deploy tunnel server to AWS EC2
   deploy:site        Deploy marketing site to S3+CloudFront
   deploy:analytics   Deploy analytics backend (DynamoDB + Lambda)

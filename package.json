@@ -38,6 +38,11 @@
       "bun": "./src/cloud/index.ts",
       "types": "./dist/src/cloud/index.d.ts",
       "import": "./dist/src/cloud/index.js"
+    },
+    "./vpn": {
+      "bun": "./src/vpn/index.ts",
+      "types": "./dist/src/vpn/index.d.ts",
+      "import": "./dist/src/vpn/index.js"
     }
   },
   "module": "./dist/src/index.js",

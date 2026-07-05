@@ -18,3 +18,5 @@ bin/localtunnels*
 pantry
 .env
 /docs/.bunpress
+/native/.zig-cache
+/native/zig-out
