@@ -1,7 +1,8 @@
 {
-  "name": "localtunnels",
+  "name": "localtunnels-monorepo",
   "type": "module",
   "version": "0.2.7",
+  "private": true,
   "description": "A simple and smart tunneling solution. Expose your localhost to the world.",
   "author": "Chris Breuer <chris@stacksjs.com>",
   "license": "MIT",
@@ -13,68 +14,25 @@
   "bugs": {
     "url": "https://github.com/stacksjs/localtunnels/issues"
   },
-  "keywords": [
-    "local",
-    "tunnel",
-    "localtunnel",
-    "ngrok",
-    "self-hosted",
-    "websocket",
-    "proxy",
-    "expose",
-    "localhost",
-    "bun",
-    "stacks",
-    "typescript",
-    "javascript"
-  ],
-  "exports": {
-    ".": {
-      "bun": "./src/index.ts",
-      "types": "./dist/src/index.d.ts",
-      "import": "./dist/src/index.js"
-    },
-    "./cloud": {
-      "bun": "./src/cloud/index.ts",
-      "types": "./dist/src/cloud/index.d.ts",
-      "import": "./dist/src/cloud/index.js"
-    },
-    "./vpn": {
-      "bun": "./src/vpn/index.ts",
-      "types": "./dist/src/vpn/index.d.ts",
-      "import": "./dist/src/vpn/index.js"
-    }
-  },
-  "module": "./dist/src/index.js",
-  "types": "./dist/src/index.d.ts",
-  "bin": {
-    "localtunnel": "./dist/bin/cli.js",
-    "lt": "./dist/bin/cli.js"
-  },
-  "files": [
-    "README.md",
-    "dist",
-    "native/build.zig",
-    "native/src",
-    "src"
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "build": "bun build.ts && bun run compile",
-    "build:native": "cd native && zig build",
-    "test:native": "cd native && zig build test",
-    "compile": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --outfile bin/localtunnels",
+    "build": "bun run --filter localtunnels build",
+    "build:native": "cd packages/vpn-core && zig build",
+    "test:native": "cd packages/vpn-core && zig build test",
+    "compile": "bun build ./packages/localtunnels/bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --outfile bin/localtunnels",
     "compile:all": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:windows-x64 && bun run compile:darwin-x64 && bun run compile:darwin-arm64",
-    "compile:linux-x64": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-linux-x64 --outfile bin/localtunnels-linux-x64",
-    "compile:linux-arm64": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-linux-arm64 --outfile bin/localtunnels-linux-arm64",
-    "compile:windows-x64": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-windows-x64 --outfile bin/localtunnels-windows-x64.exe",
-    "compile:darwin-x64": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-darwin-x64 --outfile bin/localtunnels-darwin-x64",
-    "compile:darwin-arm64": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-darwin-arm64 --outfile bin/localtunnels-darwin-arm64",
+    "compile:linux-x64": "bun build ./packages/localtunnels/bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-linux-x64 --outfile bin/localtunnels-linux-x64",
+    "compile:linux-arm64": "bun build ./packages/localtunnels/bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-linux-arm64 --outfile bin/localtunnels-linux-arm64",
+    "compile:windows-x64": "bun build ./packages/localtunnels/bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-windows-x64 --outfile bin/localtunnels-windows-x64.exe",
+    "compile:darwin-x64": "bun build ./packages/localtunnels/bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-darwin-x64 --outfile bin/localtunnels-darwin-x64",
+    "compile:darwin-arm64": "bun build ./packages/localtunnels/bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-darwin-arm64 --outfile bin/localtunnels-darwin-arm64",
     "lint": "bunx --bun pickier .",
     "lint:fix": "bunx --bun pickier . --fix",
     "fresh": "bunx rimraf node_modules/ bun.lock && bun i",
     "changelog": "bunx changelogen --output CHANGELOG.md",
-    "prepublishOnly": "bun --bun run build && bun run compile:all && bun run zip",
-    "release": "bun --bun run changelog && bunx --bun bumpp package.json --all",
+    "release": "bun --bun run changelog && bunx --bun bumpp package.json packages/*/package.json --all",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit --project tsconfig.json",
     "dev:docs": "bun --bun bunpress dev docs",
@@ -88,23 +46,22 @@
     "zip:darwin-x64": "zip -j bin/localtunnels-darwin-x64.zip bin/localtunnels-darwin-x64",
     "zip:darwin-arm64": "zip -j bin/localtunnels-darwin-arm64.zip bin/localtunnels-darwin-arm64",
     "deploy": "bun run deploy:site && bun run deploy:tunnel && bun run deploy:analytics",
-    "deploy:site": "bun run build:docs && bun run bin/cli.ts deploy:site",
-    "deploy:tunnel": "bun run bin/cli.ts deploy:tunnel",
-    "deploy:analytics": "bun run bin/cli.ts deploy:analytics",
-    "destroy": "bun run bin/cli.ts destroy",
-    "destroy:analytics": "bun run bin/cli.ts destroy:analytics",
-    "server": "bun run bin/cli.ts server",
-    "client": "bun run bin/cli.ts start",
+    "deploy:site": "bun run build:docs && bun run packages/localtunnels/bin/cli.ts deploy:site",
+    "deploy:tunnel": "bun run packages/localtunnels/bin/cli.ts deploy:tunnel",
+    "deploy:analytics": "bun run packages/localtunnels/bin/cli.ts deploy:analytics",
+    "deploy:vpn": "bun run deploy/vpn.ts",
+    "verify:vpn": "bun run deploy/verify.ts",
+    "destroy:vpn": "bun run deploy/destroy-vpn.ts",
+    "destroy": "bun run packages/localtunnels/bin/cli.ts destroy",
+    "destroy:analytics": "bun run packages/localtunnels/bin/cli.ts destroy:analytics",
+    "server": "bun run packages/localtunnels/bin/cli.ts server",
+    "client": "bun run packages/localtunnels/bin/cli.ts start",
     "format": "bunx --bun pickier . --format",
     "format:fix": "bunx --bun pickier . --format --write"
   },
-  "dependencies": {
-    "@stacksjs/ts-analytics": "github:stacksjs/ts-analytics",
-    "bunfig": "^0.15.6"
-  },
   "devDependencies": {
     "@stacksjs/bunpress": "^0.1.1",
-    "@stacksjs/clapp": "^0.2.0",
+    "@stacksjs/ts-cloud": "^0.7.6",
     "better-dx": "^0.2.15",
     "mitata": "^1.0.34"
   },

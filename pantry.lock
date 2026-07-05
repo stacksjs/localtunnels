@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "packages": {
+    "bun.sh@1.3.14": {
+      "name": "bun.sh",
+      "version": "1.3.14",
+      "resolved": "registry:bun.sh@1.3.14"
+    },
+    "bun.sh@1.3.11": {
+      "name": "bun.sh",
+      "version": "1.3.11",
+      "resolved": "registry:bun.sh@1.3.11",
+      "integrity": "sha256:61aefeb2d13032a726efaca2ceff6667342381a393cb6550ded85f0ebb76890d"
+    }
+  }
+}

@@ -26,19 +26,19 @@ jobs:
           version: master
 
       - name: Reference implementation self-test
-        run: python3 native/testvectors/wg_ref.py > /dev/null
+        run: python3 packages/vpn-core/testvectors/wg_ref.py > /dev/null
 
       - name: Zig unit + KAT + fuzz tests
-        run: cd native && zig build test
+        run: cd packages/vpn-core && zig build test
 
       - name: Build shared library
-        run: cd native && zig build
+        run: cd packages/vpn-core && zig build
 
       - name: Upload libltvpn
         uses: actions/upload-artifact@v4
         with:
           name: libltvpn-linux
-          path: native/zig-out/lib/*
+          path: packages/vpn-core/zig-out/lib/*
 
   # TypeScript suite with the native library present, so the VPN datapath /
   # coordinator / relay e2e tests actually run (rather than skip).
@@ -59,7 +59,7 @@ jobs:
         run: bun install
 
       - name: Build native library
-        run: cd native && zig build
+        run: cd packages/vpn-core && zig build
 
       - name: VPN e2e tests
         # The native lib is built, so the VPN datapath / coordinator / relay /
@@ -68,11 +68,11 @@ jobs:
 
       - name: VPN self-check via CLI
         run: |
-          bun run bin/cli.ts vpn:selftest
-          bun run bin/cli.ts vpn:demo --count 100
-          bun run bin/cli.ts vpn:mesh-demo --count 100
+          bun run packages/localtunnels/bin/cli.ts vpn:selftest
+          bun run packages/localtunnels/bin/cli.ts vpn:demo --count 100
+          bun run packages/localtunnels/bin/cli.ts vpn:mesh-demo --count 100
 
       # Real TUN device test needs CAP_NET_ADMIN — run it as root. The test
       # skips itself if the device can't be created, so this never flakes.
       - name: Routed TUN device test (root)
-        run: sudo -E env "PATH=$PATH" bun test test/vpn.tun-root.test.ts
+        run: sudo -E env "PATH=$PATH" bun test packages/localtunnels/test/vpn.tun-root.test.ts

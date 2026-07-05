@@ -16,8 +16,8 @@
  * Run: bun benchmarks/comparison.ts
  */
 import { bench, boxplot, group, run, summary } from 'mitata'
-import { TunnelClient, TunnelServer } from '../src/tunnel'
-import { generateId, generateSubdomain, isValidSubdomain } from '../src/utils'
+import { TunnelClient, TunnelServer } from '../packages/localtunnels/src/tunnel'
+import { generateId, generateSubdomain, isValidSubdomain } from '../packages/localtunnels/src/utils'
 
 // ─── Detect available tools ──────────────────────────────────────────────────
 

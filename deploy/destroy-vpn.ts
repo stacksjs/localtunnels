@@ -1,23 +1,19 @@
 /* eslint-disable node/prefer-global/process */
 /**
- * Tear down the Hetzner WireGuard VPN: delete the server, then its firewall.
+ * Tear down the localtunnels VPN: delete the server, then its firewall.
  *
- *   bun run deploy/hetzner-vpn/destroy.ts
+ *   bun run destroy:vpn
  */
 import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { HetznerClient } from '@stacksjs/ts-cloud/drivers'
 import {
   CLIENT_CONF_PATH,
   FIREWALL_NAME,
-  HetznerClient,
   loadHetznerToken,
+  log,
   SERVER_NAME,
   STATE_PATH,
 } from './config'
-
-function log(msg: string): void {
-  // eslint-disable-next-line no-console
-  console.log(`  ${msg}`)
-}
 
 async function main(): Promise<void> {
   const client = new HetznerClient({ apiToken: loadHetznerToken() })
@@ -45,7 +41,7 @@ async function main(): Promise<void> {
   // A firewall can only be deleted once no server references it.
   const firewall = (await client.listFirewalls()).find(f => f.id === firewallId || f.name === FIREWALL_NAME)
   if (firewall) {
-    // Give Hetzner a moment to detach the firewall from the deleted server.
+    // Give the provider a moment to detach the firewall from the deleted server.
     for (let i = 0; i < 10; i++) {
       try {
         await client.deleteFirewall(firewall.id)

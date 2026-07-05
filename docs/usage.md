@@ -49,7 +49,7 @@ localtunnels info            # Show help information
 localtunnels version         # Show version
 ```
 
-A fully-automated Hetzner Cloud VPN / exit-node deployment (running the localtunnels WireGuard stack) also ships in [`deploy/hetzner-vpn`](https://github.com/stacksjs/localtunnels/tree/main/deploy/hetzner-vpn) — provisioned with ts-cloud, so more providers land as ts-cloud grows.
+A fully-automated VPN / exit-node deployment (running the localtunnels WireGuard stack) also ships in [`deploy/`](https://github.com/stacksjs/localtunnels/tree/main/deploy) — run it with `bun run deploy:vpn`. Provisioning goes through ts-cloud (Hetzner today), so more providers land as ts-cloud grows.
 
 ## Library
 

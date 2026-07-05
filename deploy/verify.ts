@@ -1,16 +1,17 @@
 /* eslint-disable node/prefer-global/process */
 /**
- * End-to-end verification of the localtunnels VPN on Hetzner.
+ * End-to-end verification of the deployed localtunnels VPN.
  *
  * The server runs the localtunnels VPN (systemd `localtunnels-vpn`). This test
  * spins up a localtunnels CLIENT inside a network namespace on the server —
  * OUR stack on both ends — and confirms a handshake, a ping through the tunnel,
  * and internet egress via the server (exit node). Fully controlled, repeatable.
  *
- *   bun run deploy/hetzner-vpn/verify.ts
+ *   bun run verify:vpn
  */
 import { readFileSync } from 'node:fs'
-import { REMOTE_BIN, REMOTE_LIB, ssh, sshOrThrow, STATE_PATH, WG_PORT } from './config'
+import { sshExec, sshExecOrThrow } from '@stacksjs/ts-cloud/drivers'
+import { EXEC_OPTS, REMOTE_BIN, REMOTE_LIB, STATE_PATH, WG_PORT } from './config'
 
 interface Check { name: string, ok: boolean, detail: string }
 const checks: Check[] = []
@@ -87,7 +88,7 @@ async function main(): Promise<void> {
     state = JSON.parse(readFileSync(STATE_PATH, 'utf8'))
   }
   catch {
-    throw new Error(`no deploy state at ${STATE_PATH} — run deploy.ts first`)
+    throw new Error(`no deploy state at ${STATE_PATH} — run \`bun run deploy:vpn\` first`)
   }
   const ip: string = state.publicIp
 
@@ -95,25 +96,25 @@ async function main(): Promise<void> {
   console.log(`\n  Verifying localtunnels VPN at ${ip}\n`)
 
   // ── Server-side posture ──────────────────────────────────────────────────
-  const svc = await ssh(ip, 'systemctl is-active localtunnels-vpn.service')
+  const svc = await sshExec(ip, 'systemctl is-active localtunnels-vpn.service', EXEC_OPTS)
   record('localtunnels-vpn service active', svc.stdout.trim() === 'active', svc.stdout.trim())
 
-  const iface = await ssh(ip, 'ip -o link show | grep -oE "tun[0-9]+" | head -1')
+  const iface = await sshExec(ip, 'ip -o link show | grep -oE "tun[0-9]+" | head -1', EXEC_OPTS)
   record('Server TUN interface present', /tun\d+/.test(iface.stdout), iface.stdout.trim())
 
-  const listen = await ssh(ip, `ss -lun | grep -q ':${WG_PORT} ' && echo yes || echo no`)
+  const listen = await sshExec(ip, `ss -lun | grep -q ':${WG_PORT} ' && echo yes || echo no`, EXEC_OPTS)
   record(`Listening on udp/${WG_PORT}`, listen.stdout.includes('yes'))
 
-  const fwd = await ssh(ip, 'sysctl -n net.ipv4.ip_forward')
+  const fwd = await sshExec(ip, 'sysctl -n net.ipv4.ip_forward', EXEC_OPTS)
   record('IPv4 forwarding enabled', fwd.stdout.trim() === '1')
 
-  const nat = await ssh(ip, 'iptables -t nat -S POSTROUTING | grep -q MASQUERADE && echo yes || echo no')
+  const nat = await sshExec(ip, 'iptables -t nat -S POSTROUTING | grep -q MASQUERADE && echo yes || echo no', EXEC_OPTS)
   record('NAT masquerade rule present', nat.stdout.includes('yes'))
 
   // ── The real e2e: a localtunnels client through the tunnel ───────────────
   // eslint-disable-next-line no-console
   console.log('\n  Running netns localtunnels client e2e (our stack on both ends)...\n')
-  const out = await sshOrThrow(ip, netnsClientScript())
+  const out = await sshExecOrThrow(ip, netnsClientScript(), EXEC_OPTS)
   const kv: Record<string, string> = {}
   for (const line of out.split('\n')) {
     const eq = line.indexOf('=')

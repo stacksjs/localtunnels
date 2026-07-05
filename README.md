@@ -168,13 +168,13 @@ Cloud deployments are powered by [ts-cloud](https://github.com/stacksjs/ts-cloud
   localtunnels deploy:tunnel --domain mytunnel.example.com --key-name my-keypair --enable-ssl
   ```
 
-- **Hetzner Cloud** — a fully-automated, end-to-end-verified VPN / exit node running the localtunnels WireGuard stack (see [`deploy/hetzner-vpn`](deploy/hetzner-vpn)):
+- **Hetzner Cloud** — a fully-automated, end-to-end-verified VPN / exit node running the localtunnels WireGuard stack (see [`deploy/`](deploy)):
 
   ```sh
-  bun run deploy/hetzner-vpn/deploy.ts
+  bun run deploy:vpn     # provision + ship + start (verify with `bun run verify:vpn`)
   ```
 
-Tear down anytime with `localtunnels destroy` (AWS) or `bun run deploy/hetzner-vpn/destroy.ts` (Hetzner).
+Tear down anytime with `localtunnels destroy` (AWS) or `bun run destroy:vpn` (VPN).
 
 ## VPN Mode
 
@@ -185,7 +185,7 @@ in a dependency-free **Zig** core (`libltvpn`, consumed from Bun over `bun:ffi`)
 with the control plane in TypeScript.
 
 The core is validated for wire-correctness against an independent reference
-implementation (`native/testvectors/wg_ref.py`, itself checked against the
+implementation (`packages/vpn-core/testvectors/wg_ref.py`, itself checked against the
 RFC 7748 / 8439 / 7693 vectors): the Zig code produces byte-identical handshake
 messages, transport keys, and the canonical WireGuard `InitialChainKey`.
 
@@ -216,7 +216,7 @@ devices on macOS (`utun`) and Linux (`/dev/net/tun`).
 Build the native library from source (requires [Zig](https://ziglang.org)):
 
 ```sh
-bun run build:native   # → native/zig-out/lib/libltvpn.*
+bun run build:native   # → packages/vpn-core/zig-out/lib/libltvpn.*
 bun run test:native    # Zig unit + known-answer + fuzz tests
 ```
 

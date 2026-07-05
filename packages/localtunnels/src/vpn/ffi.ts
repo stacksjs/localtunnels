@@ -27,7 +27,8 @@ const LIB_BASENAME = `libltvpn.${suffix}`
  * Candidate locations for the shared library, most specific first:
  *   1. `LTVPN_LIB` env override (absolute path to the library file)
  *   2. `dist/native/` — where the published npm package ships prebuilt libs
- *   3. `native/zig-out/lib/` — where `zig build` puts it during development
+ *   3. `native/zig-out/lib/` — a source build inside the installed package
+ *   4. `../vpn-core/zig-out/lib/` — monorepo dev builds (packages/vpn-core)
  */
 function candidatePaths(): string[] {
   const here = dirname(fileURLToPath(import.meta.url))
@@ -41,10 +42,12 @@ function candidatePaths(): string[] {
   const pkgRootDev = join(here, '..', '..')
   paths.push(join(pkgRootDev, 'dist', 'native', LIB_BASENAME))
   paths.push(join(pkgRootDev, 'native', 'zig-out', 'lib', LIB_BASENAME))
+  paths.push(join(pkgRootDev, '..', 'vpn-core', 'zig-out', 'lib', LIB_BASENAME))
   // When running from dist/src/vpn, the package root is one level higher.
   const pkgRootDist = join(here, '..', '..', '..')
   paths.push(join(pkgRootDist, 'dist', 'native', LIB_BASENAME))
   paths.push(join(pkgRootDist, 'native', 'zig-out', 'lib', LIB_BASENAME))
+  paths.push(join(pkgRootDist, '..', 'vpn-core', 'zig-out', 'lib', LIB_BASENAME))
 
   return paths
 }
@@ -145,7 +148,7 @@ export function loadNative(): LtvpnSymbols {
   const found = tried.find(p => existsSync(p))
   if (!found) {
     throw new VpnUnavailableError(
-      `native libltvpn not found. Build it with \`cd native && zig build\`, or set LTVPN_LIB. Looked in:\n  ${tried.join('\n  ')}`,
+      `native libltvpn not found. Build it with \`bun run build:native\`, or set LTVPN_LIB. Looked in:\n  ${tried.join('\n  ')}`,
     )
   }
 

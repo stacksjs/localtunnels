@@ -18,5 +18,8 @@ bin/localtunnels*
 pantry
 .env
 /docs/.bunpress
-/native/.zig-cache
-/native/zig-out
+/packages/vpn-core/.zig-cache
+/packages/vpn-core/zig-out
+# synced into the package by packages/localtunnels/build.ts
+/packages/localtunnels/native
+/packages/localtunnels/README.md

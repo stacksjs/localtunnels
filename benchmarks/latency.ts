@@ -8,7 +8,7 @@
  * Run: bun benchmarks/latency.ts
  */
 import { bench, boxplot, run, summary } from 'mitata'
-import { TunnelClient, TunnelServer } from '../src/tunnel'
+import { TunnelClient, TunnelServer } from '../packages/localtunnels/src/tunnel'
 
 const SERVER_PORT = 19300
 const LOCAL_PORT = 19301

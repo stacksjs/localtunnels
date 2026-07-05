@@ -2,7 +2,16 @@
 
 ## About
 
-localtunnels is a zero-config local tunnel that exposes your localhost to the internet over HTTPS. It features smart subdomain resolution (explicit, APP_NAME-based, or random memorable names with auto-collision handling), automatic DNS resolution for macOS `.dev` TLD issues, and self-hosting support via AWS. Available as both a CLI (`localtunnels start`) and a library (`startLocalTunnel()` / `TunnelClient`).
+localtunnels is a zero-config local tunnel that exposes your localhost to the internet over HTTPS. It features smart subdomain resolution (explicit, APP_NAME-based, or random memorable names with auto-collision handling), automatic DNS resolution for macOS `.dev` TLD issues, and self-hosting with IaC deploys via ts-cloud (AWS + Hetzner). Available as both a CLI (`localtunnels start`) and a library (`startLocalTunnel()` / `TunnelClient`).
+
+## Repository layout
+
+This is a bun-workspaces monorepo:
+
+- `packages/localtunnels` — the published npm package (TypeScript source, CLI, tests)
+- `packages/vpn-core` — the native WireGuard v1 core (`libltvpn`) in Zig; build with `bun run build:native`
+- `deploy/` — VPN deployment scripts (`bun run deploy:vpn` / `verify:vpn` / `destroy:vpn`), provisioning via `@stacksjs/ts-cloud`
+- `docs/`, `benchmarks/` — bunpress docs and mitata benchmark suites at the root
 
 ## Linting
 

@@ -7,7 +7,7 @@
  * Run: bun benchmarks/connection.ts
  */
 import { bench, boxplot, group, run, summary } from 'mitata'
-import { TunnelClient, TunnelServer } from '../src/tunnel'
+import { TunnelClient, TunnelServer } from '../packages/localtunnels/src/tunnel'
 
 const SERVER_PORT = 19100
 

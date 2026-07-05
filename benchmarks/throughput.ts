@@ -8,7 +8,7 @@
  * Run: bun benchmarks/throughput.ts
  */
 import { bench, boxplot, group, run, summary } from 'mitata'
-import { TunnelClient, TunnelServer } from '../src/tunnel'
+import { TunnelClient, TunnelServer } from '../packages/localtunnels/src/tunnel'
 
 const SERVER_PORT = 19200
 const LOCAL_PORT = 19201

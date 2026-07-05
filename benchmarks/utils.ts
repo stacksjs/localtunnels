@@ -16,7 +16,7 @@ import {
   isValidPort,
   isValidSubdomain,
   parseHost,
-} from '../src/utils'
+} from '../packages/localtunnels/src/utils'
 
 // ─── ID Generation ───────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import type { LocalTunnelOptions } from './src/types'
+import type { LocalTunnelOptions } from './packages/localtunnels/src/types'
 
 const config: LocalTunnelOptions = {
   verbose: true,

@@ -21,11 +21,12 @@
     "skipLibCheck": true
   },
   "include": [
-    "src/**/*.ts",
-    "bin/**/*.ts"
+    "packages/localtunnels/src/**/*.ts",
+    "packages/localtunnels/bin/**/*.ts"
   ],
   "exclude": [
-    "src/cloud/**",
+    "packages/localtunnels/src/cloud/**",
+    "packages/localtunnels/native/**",
     "dist/**",
     "node_modules/**",
     "bunpress.ts",
