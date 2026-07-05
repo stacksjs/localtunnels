@@ -55,6 +55,21 @@ const testing = std.testing;
 
 extern "c" fn pipe(fds: [*]c_int) c_int;
 extern "c" fn close(fd: c_int) c_int;
+extern "c" fn socketpair(domain: c_int, sock_type: c_int, protocol: c_int, sv: [*]c_int) c_int;
+extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
+
+const builtin = @import("builtin");
+
+/// Mark a descriptor non-blocking so a drained read returns EAGAIN (→ the pump
+/// stops) instead of blocking — matching production TUN/UDP sockets.
+fn setNonBlocking(fd: c_int) void {
+    const F_SETFL: c_int = 4;
+    const O_NONBLOCK: c_int = switch (builtin.os.tag) {
+        .macos => 0x0004,
+        else => 0o4000,
+    };
+    _ = fcntl(fd, F_SETFL, O_NONBLOCK);
+}
 
 fn testSessions() struct { a: transport.Session, b: transport.Session } {
     const k1: [32]u8 = @splat(0x33);
@@ -90,6 +105,41 @@ test "forwardEncrypt moves a packet from one fd to another, encrypted" {
     const pn = try s.b.decrypt(wire[0..@intCast(wn)], &plain);
     try testing.expect(pn >= payload.len);
     try testing.expectEqualSlices(u8, payload, plain[0..payload.len]);
+}
+
+test "pump works over real datagram sockets (production-like)" {
+    var s = testSessions();
+
+    // AF_UNIX SOCK_DGRAM socketpair — message boundaries like UDP, no root.
+    const AF_UNIX: c_int = 1;
+    const SOCK_DGRAM: c_int = 2;
+    var raw: [2]c_int = undefined;
+    var wire: [2]c_int = undefined;
+    var out: [2]c_int = undefined;
+    try testing.expect(socketpair(AF_UNIX, SOCK_DGRAM, 0, &raw) == 0);
+    try testing.expect(socketpair(AF_UNIX, SOCK_DGRAM, 0, &wire) == 0);
+    try testing.expect(socketpair(AF_UNIX, SOCK_DGRAM, 0, &out) == 0);
+    defer for ([_]c_int{ raw[0], raw[1], wire[0], wire[1], out[0], out[1] }) |fd| {
+        _ = close(fd);
+    };
+    // The pump reads until EAGAIN, so its input fds must be non-blocking.
+    setNonBlocking(raw[0]);
+    setNonBlocking(wire[0]);
+
+    // Push three distinct packets through the encrypt pump, then the decrypt pump.
+    const packets = [_][]const u8{ "packet-one", "second-packet-here", "3" };
+    for (packets) |p| try testing.expect(write(raw[1], p.ptr, p.len) == @as(isize, @intCast(p.len)));
+
+    // A generous max_packets (16) drains all 3 then stops cleanly on EAGAIN.
+    try testing.expectEqual(@as(usize, 3), forwardEncrypt(&s.a, raw[0], wire[1], 16));
+    try testing.expectEqual(@as(usize, 3), forwardDecrypt(&s.b, wire[0], out[1], 16));
+
+    for (packets) |p| {
+        var buf: [128]u8 = undefined;
+        const n = read(out[0], &buf, buf.len);
+        try testing.expect(n >= @as(isize, @intCast(p.len)));
+        try testing.expectEqualSlices(u8, p, buf[0..p.len]);
+    }
 }
 
 test "forwardDecrypt reverses forwardEncrypt end to end" {
