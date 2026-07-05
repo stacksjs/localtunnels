@@ -1,0 +1,3 @@
+# Deploy state and generated client config contain secrets — never commit.
+.state.json
+client-lt.conf
