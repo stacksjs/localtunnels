@@ -62,7 +62,9 @@ jobs:
         run: cd native && zig build
 
       - name: VPN e2e tests
-        run: bun test test/vpn.test.ts test/vpn.e2e.test.ts test/vpn.coordinator.test.ts test/vpn.nat.test.ts test/vpn.relay.test.ts test/vpn.lifecycle.test.ts test/vpn.tun.test.ts
+        # The native lib is built, so the VPN datapath / coordinator / relay /
+        # raw / routing tests all run here rather than skip.
+        run: bun test
 
       - name: VPN self-check via CLI
         run: |
