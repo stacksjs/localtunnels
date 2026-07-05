@@ -442,7 +442,7 @@ export async function deployTunnelInfrastructure(
     )
   }
 
-  const userData = generateUserData({
+  const userData = generateTunnelServerUserData({
     internalPort,
     domain: config.domain,
     enableSsl: config.enableSsl,
@@ -876,14 +876,16 @@ export async function destroyTunnelInfrastructure(
  * the cert/key files directly to TunnelServer's ssl option (Bun's
  * native TLS — no reverse proxy needed).
  */
-function generateUserData(opts: {
+export function generateTunnelServerUserData(opts: {
   internalPort: number
   domain?: string
   enableSsl?: boolean
   porkbunApiKey?: string
   porkbunSecretKey?: string
+  /** Target distro for package installs. @default 'al2023' (Amazon Linux) */
+  distro?: 'al2023' | 'ubuntu'
 }): string {
-  const { internalPort, domain, enableSsl, porkbunApiKey, porkbunSecretKey } = opts
+  const { internalPort, domain, enableSsl, porkbunApiKey, porkbunSecretKey, distro = 'al2023' } = opts
 
   // Build the server script based on SSL mode
   const sslLines = enableSsl && domain
@@ -925,7 +927,8 @@ function generateUserData(opts: {
     '# Set HOME explicitly (cloud-init does not always set it)',
     'export HOME=/root',
     '',
-    '# Install Bun',
+    '# Install Bun (its installer needs unzip, preinstalled on AL2023 only)',
+    ...(distro === 'ubuntu' ? ['apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y unzip'] : []),
     'export BUN_INSTALL="/root/.bun"',
     'curl -fsSL https://bun.sh/install | bash',
     'export PATH="$BUN_INSTALL/bin:$PATH"',
@@ -949,7 +952,9 @@ function generateUserData(opts: {
   if (enableSsl && domain) {
     lines.push(
       '# Install acme.sh for Let\'s Encrypt certificate provisioning',
-      'dnf install -y socat cronie',
+      distro === 'ubuntu'
+        ? 'apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y socat cron unzip'
+        : 'dnf install -y socat cronie',
       `curl -fsSL https://get.acme.sh | sh -s email=admin@${domain}`,
       '',
       'mkdir -p /etc/ssl/localtunnel',

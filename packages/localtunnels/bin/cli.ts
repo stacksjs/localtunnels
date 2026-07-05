@@ -26,10 +26,13 @@ interface ServerOptions {
 }
 
 interface DeployOptions {
+  provider?: string
   region?: string
   prefix?: string
   domain?: string
   instanceType?: string
+  serverType?: string
+  location?: string
   keyName?: string
   enableSsl?: boolean
   porkbunApiKey?: string
@@ -38,6 +41,7 @@ interface DeployOptions {
 }
 
 interface DestroyOptions {
+  provider?: string
   region?: string
   prefix?: string
   domain?: string
@@ -231,11 +235,14 @@ cli
   })
 
 cli
-  .command('deploy:tunnel', 'Deploy tunnel server to AWS EC2 using ts-cloud')
+  .command('deploy:tunnel', 'Deploy the tunnel server to the cloud (AWS EC2 or Hetzner, via ts-cloud)')
+  .option('--provider <provider>', 'Cloud provider: aws or hetzner', { default: 'aws' })
   .option('--region <region>', 'AWS region', { default: 'us-east-1' })
   .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
-  .option('--domain <domain>', 'Domain for tunnel URLs (sets up Route53 DNS)')
+  .option('--domain <domain>', 'Domain for tunnel URLs (AWS: sets up Route53 DNS; Hetzner: prints the records)')
   .option('--instance-type <type>', 'EC2 instance type', { default: 't3.micro' })
+  .option('--server-type <type>', 'Hetzner server type', { default: 'cx23' })
+  .option('--location <location>', 'Hetzner location', { default: 'fsn1' })
   .option('--key-name <name>', 'EC2 key pair name for SSH access')
   .option('--enable-ssl', 'Enable SSL (HTTPS/WSS) via Caddy reverse proxy')
   .option('--porkbun-api-key <key>', 'Porkbun API key for DNS-01 TLS challenge (or set PORKBUN_API_KEY env)')
@@ -248,31 +255,55 @@ cli
 ╚══════════════════════════════════════════════════════════════╝
 `)
 
-    console.log(`Region:          ${options.region}`)
+    const provider = options.provider === 'hetzner' ? 'hetzner' : 'aws'
+    console.log(`Provider:        ${provider}`)
+    if (provider === 'aws') {
+      console.log(`Region:          ${options.region}`)
+      console.log(`Instance Type:   ${options.instanceType}`)
+    }
+    else {
+      console.log(`Location:        ${options.location}`)
+      console.log(`Server Type:     ${options.serverType}`)
+    }
     console.log(`Prefix:          ${options.prefix}`)
-    console.log(`Instance Type:   ${options.instanceType}`)
     if (options.domain) {
       console.log(`Domain:          ${options.domain}`)
     }
     console.log('')
-    console.log('Deploying EC2 tunnel server...')
+    console.log(`Deploying tunnel server to ${provider}...`)
     console.log('')
 
     try {
-      const cloudModule = '../src/cloud/deploy'
-      const { deployTunnelInfrastructure } = await import(/* @vite-ignore */ cloudModule) as any
-
-      const result = await deployTunnelInfrastructure({
-        region: options.region,
-        prefix: options.prefix,
-        domain: options.domain,
-        instanceType: options.instanceType,
-        keyName: options.keyName,
-        enableSsl: options.enableSsl,
-        porkbunApiKey: options.porkbunApiKey,
-        porkbunSecretKey: options.porkbunSecretKey,
-        verbose: options.verbose,
-      })
+      let result: any
+      if (provider === 'hetzner') {
+        const hetznerModule = '../src/cloud/deploy-hetzner'
+        const { deployTunnelHetzner } = await import(/* @vite-ignore */ hetznerModule) as any
+        result = await deployTunnelHetzner({
+          prefix: options.prefix,
+          domain: options.domain,
+          serverType: options.serverType,
+          location: options.location,
+          enableSsl: options.enableSsl,
+          porkbunApiKey: options.porkbunApiKey,
+          porkbunSecretKey: options.porkbunSecretKey,
+          verbose: options.verbose,
+        })
+      }
+      else {
+        const cloudModule = '../src/cloud/deploy'
+        const { deployTunnelInfrastructure } = await import(/* @vite-ignore */ cloudModule) as any
+        result = await deployTunnelInfrastructure({
+          region: options.region,
+          prefix: options.prefix,
+          domain: options.domain,
+          instanceType: options.instanceType,
+          keyName: options.keyName,
+          enableSsl: options.enableSsl,
+          porkbunApiKey: options.porkbunApiKey,
+          porkbunSecretKey: options.porkbunSecretKey,
+          verbose: options.verbose,
+        })
+      }
 
       console.log('')
       console.log('╔══════════════════════════════════════════════════════════════╗')
@@ -280,11 +311,17 @@ cli
       console.log('╚══════════════════════════════════════════════════════════════╝')
       console.log('')
       console.log('Resources:')
-      console.log(`  Instance ID:     ${result.instanceId}`)
-      console.log(`  Public IP:       ${result.publicIp}`)
-      console.log(`  Security Group:  ${result.securityGroupId}`)
-      console.log(`  Elastic IP:      ${result.allocationId}`)
-      console.log(`  Region:          ${result.region}`)
+      if (provider === 'aws') {
+        console.log(`  Instance ID:     ${result.instanceId}`)
+        console.log(`  Public IP:       ${result.publicIp}`)
+        console.log(`  Security Group:  ${result.securityGroupId}`)
+        console.log(`  Elastic IP:      ${result.allocationId}`)
+        console.log(`  Region:          ${result.region}`)
+      }
+      else {
+        console.log(`  Server:          ${result.serverName} (#${result.serverId})`)
+        console.log(`  Public IP:       ${result.publicIp}`)
+      }
       console.log('')
       console.log('Endpoints:')
       console.log(`  Server URL:      ${result.serverUrl}`)
@@ -307,10 +344,11 @@ cli
   })
 
 cli
-  .command('destroy', 'Destroy tunnel infrastructure from AWS')
+  .command('destroy', 'Destroy tunnel infrastructure (AWS or Hetzner)')
+  .option('--provider <provider>', 'Cloud provider: aws or hetzner', { default: 'aws' })
   .option('--region <region>', 'AWS region', { default: 'us-east-1' })
   .option('--prefix <prefix>', 'Resource name prefix', { default: 'localtunnel' })
-  .option('--domain <domain>', 'Domain to clean up DNS records for')
+  .option('--domain <domain>', 'Domain to clean up DNS records for (AWS only)')
   .option('--verbose', 'Enable verbose logging')
   .action(async (options: DestroyOptions) => {
     console.log(`
@@ -329,15 +367,22 @@ cli
     console.log('')
 
     try {
-      const cloudModuleD = '../src/cloud/deploy'
-      const { destroyTunnelInfrastructure } = await import(/* @vite-ignore */ cloudModuleD) as any
+      if (options.provider === 'hetzner') {
+        const hetznerModuleD = '../src/cloud/deploy-hetzner'
+        const { destroyTunnelHetzner } = await import(/* @vite-ignore */ hetznerModuleD) as any
+        await destroyTunnelHetzner({ prefix: options.prefix })
+      }
+      else {
+        const cloudModuleD = '../src/cloud/deploy'
+        const { destroyTunnelInfrastructure } = await import(/* @vite-ignore */ cloudModuleD) as any
 
-      await destroyTunnelInfrastructure({
-        region: options.region,
-        prefix: options.prefix,
-        domain: options.domain,
-        verbose: options.verbose,
-      })
+        await destroyTunnelInfrastructure({
+          region: options.region,
+          prefix: options.prefix,
+          domain: options.domain,
+          verbose: options.verbose,
+        })
+      }
 
       console.log('')
       console.log('╔══════════════════════════════════════════════════════════════╗')
@@ -1045,10 +1090,10 @@ COMMANDS:
   vpn:up             Bring up a layer-3 VPN interface bridged to a peer (root)
   vpn:coordinator    Run the peer-discovery coordination server
   vpn:mesh-demo      Coordinator + two auto-discovering nodes, end-to-end
-  deploy:tunnel      Deploy tunnel server to AWS EC2
+  deploy:tunnel      Deploy tunnel server to the cloud (--provider aws|hetzner)
   deploy:site        Deploy marketing site to S3+CloudFront
   deploy:analytics   Deploy analytics backend (DynamoDB + Lambda)
-  destroy            Remove AWS infrastructure
+  destroy            Remove tunnel infrastructure (--provider aws|hetzner)
   destroy:analytics  Tear down analytics infrastructure
   status             Check tunnel server status
   info               Show this information
@@ -1069,8 +1114,9 @@ EXAMPLES:
   # Start your own tunnel server
   localtunnels server --port 8080 --domain mytunnel.example.com
 
-  # Deploy tunnel server to EC2
+  # Deploy tunnel server to AWS EC2 or Hetzner Cloud
   localtunnels deploy:tunnel --region us-east-1 --domain localtunnel.dev
+  localtunnels deploy:tunnel --provider hetzner --domain localtunnel.dev
 
   # Deploy marketing site to S3+CloudFront
   localtunnels deploy:site --domain localtunnel.dev
