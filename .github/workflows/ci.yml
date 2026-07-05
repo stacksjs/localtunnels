@@ -86,6 +86,9 @@ jobs:
   publish-commit:
     needs: [lint, typecheck, test]
     runs-on: ubuntu-latest
+    # Gated on a repo variable (same pattern as ts-cloud) so a stale
+    # PANTRY_TOKEN doesn't keep main permanently red.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PANTRY_PUBLISH_COMMITS == 'true'
 
     steps:
       - uses: actions/checkout@v6
@@ -102,7 +105,6 @@ jobs:
         run: bun run build
 
       - name: Publish Commit
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: pantry publish:commit './packages/*'
         env:
           PANTRY_REGISTRY_TOKEN: ${{ secrets.PANTRY_TOKEN }}

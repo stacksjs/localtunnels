@@ -23,7 +23,16 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    const tests = b.addTest(.{ .root_module = mod });
+    // Tests always link libc: the test helpers use C ABI calls (pipe,
+    // socketpair) on every OS, and zig 0.17+ requires the libc dependency to
+    // be explicit. The shipped library module above stays libc-free on Linux.
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const tests = b.addTest(.{ .root_module = test_mod });
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run libltvpn unit tests");
     test_step.dependOn(&run_tests.step);
