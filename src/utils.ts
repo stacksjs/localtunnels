@@ -147,6 +147,20 @@ export function generateSubdomain(): string {
 }
 
 /**
+ * Produce the next collision-avoidance candidate for a taken subdomain:
+ * "myapp" -> "myapp-2" -> "myapp-3" ... The base is truncated if needed so
+ * the result never exceeds the 63-character DNS label limit.
+ */
+export function incrementSubdomain(subdomain: string): string {
+  const match = subdomain.match(/^(.+)-(\d+)$/)
+  const base = match ? match[1] : subdomain
+  const next = match ? Number.parseInt(match[2], 10) + 1 : 2
+  const suffix = `-${next}`
+  const maxBase = 63 - suffix.length
+  return `${base.slice(0, maxBase).replace(/-+$/, '')}${suffix}`
+}
+
+/**
  * Parse a host string into its components
  * @param host - The host string (e.g., "subdomain.example.com:3000")
  * @returns The parsed host components

@@ -1,8 +1,9 @@
 import type { ServerWebSocket } from 'bun'
 import type { ClientState, ServerStats, TunnelClientEvents, TunnelOptions, TunnelRequest, TunnelServerEvents } from './types'
+import { version } from '../package.json'
 import { TypedEventEmitter } from './types'
-import { canSystemConnect, cleanupMacOSResolver, ensureMacOSResolver, resolveHostname } from './hosts'
-import { calculateBackoff, debugLog, delay, generateSubdomain, isValidSubdomain } from './utils'
+import { canSystemConnect, cleanupMacOSResolver, ensureMacOSResolver, isLocalOrIpHost, resolveHostname } from './hosts'
+import { calculateBackoff, debugLog, delay, generateSubdomain, incrementSubdomain, isValidSubdomain } from './utils'
 
 // Internal options type with ssl being optional
 type ResolvedTunnelOptions = Omit<Required<TunnelOptions>, 'ssl' | 'manageHosts' | 'domain'> & { ssl?: TunnelOptions['ssl'], manageHosts: boolean, domain: string }
@@ -27,13 +28,33 @@ const SKIP_REQUEST_HEADERS = new Set(['host', 'connection', 'upgrade', 'content-
 // Header names to skip when forwarding responses
 const SKIP_RESPONSE_HEADERS = new Set(['content-encoding', 'transfer-encoding', 'connection', 'content-length'])
 
-// Binary content-type detection — shared between server and client
-function isBinaryContentType(contentType: string): boolean {
-  return contentType.includes('application/octet-stream')
-    || contentType.includes('image/')
-    || contentType.includes('audio/')
-    || contentType.includes('video/')
-    || contentType.includes('application/pdf')
+// Headers whose values are secrets — redacted in the devtools request log
+const REDACTED_LOG_HEADERS = new Set(['authorization', 'proxy-authorization', 'cookie', 'set-cookie', 'x-api-key'])
+
+// Maximum bytes of request/response body kept per devtools log entry
+const MAX_LOGGED_BODY = 4096
+
+// Client gives up requesting alternate subdomains after this many rejections
+const MAX_SUBDOMAIN_RETRIES = 10
+
+// Text content-type detection — shared between server and client.
+// Anything not recognized as text is base64-encoded for the JSON transport,
+// so binary payloads (fonts, archives, wasm, media, office docs, unknown
+// types) survive the tunnel byte-for-byte instead of being corrupted by
+// UTF-8 decoding.
+function isTextContentType(contentType: string): boolean {
+  if (!contentType)
+    return false
+  const semi = contentType.indexOf(';')
+  const mime = (semi === -1 ? contentType : contentType.slice(0, semi)).trim().toLowerCase()
+  return mime.startsWith('text/')
+    || mime.endsWith('+json')
+    || mime.endsWith('+xml')
+    || mime === 'application/json'
+    || mime === 'application/javascript'
+    || mime === 'application/x-javascript'
+    || mime === 'application/xml'
+    || mime === 'application/x-www-form-urlencoded'
 }
 
 // Fast path extraction from a full URL string (avoids new URL() ~230ns overhead)
@@ -86,6 +107,9 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
   private requestCounter = 0
   private responseHandlers: Map<number, (response: any) => void> = new Map()
   private responseTimeouts: Map<number, ReturnType<typeof setTimeout>> = new Map()
+  // Which client socket each in-flight request was sent to, so pending
+  // requests can be failed fast when that socket goes away.
+  private requestSockets: Map<number, ServerWebSocket<WebSocketData>> = new Map()
   private subdomainSockets: Map<string, Set<ServerWebSocket<WebSocketData>>> = new Map()
   private subdomainRequestLogs: Map<string, RequestLogEntry[]> = new Map()
   private idleCleanupInterval: ReturnType<typeof setInterval> | null = null
@@ -161,7 +185,27 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
     }
     this.activeConnections = Math.max(0, this.activeConnections - 1)
     this.stats.connections = this.activeConnections
+    this.failPendingRequests(socket)
     this.emit('disconnection', { subdomain })
+  }
+
+  // Fail all in-flight requests that were sent to a now-closed socket with an
+  // immediate 502 instead of leaving callers hanging until the gateway timeout.
+  private failPendingRequests(socket: ServerWebSocket<WebSocketData>): void {
+    for (const [id, sock] of this.requestSockets) {
+      if (sock !== socket)
+        continue
+      this.requestSockets.delete(id)
+      const handler = this.responseHandlers.get(id)
+      if (handler) {
+        this.responseHandlers.delete(id)
+        handler({
+          status: 502,
+          headers: { 'Content-Type': 'text/plain' },
+          body: 'Tunnel client disconnected',
+        })
+      }
+    }
   }
 
   private getSocketForSubdomain(subdomain: string): ServerWebSocket<WebSocketData> | undefined {
@@ -178,7 +222,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
     return first
   }
 
-  private async forwardRequest(req: Request, path: string, subdomain: string): Promise<Response> {
+  private async forwardRequest(req: Request, path: string, subdomain: string, clientIp?: string): Promise<Response> {
     const requestId = ++this.requestCounter
     const startTime = Date.now()
 
@@ -188,15 +232,15 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       try {
         const contentType = req.headers.get('content-type') || ''
-        if (isBinaryContentType(contentType)) {
+        if (isTextContentType(contentType)) {
+          body = await req.text()
+          this.stats.bytesIn += Buffer.byteLength(body)
+        }
+        else {
           const buffer = await req.arrayBuffer()
           body = Buffer.from(buffer).toString('base64')
           isBase64Encoded = true
           this.stats.bytesIn += buffer.byteLength
-        }
-        else {
-          body = await req.text()
-          this.stats.bytesIn += body.length
         }
       }
       catch {
@@ -211,6 +255,14 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
         headers[key] = value
       }
     })
+
+    // Standard forwarding headers so the local app can see the real request origin
+    const originalHost = req.headers.get('host')
+    if (originalHost)
+      headers['x-forwarded-host'] = originalHost
+    headers['x-forwarded-proto'] = this.options.secure ? 'https' : 'http'
+    if (clientIp)
+      headers['x-forwarded-for'] = headers['x-forwarded-for'] ? `${headers['x-forwarded-for']}, ${clientIp}` : clientIp
 
     const message: TunnelRequest = {
       type: 'request',
@@ -236,6 +288,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
           clearTimeout(tid)
           this.responseTimeouts.delete(requestId)
         }
+        this.requestSockets.delete(requestId)
 
         // Track response size
         const bodySize = responseData.body?.length || 0
@@ -248,6 +301,14 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
         const now = new Date()
         const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
         const sizeStr = bodySize > 1024 ? `${(bodySize / 1024).toFixed(1)} KB` : `${bodySize} B`
+
+        // Redact credential-bearing headers before logging — the devtools API
+        // serves this log to anyone who can reach the tunnel URL.
+        const loggedHeaders: Record<string, string> = {}
+        for (const key of Object.keys(headers)) {
+          loggedHeaders[key] = REDACTED_LOG_HEADERS.has(key.toLowerCase()) ? '<redacted>' : headers[key]
+        }
+
         this.logRequest(subdomain, {
           id: requestId,
           method: req.method,
@@ -256,9 +317,9 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
           size: sizeStr,
           time: `${duration}ms`,
           ts,
-          headers: headers,
-          body: body || null,
-          response: typeof responseData.body === 'string' ? responseData.body.slice(0, 4096) : '',
+          headers: loggedHeaders,
+          body: body ? body.slice(0, MAX_LOGGED_BODY) : null,
+          response: typeof responseData.body === 'string' ? responseData.body.slice(0, MAX_LOGGED_BODY) : '',
         })
 
         // Handle binary responses
@@ -277,6 +338,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
       // Send request to client — handle socket being closed mid-flight
       try {
         socket.send(JSON.stringify(message))
+        this.requestSockets.set(requestId, socket)
       }
       catch (err) {
         this.responseHandlers.delete(requestId)
@@ -290,6 +352,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
         if (this.responseHandlers.has(requestId)) {
           this.responseHandlers.delete(requestId)
           this.responseTimeouts.delete(requestId)
+          this.requestSockets.delete(requestId)
           resolve(new Response('Gateway timeout - tunnel client did not respond', { status: 504 }))
         }
       }, this.options.timeout)
@@ -432,7 +495,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
           const stats = this.getStats()
           return new Response(JSON.stringify({
             status: 'ok',
-            version: '0.2.7',
+            version,
             connections: this.activeConnections,
             totalConnections: this.totalConnections,
             activeSubdomains: this.subdomainSockets.size,
@@ -533,7 +596,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
           this.stats.requests++
           if (this.options.verbose) debugLog('server', `Publishing HTTP request to subdomain: ${subdomain}`, true)
 
-          return this.forwardRequest(req, path, subdomain)
+          return this.forwardRequest(req, path, subdomain, server.requestIP(req)?.address)
         }
 
         // No tunnel client for this subdomain
@@ -701,6 +764,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
         clearTimeout(tid)
       }
       this.responseTimeouts.clear()
+      this.requestSockets.clear()
       this.activeConnections = 0
       debugLog('server', 'Server stopped', this.options.verbose)
       this.emit('stop')
@@ -722,6 +786,7 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
   private pingInterval: ReturnType<typeof setInterval> | null = null
   private resolvedIp: string | null = null
   private resolverCreated = false
+  private subdomainRetries = 0
 
   constructor(options: TunnelOptions = {}) {
     super()
@@ -749,7 +814,12 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
   }
 
   public async connect(): Promise<void> {
-    if (this.options.manageHosts) {
+    // Re-enable reconnection in case a previous disconnect() turned it off
+    this.shouldReconnect = true
+
+    // Localhost and IP-literal hosts never need resolver fixes or DNS fallback —
+    // skipping them avoids pointless probes and surprise sudo prompts locally.
+    if (this.options.manageHosts && !isLocalOrIpHost(this.options.host)) {
       // On macOS, fix the system DNS so browsers can also reach the tunnel URL.
       // This must run regardless of canSystemConnect — the tunnel client can bypass DNS
       // with direct IP, but browsers need system DNS to work.
@@ -766,7 +836,7 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
       // so we can connect to the IP and bypass broken system DNS (common on macOS with .dev TLD)
       if (!this.resolvedIp) {
         try {
-          const reachable = await canSystemConnect(this.options.host, this.options.secure)
+          const reachable = await canSystemConnect(this.options.host, this.options.secure, this.options.port)
           if (!reachable) {
             debugLog('client', `Cannot reach ${this.options.host} via system DNS, resolving IP...`, this.options.verbose)
             this.resolvedIp = await resolveHostname(this.options.host, this.options.verbose)
@@ -807,19 +877,22 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
 
       this.ws = new WebSocket(url, wsOptions as any)
 
+      let settled = false
+
+      // The timeout covers the full connect flow: socket open AND server
+      // registration. Clearing it on 'open' alone would let the promise hang
+      // forever if the server never confirms (or rejects) the subdomain.
       const timeout = setTimeout(() => {
-        if (this.ws?.readyState !== WebSocket.OPEN) {
+        if (!settled) {
+          settled = true
           debugLog('client', 'Connection timeout', this.options.verbose)
           this.ws?.close()
           this.state = 'error'
-          reject(new Error('Connection timeout'))
+          reject(new Error('Connection timeout - server did not confirm registration'))
         }
       }, this.options.timeout)
 
-      let settled = false
-
       this.ws.addEventListener('open', () => {
-        clearTimeout(timeout)
         this.state = 'connected'
         this.reconnectAttempts = 0
         debugLog('client', 'Connected to tunnel server', this.options.verbose)
@@ -839,6 +912,7 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
           if (data.type === 'registered') {
             // Server confirmed our subdomain — now we're truly ready
             this.options.subdomain = data.subdomain
+            this.subdomainRetries = 0
             debugLog('client', `Registered with subdomain: ${data.subdomain}`, this.options.verbose)
 
             this.emit('connected', {
@@ -851,16 +925,32 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
 
             if (!settled) {
               settled = true
+              clearTimeout(timeout)
               resolve()
             }
           }
           else if (data.type === 'subdomain_taken') {
-            // Subdomain in use — append or increment suffix and retry
-            const current = this.options.subdomain
-            const match = current.match(/^(.+)-(\d+)$/)
-            const base = match ? match[1] : current
-            const next = match ? Number.parseInt(match[2]) + 1 : 2
-            this.options.subdomain = `${base}-${next}`
+            // Subdomain in use — try an incremented suffix, then fall back to
+            // random names, and give up after MAX_SUBDOMAIN_RETRIES so a busy
+            // server can't keep us in an endless retry loop.
+            this.subdomainRetries++
+            if (this.subdomainRetries > MAX_SUBDOMAIN_RETRIES) {
+              const error = new Error(`Could not acquire a free subdomain after ${MAX_SUBDOMAIN_RETRIES} attempts`)
+              this.emit('error', error)
+              if (!settled) {
+                settled = true
+                clearTimeout(timeout)
+                this.state = 'error'
+                this.shouldReconnect = false
+                this.ws?.close()
+                reject(error)
+              }
+              return
+            }
+
+            this.options.subdomain = this.subdomainRetries > 3
+              ? generateSubdomain()
+              : incrementSubdomain(this.options.subdomain)
             debugLog('client', `Subdomain ${data.subdomain} taken, trying ${this.options.subdomain}`, this.options.verbose)
 
             this.ws?.send(JSON.stringify({
@@ -876,7 +966,18 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
           }
           else if (data.type === 'error') {
             debugLog('client', `Server error: ${data.message}`, this.options.verbose, 'error')
-            this.emit('error', new Error(data.message))
+            const error = new Error(data.message)
+            this.emit('error', error)
+            // A server error before registration (e.g. invalid subdomain) is
+            // fatal for this connect attempt — fail fast instead of hanging.
+            if (!settled) {
+              settled = true
+              clearTimeout(timeout)
+              this.state = 'error'
+              this.shouldReconnect = false
+              this.ws?.close()
+              reject(error)
+            }
           }
         }
         catch (err) {
@@ -890,6 +991,13 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
         this.state = 'disconnected'
         debugLog('client', 'Disconnected from tunnel server', this.options.verbose)
         this.emit('close')
+
+        // Closed before registration completed — fail the connect promise
+        // (reconnection below may still recover the tunnel in the background)
+        if (!settled) {
+          settled = true
+          reject(new Error('Connection closed before registration'))
+        }
 
         // Attempt reconnection
         if (this.shouldReconnect && this.reconnectAttempts < this.options.maxReconnectAttempts) {
@@ -922,7 +1030,8 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
         debugLog('client', `WebSocket error: ${event}`, this.options.verbose, 'error')
         const error = event instanceof Error ? event : new Error('WebSocket connection error')
         this.emit('error', error)
-        if (this.state === 'connecting') {
+        if (!settled && this.state === 'connecting') {
+          settled = true
           this.state = 'error'
           reject(error)
         }
@@ -977,18 +1086,19 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
 
       const response = await fetch(localUrl, fetchOptions)
 
-      // Check content type for binary responses
+      // Text responses travel as-is; everything else (including responses
+      // without a content-type) is base64-encoded to stay binary-safe.
       const contentType = response.headers.get('content-type') || ''
       let responseBody: string
       let isBase64Encoded = false
 
-      if (isBinaryContentType(contentType)) {
+      if (isTextContentType(contentType)) {
+        responseBody = await response.text()
+      }
+      else {
         const buffer = await response.arrayBuffer()
         responseBody = Buffer.from(buffer).toString('base64')
         isBase64Encoded = true
-      }
-      else {
-        responseBody = await response.text()
       }
 
       const duration = Date.now() - startTime

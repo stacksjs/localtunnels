@@ -44,8 +44,8 @@ interface DestroyOptions {
   verbose?: boolean
 }
 
-// Default tunnel server
-const DEFAULT_SERVER = 'api.localtunnel.dev'
+// Default tunnel server — TUNNEL_SERVER env var overrides (see `lt info`)
+const DEFAULT_SERVER = process.env.TUNNEL_SERVER || 'api.localtunnel.dev'
 
 cli
   .command('start', 'Start a local tunnel to expose your local server')
@@ -65,17 +65,20 @@ cli
       process.exit(1)
     }
 
-    const subdomain = options.subdomain || generateSubdomain()
+    const requestedSubdomain = options.subdomain || process.env.TUNNEL_SUBDOMAIN
 
-    if (options.subdomain && !isValidSubdomain(options.subdomain)) {
-      console.error(`Invalid subdomain: ${options.subdomain}`)
+    if (requestedSubdomain && !isValidSubdomain(requestedSubdomain)) {
+      console.error(`Invalid subdomain: ${requestedSubdomain}`)
       console.error('Subdomains must be lowercase alphanumeric with optional hyphens')
       process.exit(1)
     }
 
+    const subdomain = requestedSubdomain || generateSubdomain()
+
     try {
       const serverHost = options.server?.replace(/^(wss?|https?):\/\//, '') || DEFAULT_SERVER
-      const secure = options.secure || options.server?.startsWith('wss://') || options.server?.startsWith('https://') || serverHost === DEFAULT_SERVER || serverHost === 'localtunnel.dev'
+      // The hosted service always speaks TLS; a custom server (flag or TUNNEL_SERVER env) must opt in
+      const secure = options.secure || options.server?.startsWith('wss://') || options.server?.startsWith('https://') || serverHost === 'api.localtunnel.dev' || serverHost === 'localtunnel.dev'
 
       console.log('')
       console.log(`  Connecting to ${serverHost}...`)

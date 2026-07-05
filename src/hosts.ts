@@ -103,15 +103,28 @@ export async function resolveHostname(hostname: string, verbose?: boolean): Prom
 }
 
 /**
+ * True for hosts that never need DNS management: localhost names,
+ * IPv4/IPv6 literals. Skips resolver setup and connectivity probing.
+ */
+export function isLocalOrIpHost(host: string): boolean {
+  return host === 'localhost'
+    || host.endsWith('.localhost')
+    || /^\d+\.\d+\.\d+\.\d+$/.test(host)
+    || host.includes(':') // IPv6 literal
+}
+
+/**
  * Check if the system can actually reach a hostname via HTTPS/HTTP.
  * Bun.dns.resolve uses a different code path than fetch/WebSocket on macOS,
  * and /etc/resolver overrides (e.g. for .dev TLD) can make /etc/hosts useless.
  * The only reliable check is an actual connection attempt.
  */
-export async function canSystemConnect(hostname: string, secure: boolean): Promise<boolean> {
+export async function canSystemConnect(hostname: string, secure: boolean, port?: number): Promise<boolean> {
   try {
     const protocol = secure ? 'https' : 'http'
-    await fetch(`${protocol}://${hostname}/health`, {
+    const defaultPort = secure ? 443 : 80
+    const portSuffix = port && port !== defaultPort ? `:${port}` : ''
+    await fetch(`${protocol}://${hostname}${portSuffix}/health`, {
       signal: AbortSignal.timeout(DNS_TIMEOUT_MS),
     })
     return true

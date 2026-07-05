@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { isLocalOrIpHost } from '../src/hosts'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
-import { calculateBackoff, generateId, isValidPort, isValidSubdomain } from '../src/utils'
+import { calculateBackoff, generateId, incrementSubdomain, isValidPort, isValidSubdomain } from '../src/utils'
 
 describe('localtunnels', () => {
   beforeAll(() => {
@@ -86,6 +87,45 @@ describe('localtunnels', () => {
       const delay = calculateBackoff(20, 1000, 5000)
       // Should be capped at 5000 + up to 1000 jitter
       expect(delay).toBeLessThanOrEqual(6000)
+    })
+  })
+
+  describe('incrementSubdomain', () => {
+    it('should append -2 to a plain subdomain', () => {
+      expect(incrementSubdomain('myapp')).toBe('myapp-2')
+    })
+
+    it('should increment an existing numeric suffix', () => {
+      expect(incrementSubdomain('myapp-2')).toBe('myapp-3')
+      expect(incrementSubdomain('myapp-9')).toBe('myapp-10')
+    })
+
+    it('should keep hyphenated names intact', () => {
+      expect(incrementSubdomain('swift-fox')).toBe('swift-fox-2')
+    })
+
+    it('should never exceed the 63-character DNS label limit', () => {
+      const long = 'a'.repeat(63)
+      const next = incrementSubdomain(long)
+      expect(next.length).toBeLessThanOrEqual(63)
+      expect(next.endsWith('-2')).toBe(true)
+      expect(isValidSubdomain(next)).toBe(true)
+    })
+  })
+
+  describe('isLocalOrIpHost', () => {
+    it('should recognize local and IP-literal hosts', () => {
+      expect(isLocalOrIpHost('localhost')).toBe(true)
+      expect(isLocalOrIpHost('myapp.localhost')).toBe(true)
+      expect(isLocalOrIpHost('127.0.0.1')).toBe(true)
+      expect(isLocalOrIpHost('192.168.1.10')).toBe(true)
+      expect(isLocalOrIpHost('::1')).toBe(true)
+    })
+
+    it('should not match real domains', () => {
+      expect(isLocalOrIpHost('localtunnel.dev')).toBe(false)
+      expect(isLocalOrIpHost('api.localtunnel.dev')).toBe(false)
+      expect(isLocalOrIpHost('example.com')).toBe(false)
     })
   })
 
@@ -319,6 +359,249 @@ describe('localtunnels', () => {
       expect(response.status).toBe(200)
       const text = await response.text()
       expect(text).toBe('OK')
+    })
+  })
+
+  // ============================================
+  // Integration: hardening (binary safety, forwarding, fail-fast)
+  // ============================================
+
+  describe('Integration: hardening', () => {
+    let server: TunnelServer
+    let serverPort: number
+
+    beforeAll(async () => {
+      server = new TunnelServer({ port: 0, verbose: false })
+      await server.start()
+      serverPort = (server as any).server?.port
+    })
+
+    afterAll(() => {
+      server.stop()
+    })
+
+    it('should forward binary responses byte-for-byte (application/zip)', async () => {
+      // Bytes that UTF-8 decoding would corrupt (0xFF, 0xFE, lone continuation bytes)
+      const payload = new Uint8Array(512)
+      for (let i = 0; i < payload.length; i++) payload[i] = (i * 7 + 0x80) % 256
+      payload.set([0xFF, 0xFE, 0x00, 0x80], 0)
+
+      const localServer = Bun.serve({
+        port: 0,
+        fetch() {
+          return new Response(payload, { headers: { 'Content-Type': 'application/zip' } })
+        },
+      })
+
+      const client = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'binresp',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+      await client.connect()
+
+      const response = await fetch(`http://localhost:${serverPort}/file.zip`, {
+        headers: { host: 'binresp.localhost' },
+      })
+      expect(response.status).toBe(200)
+      const received = new Uint8Array(await response.arrayBuffer())
+      expect(received).toEqual(payload)
+
+      await client.disconnect()
+      localServer.stop()
+    })
+
+    it('should forward binary request bodies byte-for-byte', async () => {
+      const payload = new Uint8Array(256)
+      for (let i = 0; i < payload.length; i++) payload[i] = 255 - (i % 256)
+
+      let receivedByLocal: Uint8Array | null = null
+      const localServer = Bun.serve({
+        port: 0,
+        async fetch(req) {
+          receivedByLocal = new Uint8Array(await req.arrayBuffer())
+          return new Response('ok')
+        },
+      })
+
+      const client = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'binreq',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+      await client.connect()
+
+      const response = await fetch(`http://localhost:${serverPort}/upload`, {
+        method: 'POST',
+        headers: { 'host': 'binreq.localhost', 'content-type': 'application/octet-stream' },
+        body: payload,
+      })
+      expect(response.status).toBe(200)
+      expect(receivedByLocal).toEqual(payload)
+
+      await client.disconnect()
+      localServer.stop()
+    })
+
+    it('should add x-forwarded-* headers for the local app', async () => {
+      let seenHeaders: Record<string, string> = {}
+      const localServer = Bun.serve({
+        port: 0,
+        fetch(req) {
+          seenHeaders = Object.fromEntries(req.headers.entries())
+          return new Response('ok')
+        },
+      })
+
+      const client = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'fwd',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+      await client.connect()
+
+      const response = await fetch(`http://localhost:${serverPort}/headers`, {
+        headers: { host: 'fwd.localhost' },
+      })
+      expect(response.status).toBe(200)
+      expect(seenHeaders['x-forwarded-host']).toBe('fwd.localhost')
+      expect(seenHeaders['x-forwarded-proto']).toBe('http')
+      expect(seenHeaders['x-forwarded-for']).toBeTruthy()
+
+      await client.disconnect()
+      localServer.stop()
+    })
+
+    it('should fail in-flight requests fast when the client disconnects', async () => {
+      // Local server that never responds within the test window
+      const localServer = Bun.serve({
+        port: 0,
+        async fetch() {
+          await new Promise(resolve => setTimeout(resolve, 10_000))
+          return new Response('too late')
+        },
+      })
+
+      const client = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'slowpoke',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+      await client.connect()
+
+      const started = Date.now()
+      const pending = fetch(`http://localhost:${serverPort}/slow`, {
+        headers: { host: 'slowpoke.localhost' },
+      })
+
+      // Give the request time to reach the client, then drop the tunnel
+      await new Promise(resolve => setTimeout(resolve, 150))
+      await client.disconnect()
+
+      const response = await pending
+      expect(response.status).toBe(502)
+      // Must resolve via fail-fast, not the 30s gateway timeout
+      expect(Date.now() - started).toBeLessThan(3000)
+
+      localServer.stop()
+    })
+
+    it('should redact credential headers in the devtools request log', async () => {
+      const localServer = Bun.serve({
+        port: 0,
+        fetch() {
+          return new Response('ok')
+        },
+      })
+
+      const client = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'redact',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+      await client.connect()
+
+      await fetch(`http://localhost:${serverPort}/private`, {
+        headers: {
+          'host': 'redact.localhost',
+          'authorization': 'Bearer super-secret-token',
+          'cookie': 'session=abc123',
+          'x-request-id': 'keep-me',
+        },
+      })
+
+      const logs = await (await fetch(`http://localhost:${serverPort}/devtools/api/requests`, {
+        headers: { host: 'redact.localhost' },
+      })).json() as Array<{ headers: Record<string, string> }>
+
+      expect(logs.length).toBeGreaterThan(0)
+      const entry = logs[logs.length - 1]
+      expect(entry.headers.authorization).toBe('<redacted>')
+      expect(entry.headers.cookie).toBe('<redacted>')
+      expect(entry.headers['x-request-id']).toBe('keep-me')
+
+      await client.disconnect()
+      localServer.stop()
+    })
+
+    it('should reject connect() fast when the server refuses the subdomain', async () => {
+      const client = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'Not_Valid!',
+        localPort: 9999,
+        timeout: 30_000, // deliberately long — rejection must not wait for it
+      })
+
+      client.on('error', () => {}) // avoid unhandled 'error' event
+
+      const started = Date.now()
+      await expect(client.connect()).rejects.toThrow('Invalid subdomain')
+      expect(Date.now() - started).toBeLessThan(3000)
+    })
+
+    it('should resolve the taken-subdomain collision with a suffixed name', async () => {
+      const localServer = Bun.serve({
+        port: 0,
+        fetch() {
+          return new Response('ok')
+        },
+      })
+
+      const first = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'popular',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+      const second = new TunnelClient({
+        host: 'localhost',
+        port: serverPort,
+        subdomain: 'popular',
+        localPort: localServer.port,
+        timeout: 5000,
+      })
+
+      await first.connect()
+      await second.connect()
+
+      expect(first.getSubdomain()).toBe('popular')
+      expect(second.getSubdomain()).toBe('popular-2')
+
+      await second.disconnect()
+      await first.disconnect()
+      localServer.stop()
     })
   })
 
