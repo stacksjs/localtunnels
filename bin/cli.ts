@@ -856,6 +856,122 @@ cli
   })
 
 cli
+  .command('vpn:coordinator', 'Run the VPN coordination server (peer discovery + IP assignment)')
+  .option('-p, --port <port>', 'Port to listen on', { default: '51821' })
+  .option('-h, --host <host>', 'Host to bind to', { default: '0.0.0.0' })
+  .option('--network <cidr>', 'Tunnel network to assign IPs from', { default: '100.100.0.0/16' })
+  .action(async (options: { port: string, host: string, network: string }) => {
+    try {
+      const { VpnCoordinator } = await import('../src/vpn')
+      const port = Number.parseInt(options.port) || 51821
+      const coordinator = new VpnCoordinator({ port, host: options.host, network: options.network })
+      coordinator.start()
+
+      console.log('')
+      console.log('  localtunnels VPN coordinator')
+      console.log('')
+      console.log(`  Listening:  ws://${options.host === '0.0.0.0' ? 'localhost' : options.host}:${coordinator.port}`)
+      console.log(`  Network:    ${options.network}`)
+      console.log('')
+      console.log('  Nodes join with:')
+      console.log(`    lt vpn up --coordinator ws://<this-host>:${coordinator.port}`)
+      console.log('')
+      console.log('  Press Ctrl+C to stop')
+      console.log('')
+
+      const shutdown = () => {
+        console.log('\n  Stopping coordinator...')
+        coordinator.stop()
+        process.exit(0)
+      }
+      process.on('SIGINT', shutdown)
+      process.on('SIGTERM', shutdown)
+      await new Promise(() => {})
+    }
+    catch (error: any) {
+      console.error(`\n  Coordinator failed: ${error.message}`)
+      process.exit(1)
+    }
+  })
+
+cli
+  .command('vpn:mesh-demo', 'Run a coordinator and two auto-discovering nodes end-to-end')
+  .option('--count <n>', 'Messages to exchange each way', { default: '100' })
+  .action(async (options: { count: string }) => {
+    try {
+      const { generateKeyPair, VpnCoordinator, VpnNode } = await import('../src/vpn')
+      const count = Number.parseInt(options.count) || 100
+
+      const coordinator = new VpnCoordinator({ host: '127.0.0.1' })
+      coordinator.start()
+      const url = `ws://127.0.0.1:${coordinator.port}`
+
+      const alice = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url })
+      const bob = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url })
+
+      let atBob = 0
+      let atAlice = 0
+      bob.on('message', (data, from) => {
+        atBob++
+        bob.send(from, data) // echo
+      })
+      alice.on('message', () => { atAlice++ })
+      alice.on('error', () => {})
+      bob.on('error', () => {})
+
+      console.log('')
+      console.log(`  Coordinator: ${url}`)
+      const aInfo = await alice.start()
+      const bInfo = await bob.start()
+      console.log(`  Alice joined as ${aInfo.assignedIp}, Bob as ${bInfo.assignedIp}`)
+
+      // Wait for the encrypted link to form.
+      const linkDeadline = Date.now() + 5000
+      const linked = new Promise<void>((resolve) => {
+        alice.on('link', () => resolve())
+        bob.on('link', () => resolve())
+      })
+      await Promise.race([linked, new Promise(r => setTimeout(r, 5000))])
+      while (Date.now() < linkDeadline && atAlice === 0) {
+        await new Promise(r => setTimeout(r, 20))
+        break
+      }
+      await new Promise(r => setTimeout(r, 200))
+
+      const t0 = performance.now()
+      for (let i = 0; i < count; i++)
+        alice.send(bob.publicKeyB64, new TextEncoder().encode(`packet-${i}`))
+
+      const deadline = Date.now() + 5000
+      while (atAlice < count && Date.now() < deadline)
+        await new Promise(r => setTimeout(r, 5))
+      const rtt = performance.now() - t0
+
+      alice.stop()
+      bob.stop()
+      coordinator.stop()
+
+      console.log('')
+      console.log(`  Bob received:    ${atBob}/${count}`)
+      console.log(`  Alice got echos: ${atAlice}/${count}`)
+      console.log(`  Round trip:      ${rtt.toFixed(1)}ms for ${count} messages`)
+      console.log('')
+      if (atBob < count || atAlice < count) {
+        console.error('  Mesh demo FAILED: message loss')
+        process.exit(1)
+      }
+      console.log('  Auto-discovered encrypted mesh working end-to-end.')
+      console.log('')
+    }
+    catch (error: any) {
+      console.error(`\n  Mesh demo failed: ${error.message}`)
+      if (error.name === 'VpnUnavailableError')
+        console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+cli
   .command('info', 'Show information about localtunnels')
   .action(() => {
     console.log(`
@@ -880,6 +996,8 @@ COMMANDS:
   vpn:demo           Run two peers over real UDP and exchange encrypted traffic
   vpn:tun-check      Check whether a TUN device can be opened (needs root)
   vpn:up             Bring up a layer-3 VPN interface bridged to a peer (root)
+  vpn:coordinator    Run the peer-discovery coordination server
+  vpn:mesh-demo      Coordinator + two auto-discovering nodes, end-to-end
   deploy:tunnel      Deploy tunnel server to AWS EC2
   deploy:site        Deploy marketing site to S3+CloudFront
   deploy:analytics   Deploy analytics backend (DynamoDB + Lambda)

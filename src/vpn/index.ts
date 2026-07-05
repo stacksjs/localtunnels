@@ -51,6 +51,37 @@ export type {
   TunDeviceEvents,
 } from './tun'
 
+export {
+  VpnCoordinator,
+} from './coordinator'
+
+export type {
+  VpnCoordinatorOptions,
+} from './coordinator'
+
+export {
+  VpnCoordinatorClient,
+} from './client'
+
+export type {
+  VpnCoordinatorClientEvents,
+  VpnCoordinatorClientOptions,
+} from './client'
+
+export {
+  VpnNode,
+} from './node'
+
+export type {
+  VpnNodeEvents,
+  VpnNodeOptions,
+} from './node'
+
+export type {
+  Endpoint,
+  PeerRecord,
+} from './protocol'
+
 export type {
   HandshakeResult,
   VpnKeyPair,
