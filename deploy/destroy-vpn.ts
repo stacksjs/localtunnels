@@ -1,62 +1,38 @@
 /* eslint-disable node/prefer-global/process */
 /**
- * Tear down the localtunnels VPN: delete the server, then its firewall.
+ * Tear down the localtunnels VPN: delete the box and its firewall/security
+ * group on whichever provider it was deployed to (recorded in the state file;
+ * override with --provider).
  *
  *   bun run destroy:vpn
  */
 import { existsSync, readFileSync, rmSync } from 'node:fs'
-import { HetznerClient } from '@stacksjs/ts-cloud/drivers'
 import {
   CLIENT_CONF_PATH,
-  FIREWALL_NAME,
-  loadHetznerToken,
+  createProvisioner,
   log,
+  resolveProvider,
   SERVER_NAME,
   STATE_PATH,
 } from './config'
 
 async function main(): Promise<void> {
-  const client = new HetznerClient({ apiToken: loadHetznerToken() })
-
-  // Prefer state; fall back to discovery by name so teardown works regardless.
-  let serverId: number | undefined
-  let firewallId: number | undefined
-  if (existsSync(STATE_PATH)) {
-    const s = JSON.parse(readFileSync(STATE_PATH, 'utf8'))
-    serverId = s.serverId
-    firewallId = s.firewallId
+  // Prefer the provider recorded at deploy time; fall back to flag/env/default
+  // so teardown still works without local state.
+  let provider = resolveProvider()
+  if (!process.argv.includes('--provider') && existsSync(STATE_PATH)) {
+    const state = JSON.parse(readFileSync(STATE_PATH, 'utf8'))
+    if (state.provider === 'hetzner' || state.provider === 'aws')
+      provider = state.provider
   }
 
-  const server = (await client.listServers()).find(s => s.id === serverId || s.name === SERVER_NAME)
-  if (server) {
-    log(`Deleting server "${server.name}" (#${server.id})...`)
-    const action = await client.deleteServer(server.id)
-    await client.waitForAction(action.id).catch(() => {})
-    log('Server deleted.')
-  }
-  else {
-    log('No matching server found (already gone).')
-  }
-
-  // A firewall can only be deleted once no server references it.
-  const firewall = (await client.listFirewalls()).find(f => f.id === firewallId || f.name === FIREWALL_NAME)
-  if (firewall) {
-    // Give the provider a moment to detach the firewall from the deleted server.
-    for (let i = 0; i < 10; i++) {
-      try {
-        await client.deleteFirewall(firewall.id)
-        log(`Firewall "${firewall.name}" (#${firewall.id}) deleted.`)
-        break
-      }
-      catch (err: any) {
-        if (i === 9) {
-          log(`Could not delete firewall (${err.message}); delete it manually if needed.`)
-          break
-        }
-        await Bun.sleep(3000)
-      }
-    }
-  }
+  const provisioner = await createProvisioner(provider)
+  log(`Destroying "${SERVER_NAME}" on ${provider}...`)
+  const { destroyed } = await provisioner.destroyBox(SERVER_NAME)
+  if (destroyed.length === 0)
+    log('No matching resources found (already gone).')
+  for (const item of destroyed)
+    log(`Destroyed ${item}.`)
 
   for (const p of [STATE_PATH, CLIENT_CONF_PATH]) {
     if (existsSync(p))

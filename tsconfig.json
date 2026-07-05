@@ -22,7 +22,8 @@
   },
   "include": [
     "packages/localtunnels/src/**/*.ts",
-    "packages/localtunnels/bin/**/*.ts"
+    "packages/localtunnels/bin/**/*.ts",
+    "deploy/**/*.ts"
   ],
   "exclude": [
     "packages/localtunnels/src/cloud/**",

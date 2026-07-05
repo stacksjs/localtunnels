@@ -2,13 +2,14 @@
 
 A fully-automated, end-to-end-verified VPN / exit node that runs the **localtunnels** WireGuard-style stack — our own Zig crypto core ([`packages/vpn-core`](../packages/vpn-core)), Linux TUN device, raw datapath, and cryptokey routing — not stock kernel WireGuard.
 
-Provisioning goes through [`@stacksjs/ts-cloud`](https://github.com/stacksjs/ts-cloud) (its idempotent `ensureServer` / `ensureFirewall` / `ensureSshKey` helpers plus `sshExec` / `scpUpload` / boot waits), so this directory only contains what is localtunnels-specific: the service setup, the cloud-init bootstrap, and the e2e verifier. Hetzner Cloud is the current provider; more land as ts-cloud grows.
+Provisioning goes through [`@stacksjs/ts-cloud`](https://github.com/stacksjs/ts-cloud)'s provider-agnostic box provisioner (plus `sshExec` / `scpUpload` / boot waits), so this directory only contains what is localtunnels-specific: the service setup, the first-boot bootstrap, and the e2e verifier. Pick the provider with `--provider hetzner|aws` (Hetzner is the default); more providers land as ts-cloud grows.
 
 ## Usage
 
 ```sh
-# Deploy: provision server + firewall, build/ship the localtunnels binary, start the service.
-bun run deploy:vpn
+# Deploy: provision box + firewall, build/ship the localtunnels binary, start the service.
+bun run deploy:vpn                     # Hetzner (default)
+bun run deploy:vpn -- --provider aws   # AWS EC2
 
 # Verify end-to-end: our stack on both ends (handshake, tunnel ping, exit routing).
 bun run verify:vpn
@@ -17,11 +18,11 @@ bun run verify:vpn
 bun run destroy:vpn
 ```
 
-The provider API token is read from `HCLOUD_TOKEN` / `HETZNER_API_TOKEN` (falling back to the ts-cloud checkout's `.env`) and is never written into this directory. Deploy state and the generated client config are written locally and git-ignored.
+The Hetzner token is read from `HCLOUD_TOKEN` / `HETZNER_API_TOKEN` (falling back to the ts-cloud checkout's `.env`); AWS uses the ambient credentials/`AWS_REGION`. Nothing secret is ever written into this directory. Deploy state and the generated client config are written locally and git-ignored.
 
 ## How it works
 
-- **Provisioning** (`vpn.ts`, via ts-cloud): ensure the SSH key, a cloud firewall (`tcp/22`, `udp/51820`, `icmp`), and an Ubuntu 24.04 `cx23` server in Falkenstein (`fsn1`).
+- **Provisioning** (`vpn.ts`, via ts-cloud's box provisioner): ensure an Ubuntu 24.04 box (`cx23` in `fsn1`, or `t3.micro` on AWS) with `udp/51820` + `icmp` open and the SSH key authorized.
 - **Build + ship**: compile the localtunnels CLI for `bun-linux-x64` and cross-compile `libltvpn.so` for `x86_64-linux-musl` (self-contained, no libc dependency), then `scp` both to the server.
 - **Service** (`lt-server-setup.sh`): generate server + client identities with `lt vpn keygen`, then run `lt vpn up` in server mode as the systemd unit `localtunnels-vpn` — a TUN interface at `10.8.0.1/24`, listening `udp/51820`, with IP forwarding + `iptables` MASQUERADE so client traffic egresses via the server IP (exit node).
 

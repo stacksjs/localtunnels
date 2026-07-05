@@ -1,12 +1,12 @@
 import { CLIENT_WG_IP, WG_PORT } from './config'
 
 /**
- * Minimal first-boot bootstrap. The VPN itself is the localtunnels binary we
- * ship post-boot (not an apt package), so cloud-init only needs to ensure the
- * TUN module and a couple of tools are present.
+ * Minimal first-boot bootstrap for the VPN box. The VPN itself is the
+ * localtunnels binary we ship post-boot (not an apt package), so first boot
+ * only needs the TUN module and a couple of tools. ts-cloud's box provisioner
+ * wraps this script into cloud-config (with root SSH access) for us.
  */
-export function buildCloudInit(): string {
-  const script = `#!/usr/bin/env bash
+export const VPN_BOOTSTRAP_SCRIPT: string = `#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 for _ in $(seq 1 60); do
@@ -18,19 +18,6 @@ apt-get install -y curl iproute2 iptables || true
 modprobe tun || true
 echo ready > /var/lib/cloud/lt-ready
 `
-  const path = '/var/lib/cloud/lt-bootstrap.sh'
-  const indented = script.split('\n').map(l => `      ${l}`).join('\n')
-  return `#cloud-config
-write_files:
-  - path: ${path}
-    permissions: '0755'
-    owner: root:root
-    content: |
-${indented}
-runcmd:
-  - [ bash, ${path} ]
-`
-}
 
 /**
  * A WireGuard-compatible client config. Because the localtunnels protocol is
