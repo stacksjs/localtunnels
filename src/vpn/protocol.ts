@@ -33,7 +33,13 @@ export interface HeartbeatMessage {
   t: 'heartbeat'
 }
 
-export type ClientMessage = RegisterMessage | HeartbeatMessage
+/** Ask the coordinator to tell `target` to punch back toward us. */
+export interface PunchRequestMessage {
+  t: 'punch'
+  target: string
+}
+
+export type ClientMessage = RegisterMessage | HeartbeatMessage | PunchRequestMessage
 
 // ── coordinator → client ─────────────────────────────────────────────────────
 
@@ -54,7 +60,14 @@ export interface ErrorMessage {
   message: string
 }
 
-export type ServerMessage = RegisteredMessage | PeersMessage | ErrorMessage
+/** Tells a node to hole-punch toward `from` at `endpoint` (simultaneous open). */
+export interface PunchSignalMessage {
+  t: 'punch'
+  from: string
+  endpoint: Endpoint
+}
+
+export type ServerMessage = RegisteredMessage | PeersMessage | ErrorMessage | PunchSignalMessage
 
 /** Parse a JSON frame into a known message, or return null if malformed. */
 export function parseMessage<T>(raw: string): T | null {

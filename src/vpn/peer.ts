@@ -46,6 +46,8 @@ export interface VpnPeerEvents {
   link: (link: VpnLink) => void
   /** An application message arrived (padding/keepalives already stripped). */
   message: (data: Uint8Array, from: string) => void
+  /** A NAT hole-punch datagram arrived from `host:port`. */
+  punch: (host: string, port: number) => void
   error: (error: Error) => void
 }
 
@@ -79,6 +81,9 @@ const REKEY_GRACE_MS = 10_000
 const MSG_INITIATION = 1
 const MSG_RESPONSE = 2
 const MSG_DATA = 4
+/** Non-cryptographic datagram sent to open a NAT mapping (hole punching). */
+const MSG_PUNCH = 5
+const PUNCH_PACKET = new Uint8Array([MSG_PUNCH, 0, 0, 0])
 
 const HANDSHAKE_RETRIES = 5
 const HANDSHAKE_RETRY_MS = 1000
@@ -109,6 +114,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   private readonly sessions = new Map<number, Established>()
   /** Newest local session index to send on, per peer public key. */
   private readonly sendIndex = new Map<string, number>()
+  private punchCount = 0
 
   constructor(options: VpnPeerOptions) {
     super()
@@ -197,6 +203,27 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     })
   }
 
+  /**
+   * Send a burst of NAT hole-punch datagrams to an endpoint. These open this
+   * node's outbound NAT mapping so a peer's handshake can reach us, and prime
+   * the far side. They carry no secrets and are ignored by the receiver beyond
+   * a `punch` event.
+   */
+  punch(host: string, port: number, count = 5, spacingMs = 60): void {
+    const fire = (remaining: number) => {
+      if (remaining <= 0 || !this.socket)
+        return
+      this.sendRaw(PUNCH_PACKET, host, port)
+      setTimeout(() => fire(remaining - 1), spacingMs)
+    }
+    fire(count)
+  }
+
+  /** Count of hole-punch datagrams received (useful for diagnostics/tests). */
+  get punchesReceived(): number {
+    return this.punchCount
+  }
+
   /** Send an application message to an established peer. */
   send(peerPublicKey: Uint8Array | string, data: Uint8Array): void {
     if (data.length > MAX_MESSAGE)
@@ -243,6 +270,10 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
         break
       case MSG_DATA:
         this.handleData(buf, addr, port)
+        break
+      case MSG_PUNCH:
+        this.punchCount += 1
+        this.emit('punch', addr, port)
         break
       default:
         // Unknown/cookie messages are ignored for now.

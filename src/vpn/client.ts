@@ -18,6 +18,8 @@ export interface VpnCoordinatorClientEvents {
   registered: (info: { assignedIp: string, network: string }) => void
   /** The peer directory changed (excludes this node). */
   peers: (peers: PeerRecord[]) => void
+  /** A peer asked us to hole-punch toward it. */
+  punch: (from: string, endpoint: { host: string, port: number }) => void
   error: (error: Error) => void
   close: () => void
 }
@@ -103,10 +105,19 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
       case 'peers':
         this.emit('peers', msg.peers)
         break
+      case 'punch':
+        this.emit('punch', msg.from, msg.endpoint)
+        break
       case 'error':
         this.emit('error', new Error(msg.message))
         break
     }
+  }
+
+  /** Ask the coordinator to have `targetPublicKey` punch back toward us. */
+  requestPunch(targetPublicKey: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN)
+      this.ws.send(JSON.stringify({ t: 'punch', target: targetPublicKey }))
   }
 
   private startHeartbeat(): void {

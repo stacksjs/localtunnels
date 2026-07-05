@@ -75,6 +75,9 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
       listenPort: this.peer.port,
     })
     this.client.on('peers', records => this.onPeers(records))
+    // A peer asked us to punch toward it: open our NAT mapping so its handshake
+    // (or ours) can traverse.
+    this.client.on('punch', (_from, endpoint) => this.peer.punch(endpoint.host, endpoint.port))
     this.client.on('error', err => this.emit('error', err))
 
     const info = await this.client.connect()
@@ -97,6 +100,10 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
         continue
 
       this.connecting.add(rec.publicKey)
+      // NAT traversal: open our mapping toward the peer and ask it (via the
+      // coordinator) to punch back, so its NAT admits our handshake. Then dial.
+      this.peer.punch(rec.endpoint.host, rec.endpoint.port)
+      this.client?.requestPunch(rec.publicKey)
       this.peer.connect(decodeKey(rec.publicKey), rec.endpoint.host, rec.endpoint.port)
         .catch((err) => {
           this.connecting.delete(rec.publicKey)

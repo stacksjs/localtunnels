@@ -115,6 +115,20 @@ export class VpnCoordinator {
       }
       case 'heartbeat':
         break
+      case 'punch': {
+        // Relay a punch request: tell `target` to punch back toward the
+        // requester, so both open their NAT mappings at about the same time.
+        const requester = ws.data.publicKey ? this.peers.get(ws.data.publicKey) : undefined
+        const target = this.peers.get(msg.target)
+        if (requester && target) {
+          send(target.ws, {
+            t: 'punch',
+            from: requester.publicKey,
+            endpoint: { host: requester.host, port: requester.port },
+          })
+        }
+        break
+      }
     }
   }
 
