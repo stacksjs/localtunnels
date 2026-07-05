@@ -154,6 +154,53 @@ Or deploy to AWS:
 localtunnels deploy --domain mytunnel.example.com --key-name my-keypair
 ```
 
+## VPN Mode
+
+Beyond exposing a single port, localtunnels can join machines into a private,
+encrypted layer-3 network — a self-hosted, WireGuard-style VPN. It implements
+the actual **WireGuard v1 protocol** (`Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s`)
+in a dependency-free **Zig** core (`libltvpn`, consumed from Bun over `bun:ffi`),
+with the control plane in TypeScript.
+
+The core is validated for wire-correctness against an independent reference
+implementation (`native/testvectors/wg_ref.py`, itself checked against the
+RFC 7748 / 8439 / 7693 vectors): the Zig code produces byte-identical handshake
+messages, transport keys, and the canonical WireGuard `InitialChainKey`.
+
+```sh
+# Generate this machine's identity (X25519 keypair, stored 0600)
+lt vpn keygen
+
+# Verify the native core (handshake + encryption + replay protection)
+lt vpn selftest
+
+# See it move encrypted traffic between two peers over real UDP
+lt vpn demo
+
+# Run the peer-discovery coordinator, then a self-configuring mesh demo
+lt vpn coordinator
+lt vpn mesh-demo
+
+# Bring up a real layer-3 interface bridged to a peer (needs root)
+sudo lt vpn up --peer <pubkey> --endpoint <host>:51820
+```
+
+Features: X25519 identities, ChaCha20-Poly1305 transport with RFC-6479 replay
+protection, session rekeying, cryptokey routing (allowed-ips), a coordinator for
+zero-config peer discovery and IP assignment, NAT hole punching with an
+encrypted relay fallback (the coordinator only ever sees ciphertext), and TUN
+devices on macOS (`utun`) and Linux (`/dev/net/tun`).
+
+Build the native library from source (requires [Zig](https://ziglang.org)):
+
+```sh
+bun run build:native   # → native/zig-out/lib/libltvpn.*
+bun run test:native    # Zig unit + known-answer + fuzz tests
+```
+
+VPN features degrade gracefully: if the native library isn't present, the HTTP
+tunnel above is unaffected.
+
 ## Benchmarks
 
 localtunnels ships with a benchmark suite built on [mitata](https://github.com/evanwashere/mitata). The suite covers utility functions, connection lifecycle, request throughput, latency distribution, scalability under load, and cross-tool comparisons.

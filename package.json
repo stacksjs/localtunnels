@@ -54,10 +54,14 @@
   "files": [
     "README.md",
     "dist",
+    "native/build.zig",
+    "native/src",
     "src"
   ],
   "scripts": {
     "build": "bun build.ts && bun run compile",
+    "build:native": "cd native && zig build",
+    "test:native": "cd native && zig build test",
     "compile": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --outfile bin/localtunnels",
     "compile:all": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:windows-x64 && bun run compile:darwin-x64 && bun run compile:darwin-arm64",
     "compile:linux-x64": "bun build ./bin/cli.ts --compile --minify --external '@stacksjs/ts-analytics' --target=bun-linux-x64 --outfile bin/localtunnels-linux-x64",
