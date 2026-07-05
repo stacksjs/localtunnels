@@ -168,4 +168,14 @@ describeVpn('vpn/transport', () => {
     initiatorSession.free()
     responderSession.free()
   })
+
+  it('exposes the native pump binding (fd fast path)', () => {
+    // Correctness of the pump itself is covered by the Zig pipe tests; here we
+    // confirm the FFI binding is wired and degrades cleanly on invalid fds.
+    const { initiatorSession, responderSession } = completeHandshake()
+    expect(initiatorSession.forwardEncryptFrom(-1, -1, 8)).toBe(0)
+    expect(responderSession.forwardDecryptFrom(-1, -1, 8)).toBe(0)
+    initiatorSession.free()
+    responderSession.free()
+  })
 })

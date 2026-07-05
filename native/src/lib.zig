@@ -8,16 +8,18 @@ const keys = @import("keys.zig");
 const noise = @import("noise.zig");
 const transport = @import("transport.zig");
 const tun = @import("tun.zig");
+const pump = @import("pump.zig");
 
 pub const kdf = @import("kdf.zig");
 pub const replay = @import("replay.zig");
 pub const tai64n = @import("tai64n.zig");
 pub const rand = @import("rand.zig");
+pub const cookie = @import("cookie.zig");
 
 const allocator = std.heap.smp_allocator;
 
 /// ABI version — bump on any breaking change to this surface.
-const abi_version: u32 = 2;
+const abi_version: u32 = 3;
 
 const LtvpnError = enum(i32) {
     ok = 0,
@@ -232,6 +234,20 @@ export fn ltvpn_tun_close(fd: i32) void {
     tun.close_device(fd);
 }
 
+// ── Native packet pump (M5) ──────────────────────────────────────────────────
+
+/// Drain up to `max_packets` plaintext packets from `in_fd`, encrypt each with
+/// `session`, and write them to `out_fd`. Returns packets forwarded.
+export fn ltvpn_forward_encrypt(s: *transport.Session, in_fd: i32, out_fd: i32, max_packets: usize) usize {
+    return pump.forwardEncrypt(s, in_fd, out_fd, max_packets);
+}
+
+/// Drain up to `max_packets` wire messages from `in_fd`, decrypt each with
+/// `session`, and write the plaintext to `out_fd`. Returns packets written.
+export fn ltvpn_forward_decrypt(s: *transport.Session, in_fd: i32, out_fd: i32, max_packets: usize) usize {
+    return pump.forwardDecrypt(s, in_fd, out_fd, max_packets);
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 test {
@@ -243,6 +259,8 @@ test {
     _ = tai64n;
     _ = rand;
     _ = tun;
+    _ = pump;
+    _ = cookie;
 }
 
 test "C ABI end-to-end: keypair → handshake → transport" {

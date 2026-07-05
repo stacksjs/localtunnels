@@ -82,6 +82,12 @@ export type {
   PeerRecord,
 } from './protocol'
 
+export {
+  packetDestination,
+  packetSource,
+  RoutingTable,
+} from './routing'
+
 export type {
   HandshakeResult,
   VpnKeyPair,

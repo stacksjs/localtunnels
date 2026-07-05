@@ -178,6 +178,21 @@ export class Session {
     return out.subarray(0, n)
   }
 
+  /**
+   * Native fast path: drain up to `maxPackets` plaintext packets from `inFd`,
+   * encrypt each, and write them to `outFd` — all in one FFI call, no per-packet
+   * crossing. `inFd`/`outFd` are raw descriptors (a TUN device and a connected
+   * UDP socket in production). Returns the number of packets forwarded.
+   */
+  forwardEncryptFrom(inFd: number, outFd: number, maxPackets = 64): number {
+    return Number(this.lib.ltvpn_forward_encrypt(this.handle(), inFd, outFd, BigInt(maxPackets)))
+  }
+
+  /** Native fast path in reverse: decrypt wire messages from `inFd` to `outFd`. */
+  forwardDecryptFrom(inFd: number, outFd: number, maxPackets = 64): number {
+    return Number(this.lib.ltvpn_forward_decrypt(this.handle(), inFd, outFd, BigInt(maxPackets)))
+  }
+
   free(): void {
     if (this.ptr !== null) {
       this.lib.ltvpn_session_free(this.ptr)

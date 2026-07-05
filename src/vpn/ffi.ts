@@ -19,7 +19,7 @@ export class VpnUnavailableError extends Error {
 }
 
 /** ABI version this TypeScript layer expects from the native library. */
-export const EXPECTED_ABI_VERSION = 2
+export const EXPECTED_ABI_VERSION = 3
 
 const LIB_BASENAME = `libltvpn.${suffix}`
 
@@ -94,6 +94,8 @@ const symbols = {
   ltvpn_tun_read: { args: [FFIType.i32, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
   ltvpn_tun_write: { args: [FFIType.i32, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
   ltvpn_tun_close: { args: [FFIType.i32], returns: FFIType.void },
+  ltvpn_forward_encrypt: { args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.u64], returns: FFIType.u64 },
+  ltvpn_forward_decrypt: { args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.u64], returns: FFIType.u64 },
 } as const
 
 /** Argument accepted by the native library wherever it expects a pointer. */
@@ -125,6 +127,8 @@ export interface LtvpnSymbols {
   ltvpn_tun_read: (fd: number, buf: PtrArg, cap: bigint) => bigint
   ltvpn_tun_write: (fd: number, buf: PtrArg, len: bigint) => bigint
   ltvpn_tun_close: (fd: number) => void
+  ltvpn_forward_encrypt: (s: PtrArg, inFd: number, outFd: number, maxPackets: bigint) => bigint
+  ltvpn_forward_decrypt: (s: PtrArg, inFd: number, outFd: number, maxPackets: bigint) => bigint
 }
 
 let cached: LtvpnSymbols | null = null

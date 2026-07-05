@@ -33,6 +33,12 @@ export interface VpnPeerOptions {
   presharedKey?: Uint8Array
   /** Seconds between keepalives on an idle link. 0 disables. Default 15. */
   keepaliveInterval?: number
+  /**
+   * Seconds before an initiated link re-handshakes for fresh keys (WireGuard's
+   * REKEY_AFTER_TIME). Only the side that initiated rekeys. 0 disables.
+   * Default 120.
+   */
+  rekeyAfter?: number
 }
 
 export interface VpnPeerEvents {
@@ -62,7 +68,13 @@ interface Established {
   host: string
   port: number
   keepalive: ReturnType<typeof setInterval> | null
+  /** True when this node initiated the handshake (and thus drives rekeys). */
+  initiatedByUs: boolean
+  rekeyTimer: ReturnType<typeof setTimeout> | null
 }
+
+/** Grace period an old session keeps decrypting after a rekey, in ms. */
+const REKEY_GRACE_MS = 10_000
 
 const MSG_INITIATION = 1
 const MSG_RESPONSE = 2
@@ -89,11 +101,14 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   private readonly bindPort: number
   private readonly bindHost?: string
   private readonly keepaliveInterval: number
+  private readonly rekeyAfter: number
 
   private socket: UdpSocket | null = null
   private readonly allowed = new Map<string, PeerConfig>()
   private readonly pending = new Map<number, Pending>()
   private readonly sessions = new Map<number, Established>()
+  /** Newest local session index to send on, per peer public key. */
+  private readonly sendIndex = new Map<string, number>()
 
   constructor(options: VpnPeerOptions) {
     super()
@@ -103,6 +118,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     this.bindPort = options.port ?? 0
     this.bindHost = options.host
     this.keepaliveInterval = options.keepaliveInterval ?? 15
+    this.rekeyAfter = options.rekeyAfter ?? 120
   }
 
   /** The bound UDP port (valid after {@link start}). */
@@ -203,9 +219,12 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     for (const e of this.sessions.values()) {
       if (e.keepalive)
         clearInterval(e.keepalive)
+      if (e.rekeyTimer)
+        clearTimeout(e.rekeyTimer)
       e.session.free()
     }
     this.sessions.clear()
+    this.sendIndex.clear()
     this.socket?.close()
     this.socket = null
   }
@@ -263,7 +282,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     this.sendRaw(response, addr, port)
 
     const session = handshake.intoSession(localIndex)
-    this.establish(localIndex, session, learnedPub, addr, port)
+    this.establish(localIndex, session, learnedPub, addr, port, false)
   }
 
   private handleResponse(buf: Uint8Array, addr: string, port: number): void {
@@ -287,7 +306,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
 
     const peerIndex = pending.handshake.peerIndex()
     const session = pending.handshake.intoSession(localIndex)
-    const link = this.establish(localIndex, session, pending.peerPublicKey, pending.host, pending.port)
+    const link = this.establish(localIndex, session, pending.peerPublicKey, pending.host, pending.port, true)
     pending.resolve({ ...link, peerIndex })
   }
 
@@ -323,15 +342,13 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     this.emit('message', message, established.peerPublicKey)
   }
 
-  private establish(localIndex: number, session: Session, peerPublicKey: string, host: string, port: number): VpnLink {
-    const existing = this.sessions.get(localIndex)
-    if (existing) {
-      if (existing.keepalive)
-        clearInterval(existing.keepalive)
-      existing.session.free()
+  private establish(localIndex: number, session: Session, peerPublicKey: string, host: string, port: number, initiatedByUs: boolean): VpnLink {
+    const collision = this.sessions.get(localIndex)
+    if (collision) {
+      this.retireSession(localIndex, 0)
     }
 
-    const established: Established = { session, peerPublicKey, host, port, keepalive: null }
+    const established: Established = { session, peerPublicKey, host, port, keepalive: null, initiatedByUs, rekeyTimer: null }
     if (this.keepaliveInterval > 0) {
       established.keepalive = setInterval(() => {
         try {
@@ -344,6 +361,18 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     }
     this.sessions.set(localIndex, established)
 
+    // New traffic to this peer goes on the newest session. Any prior session
+    // keeps decrypting briefly (in-flight packets) before being retired.
+    const priorIndex = this.sendIndex.get(peerPublicKey)
+    this.sendIndex.set(peerPublicKey, localIndex)
+    if (priorIndex !== undefined && priorIndex !== localIndex)
+      this.retireSession(priorIndex, REKEY_GRACE_MS)
+
+    // The initiator schedules the next rekey.
+    if (initiatedByUs && this.rekeyAfter > 0) {
+      established.rekeyTimer = setTimeout(() => this.rekey(peerPublicKey), this.rekeyAfter * 1000)
+    }
+
     const link: VpnLink = {
       peerPublicKey,
       localIndex,
@@ -351,6 +380,44 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     }
     this.emit('link', link)
     return link
+  }
+
+  /** Free a session now (grace 0) or after a grace period. */
+  private retireSession(localIndex: number, graceMs: number): void {
+    const e = this.sessions.get(localIndex)
+    if (!e)
+      return
+    if (e.keepalive) {
+      clearInterval(e.keepalive)
+      e.keepalive = null
+    }
+    if (e.rekeyTimer) {
+      clearTimeout(e.rekeyTimer)
+      e.rekeyTimer = null
+    }
+    const free = () => {
+      const cur = this.sessions.get(localIndex)
+      if (cur === e) {
+        this.sessions.delete(localIndex)
+        e.session.free()
+      }
+    }
+    if (graceMs <= 0)
+      free()
+    else
+      setTimeout(free, graceMs)
+  }
+
+  /** Re-initiate the handshake with a peer to install fresh transport keys. */
+  private rekey(peerPublicKey: string): void {
+    const current = this.sendIndex.get(peerPublicKey)
+    const link = current !== undefined ? this.sessions.get(current) : undefined
+    const cfg = this.allowed.get(peerPublicKey)
+    if (!link || !cfg)
+      return
+    this.connect(cfg.publicKey, link.host, link.port).catch((err) => {
+      this.emit('error', err instanceof Error ? err : new Error(String(err)))
+    })
   }
 
   private sendFramed(link: Established, data: Uint8Array): void {
@@ -378,6 +445,13 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   }
 
   private findLinkByPeer(pubB64: string): Established | undefined {
+    const idx = this.sendIndex.get(pubB64)
+    if (idx !== undefined) {
+      const e = this.sessions.get(idx)
+      if (e)
+        return e
+    }
+    // Fall back to any surviving session for the peer.
     for (const e of this.sessions.values()) {
       if (e.peerPublicKey === pubB64)
         return e
