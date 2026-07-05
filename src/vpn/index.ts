@@ -41,6 +41,16 @@ export type {
   VpnPeerOptions,
 } from './peer'
 
+export {
+  configureInterface,
+  TunDevice,
+  TunError,
+} from './tun'
+
+export type {
+  TunDeviceEvents,
+} from './tun'
+
 export type {
   HandshakeResult,
   VpnKeyPair,

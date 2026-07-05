@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 /* eslint-disable node/prefer-global/process */
+import type { TunDevice as TunDeviceT } from '../src/vpn'
 import { CLI } from '@stacksjs/clapp'
 import { version } from '../package.json'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
@@ -714,6 +715,147 @@ cli
   })
 
 cli
+  .command('vpn:tun-check', 'Check whether a TUN device can be opened (needs root)')
+  .action(async () => {
+    try {
+      const { TunDevice, TunError } = await import('../src/vpn')
+      try {
+        const dev = TunDevice.open()
+        console.log('')
+        console.log(`  TUN device opened: ${dev.name} (fd ${dev.fd})`)
+        console.log('  Layer-3 tunneling is available on this machine.')
+        console.log('')
+        dev.close()
+      }
+      catch (err: any) {
+        if (err instanceof TunError) {
+          console.log('')
+          console.log(`  Could not open a TUN device: ${err.message}`)
+          if (err.code === 1 || err.code === 13)
+            console.log('  Re-run with sudo to use `lt vpn up`.')
+          console.log('')
+          process.exit(1)
+        }
+        throw err
+      }
+    }
+    catch (error: any) {
+      console.error(`\n  tun-check failed: ${error.message}`)
+      if (error.name === 'VpnUnavailableError')
+        console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+interface VpnUpOptions {
+  listen: string
+  address: string
+  peerAddress: string
+  peer?: string
+  endpoint?: string
+  psk?: string
+}
+
+cli
+  .command('vpn:up', 'Bring up a layer-3 VPN interface bridged to a WireGuard-style peer (needs root)')
+  .option('--listen <port>', 'Local UDP port', { default: '51820' })
+  .option('--address <ip>', 'This node\'s tunnel IP', { default: '100.100.0.1' })
+  .option('--peer-address <ip>', 'Point-to-point remote tunnel IP', { default: '100.100.0.2' })
+  .option('--peer <pubkey>', 'Base64 public key of the peer to connect to')
+  .option('--endpoint <host:port>', 'Peer UDP endpoint to dial (host:port)')
+  .option('--psk <key>', 'Optional base64 preshared key')
+  .action(async (options: VpnUpOptions) => {
+    try {
+      const { TunDevice, TunError, VpnPeer, configureInterface, decodeKey } = await import('../src/vpn')
+      const { loadOrCreateIdentity } = await import('../src/vpn/store')
+      const { encodeKey } = await import('../src/vpn/keys')
+
+      const identity = loadOrCreateIdentity()
+      const listenPort = Number.parseInt(options.listen) || 51820
+
+      let tun: TunDeviceT
+      try {
+        tun = TunDevice.open()
+      }
+      catch (err: any) {
+        if (err instanceof TunError) {
+          console.error(`\n  ${err.message}`)
+          console.error('  `lt vpn up` needs root to create a network interface. Try: sudo lt vpn up ...\n')
+          process.exit(1)
+        }
+        throw err
+      }
+
+      await configureInterface(tun.name, options.address, options.peerAddress)
+
+      const peer = new VpnPeer({ keyPair: identity.keyPair, port: listenPort, presharedKey: options.psk ? decodeKey(options.psk) : undefined })
+
+      let peerPubB64: string | null = null
+      if (options.peer) {
+        peer.addPeer({ publicKey: decodeKey(options.peer) })
+        peerPubB64 = options.peer
+      }
+
+      // Bridge: decrypted packets from the peer go into the kernel; packets the
+      // kernel routes to the interface get encrypted and sent to the peer.
+      peer.on('message', (packet) => {
+        try {
+          tun.write(packet)
+        }
+        catch { /* oversized/short packet; drop */ }
+      })
+      tun.on('packet', (packet) => {
+        if (!peerPubB64)
+          return
+        try {
+          peer.send(peerPubB64, packet)
+        }
+        catch { /* no link yet; drop */ }
+      })
+      peer.on('error', () => { /* transient drops are expected */ })
+
+      await peer.start()
+      tun.start()
+
+      console.log('')
+      console.log(`  Interface:   ${tun.name} (${options.address} -> ${options.peerAddress})`)
+      console.log(`  Public key:  ${encodeKey(identity.keyPair.publicKey)}`)
+      console.log(`  Listening:   udp/${peer.port}`)
+
+      if (options.peer && options.endpoint) {
+        const [host, portStr] = options.endpoint.split(':')
+        const port = Number.parseInt(portStr)
+        console.log(`  Connecting to peer ${options.peer.slice(0, 16)}… at ${options.endpoint}`)
+        await peer.connect(decodeKey(options.peer), host, port)
+        console.log(`  Link established. Try: ping ${options.peerAddress}`)
+      }
+      else {
+        console.log('  Waiting for an incoming handshake (share your public key + endpoint).')
+      }
+      console.log('')
+      console.log('  Press Ctrl+C to bring the tunnel down')
+      console.log('')
+
+      const shutdown = () => {
+        console.log('\n  Bringing tunnel down...')
+        tun.close()
+        peer.stop()
+        process.exit(0)
+      }
+      process.on('SIGINT', shutdown)
+      process.on('SIGTERM', shutdown)
+
+      await new Promise(() => {})
+    }
+    catch (error: any) {
+      console.error(`\n  vpn up failed: ${error.message}`)
+      if (error.name === 'VpnUnavailableError')
+        console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+cli
   .command('info', 'Show information about localtunnels')
   .action(() => {
     console.log(`
@@ -736,6 +878,8 @@ COMMANDS:
   vpn:keygen         Generate this machine's WireGuard-style VPN identity
   vpn:selftest       Verify the native VPN core (handshake + encryption)
   vpn:demo           Run two peers over real UDP and exchange encrypted traffic
+  vpn:tun-check      Check whether a TUN device can be opened (needs root)
+  vpn:up             Bring up a layer-3 VPN interface bridged to a peer (root)
   deploy:tunnel      Deploy tunnel server to AWS EC2
   deploy:site        Deploy marketing site to S3+CloudFront
   deploy:analytics   Deploy analytics backend (DynamoDB + Lambda)

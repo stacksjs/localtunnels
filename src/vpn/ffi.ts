@@ -19,7 +19,7 @@ export class VpnUnavailableError extends Error {
 }
 
 /** ABI version this TypeScript layer expects from the native library. */
-export const EXPECTED_ABI_VERSION = 1
+export const EXPECTED_ABI_VERSION = 2
 
 const LIB_BASENAME = `libltvpn.${suffix}`
 
@@ -90,6 +90,10 @@ const symbols = {
     args: [FFIType.ptr, FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.u64],
     returns: FFIType.i64,
   },
+  ltvpn_tun_open: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
+  ltvpn_tun_read: { args: [FFIType.i32, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
+  ltvpn_tun_write: { args: [FFIType.i32, FFIType.ptr, FFIType.u64], returns: FFIType.i64 },
+  ltvpn_tun_close: { args: [FFIType.i32], returns: FFIType.void },
 } as const
 
 /** Argument accepted by the native library wherever it expects a pointer. */
@@ -117,6 +121,10 @@ export interface LtvpnSymbols {
   ltvpn_encrypted_len: (plainLen: bigint) => bigint
   ltvpn_session_encrypt: (s: PtrArg, plaintext: PtrArg, plainLen: bigint, out: PtrArg, outCap: bigint) => bigint
   ltvpn_session_decrypt: (s: PtrArg, msg: PtrArg, msgLen: bigint, out: PtrArg, outCap: bigint) => bigint
+  ltvpn_tun_open: (nameOut: PtrArg, nameCap: bigint) => number
+  ltvpn_tun_read: (fd: number, buf: PtrArg, cap: bigint) => bigint
+  ltvpn_tun_write: (fd: number, buf: PtrArg, len: bigint) => bigint
+  ltvpn_tun_close: (fd: number) => void
 }
 
 let cached: LtvpnSymbols | null = null

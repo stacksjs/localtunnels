@@ -7,6 +7,7 @@ const std = @import("std");
 const keys = @import("keys.zig");
 const noise = @import("noise.zig");
 const transport = @import("transport.zig");
+const tun = @import("tun.zig");
 
 pub const kdf = @import("kdf.zig");
 pub const replay = @import("replay.zig");
@@ -16,7 +17,7 @@ pub const rand = @import("rand.zig");
 const allocator = std.heap.smp_allocator;
 
 /// ABI version — bump on any breaking change to this surface.
-const abi_version: u32 = 1;
+const abi_version: u32 = 2;
 
 const LtvpnError = enum(i32) {
     ok = 0,
@@ -200,6 +201,37 @@ export fn ltvpn_session_decrypt(
     return @intCast(n);
 }
 
+// ── TUN device ──────────────────────────────────────────────────────────────
+
+/// Open a TUN device. On success writes the interface name (NUL-terminated,
+/// e.g. "utun4") into `name_out` and returns the file descriptor (>= 0). On
+/// failure returns a negative errno.
+export fn ltvpn_tun_open(name_out: [*]u8, name_cap: usize) i32 {
+    var dev: tun.Device = undefined;
+    const rc = tun.open_device(&dev);
+    if (rc != 0) return rc;
+    const name = dev.nameSlice();
+    const copy = @min(name.len, if (name_cap == 0) 0 else name_cap - 1);
+    @memcpy(name_out[0..copy], name[0..copy]);
+    if (name_cap > 0) name_out[copy] = 0;
+    return dev.fd;
+}
+
+/// Read one IP packet (non-blocking). Returns bytes read, 0 if none pending,
+/// or a negative errno.
+export fn ltvpn_tun_read(fd: i32, buf: [*]u8, cap: usize) isize {
+    return tun.read_packet(fd, buf, cap);
+}
+
+/// Write one IP packet. Returns bytes written or a negative errno.
+export fn ltvpn_tun_write(fd: i32, buf: [*]const u8, len: usize) isize {
+    return tun.write_packet(fd, buf, len);
+}
+
+export fn ltvpn_tun_close(fd: i32) void {
+    tun.close_device(fd);
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 test {
@@ -210,6 +242,7 @@ test {
     _ = replay;
     _ = tai64n;
     _ = rand;
+    _ = tun;
 }
 
 test "C ABI end-to-end: keypair → handshake → transport" {
