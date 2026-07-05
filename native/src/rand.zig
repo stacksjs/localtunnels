@@ -2,7 +2,8 @@
 //!
 //! This build of Zig routes randomness through `std.Io`, which an FFI library
 //! has no handle to, so we call the OS entropy source directly:
-//!   - macOS / Linux (glibc ≥ 2.25): libc `getentropy(2)`
+//!   - Linux:   the `getrandom(2)` syscall (no libc — keeps the .so portable)
+//!   - macOS:   libc `getentropy(2)`
 //!   - Windows: `BCryptGenRandom` with the system-preferred RNG
 const std = @import("std");
 const builtin = @import("builtin");
@@ -18,12 +19,22 @@ pub const Error = error{EntropyUnavailable};
 /// Fill `buf` with secure random bytes.
 pub fn bytes(buf: []u8) Error!void {
     switch (builtin.os.tag) {
+        .linux => {
+            var off: usize = 0;
+            while (off < buf.len) {
+                const rc = std.os.linux.getrandom(buf.ptr + off, buf.len - off, 0);
+                const signed: isize = @bitCast(rc);
+                if (signed < 0) return error.EntropyUnavailable;
+                if (signed == 0) return error.EntropyUnavailable;
+                off += @intCast(signed);
+            }
+        },
         .windows => {
             if (BCryptGenRandom(null, buf.ptr, @intCast(buf.len), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
                 return error.EntropyUnavailable;
         },
         else => {
-            // getentropy caps a single call at 256 bytes; fill in chunks.
+            // macOS: getentropy caps a single call at 256 bytes; fill in chunks.
             var off: usize = 0;
             while (off < buf.len) {
                 const chunk = @min(buf.len - off, 256);

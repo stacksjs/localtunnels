@@ -1,54 +1,31 @@
 //! Cross-platform TUN (layer-3) device support.
 //!
-//! macOS: a `utun` control socket (PF_SYSTEM / SYSPROTO_CONTROL). Each frame
-//!        is prefixed on the wire with a 4-byte address family; we strip it on
-//!        read and prepend it on write so callers only ever see raw IP packets.
-//! Linux: `/dev/net/tun` configured with TUNSETIFF (IFF_TUN | IFF_NO_PI), which
-//!        already yields bare IP packets (no header).
+//! macOS: a `utun` control socket (PF_SYSTEM / SYSPROTO_CONTROL) via libc. Each
+//!        frame carries a 4-byte address-family header we strip/prepend so
+//!        callers only ever see bare IP packets.
+//! Linux: `/dev/net/tun` via raw syscalls (`std.os.linux`) — no libc, so the
+//!        shared library is fully self-contained and loads on any glibc/musl
+//!        box. TUNSETIFF (IFF_TUN | IFF_NO_PI) yields bare IP packets.
 //!
 //! Opening a TUN device requires elevated privileges; without them `open`
 //! returns a negative errno (e.g. -1 EPERM / -13 EACCES) rather than trapping.
 const std = @import("std");
 const builtin = @import("builtin");
+const linux_os = std.os.linux;
 
+// libc — referenced only on the macOS path (pruned entirely on other targets).
 extern "c" fn socket(domain: c_int, sock_type: c_int, protocol: c_int) c_int;
 extern "c" fn connect(fd: c_int, addr: *const anyopaque, len: u32) c_int;
 extern "c" fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
 extern "c" fn getsockopt(fd: c_int, level: c_int, optname: c_int, optval: *anyopaque, optlen: *u32) c_int;
-extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
 extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 extern "c" fn close(fd: c_int) c_int;
 extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
+extern "c" fn __error() *c_int; // macOS errno
 
-const errno_location = switch (builtin.os.tag) {
-    .macos => struct {
-        extern "c" fn __error() *c_int;
-    }.__error,
-    .linux => struct {
-        extern "c" fn __errno_location() *c_int;
-    }.__errno_location,
-    else => struct {
-        fn stub() *c_int {
-            const s = struct {
-                var e: c_int = 0;
-            };
-            return &s.e;
-        }
-    }.stub,
-};
-
-fn errno() i32 {
-    return @intCast(errno_location().*);
-}
-
-/// EAGAIN/EWOULDBLOCK differ by platform (35 on macOS, 11 on Linux).
-fn wouldBlock(e: i32) bool {
-    return switch (builtin.os.tag) {
-        .macos => e == 35,
-        .linux => e == 11,
-        else => false,
-    };
+fn macErrno() i32 {
+    return @intCast(__error().*);
 }
 
 /// Largest IP packet we move in one read/write (jumbo-safe headroom).
@@ -62,7 +39,6 @@ pub const Error = error{
 
 // ── constants ────────────────────────────────────────────────────────────────
 
-const O_RDWR: c_int = 0x0002;
 const F_SETFL: c_int = 4;
 
 const macos = struct {
@@ -99,18 +75,22 @@ const macos = struct {
 };
 
 const linux = struct {
-    const O_NONBLOCK: c_int = 0o4000;
     const IFF_TUN: c_short = 0x0001;
     const IFF_NO_PI: c_short = 0x1000;
     // TUNSETIFF = _IOW('T', 202, int)
-    const TUNSETIFF: c_ulong = 0x400454ca;
-    const dev_path = "/dev/net/tun";
+    const TUNSETIFF: u32 = 0x400454ca;
+    const EAGAIN = 11;
 
     const ifreq = extern struct {
         ifr_name: [16]u8 = @splat(0),
         ifr_flags: c_short = 0,
         _pad: [22]u8 = @splat(0),
     };
+
+    /// Decode a raw syscall return: negative on error (-errno), else the value.
+    fn signed(rc: usize) isize {
+        return @bitCast(rc);
+    }
 };
 
 // ── device ───────────────────────────────────────────────────────────────────
@@ -126,15 +106,6 @@ pub const Device = struct {
     }
 };
 
-fn setNonBlocking(fd: c_int) void {
-    const flag = switch (builtin.os.tag) {
-        .macos => macos.O_NONBLOCK,
-        .linux => linux.O_NONBLOCK,
-        else => 0,
-    };
-    _ = fcntl(fd, F_SETFL, flag);
-}
-
 /// Open a TUN device. Returns a negative errno on failure.
 pub fn open_device(dev: *Device) i32 {
     switch (builtin.os.tag) {
@@ -146,12 +117,12 @@ pub fn open_device(dev: *Device) i32 {
 
 fn openMacos(dev: *Device) i32 {
     const fd = socket(macos.PF_SYSTEM, macos.SOCK_DGRAM, macos.SYSPROTO_CONTROL);
-    if (fd < 0) return -errno();
+    if (fd < 0) return -macErrno();
 
     var info = macos.ctl_info{};
     @memcpy(info.ctl_name[0..macos.utun_control_name.len], macos.utun_control_name);
     if (ioctl(fd, macos.CTLIOCGINFO, &info) != 0) {
-        const e = -errno();
+        const e = -macErrno();
         _ = close(fd);
         return e;
     }
@@ -165,7 +136,7 @@ fn openMacos(dev: *Device) i32 {
         .sc_unit = 0,
     };
     if (connect(fd, &addr, @sizeOf(macos.sockaddr_ctl)) != 0) {
-        const e = -errno();
+        const e = -macErrno();
         _ = close(fd);
         return e;
     }
@@ -173,33 +144,35 @@ fn openMacos(dev: *Device) i32 {
     @memset(&dev.name, 0);
     var name_len: u32 = @intCast(dev.name.len);
     if (getsockopt(fd, macos.SYSPROTO_CONTROL, macos.UTUN_OPT_IFNAME, &dev.name, &name_len) != 0) {
-        const e = -errno();
+        const e = -macErrno();
         _ = close(fd);
         return e;
     }
 
-    setNonBlocking(fd);
+    _ = fcntl(fd, F_SETFL, macos.O_NONBLOCK);
     dev.fd = fd;
     return 0;
 }
 
 fn openLinux(dev: *Device) i32 {
-    const fd = open(linux.dev_path, O_RDWR);
-    if (fd < 0) return -errno();
+    // Open /dev/net/tun read-write and non-blocking in one syscall.
+    const flags = linux_os.O{ .ACCMODE = .RDWR, .NONBLOCK = true };
+    const orc = linux.signed(linux_os.open("/dev/net/tun", flags, 0));
+    if (orc < 0) return @intCast(orc);
+    const fd: i32 = @intCast(orc);
 
     var req = linux.ifreq{};
     req.ifr_flags = linux.IFF_TUN | linux.IFF_NO_PI;
-    if (ioctl(fd, linux.TUNSETIFF, &req) != 0) {
-        const e = -errno();
-        _ = close(fd);
-        return e;
+    const irc = linux.signed(linux_os.ioctl(fd, linux.TUNSETIFF, @intFromPtr(&req)));
+    if (irc < 0) {
+        _ = linux_os.close(fd);
+        return @intCast(irc);
     }
 
     @memset(&dev.name, 0);
     const n = std.mem.indexOfScalar(u8, &req.ifr_name, 0) orelse req.ifr_name.len;
     @memcpy(dev.name[0..n], req.ifr_name[0..n]);
 
-    setNonBlocking(fd);
     dev.fd = fd;
     return 0;
 }
@@ -214,8 +187,8 @@ pub fn read_packet(fd: c_int, buf: [*]u8, cap: usize) isize {
             const want = @min(cap + 4, scratch.len);
             const n = read(fd, &scratch, want);
             if (n < 0) {
-                const e = errno();
-                return if (wouldBlock(e)) 0 else -e;
+                const e = macErrno();
+                return if (e == 35) 0 else -e; // 35 = EAGAIN on macOS
             }
             if (n <= 4) return 0;
             const payload: usize = @intCast(n - 4);
@@ -224,11 +197,9 @@ pub fn read_packet(fd: c_int, buf: [*]u8, cap: usize) isize {
             return @intCast(copy);
         },
         .linux => {
-            const n = read(fd, buf, cap);
-            if (n < 0) {
-                const e = errno();
-                return if (wouldBlock(e)) 0 else -e;
-            }
+            const n = linux.signed(linux_os.read(fd, buf, cap));
+            if (n < 0)
+                return if (n == -linux.EAGAIN) 0 else n;
             return n;
         },
         else => return -1,
@@ -248,13 +219,12 @@ pub fn write_packet(fd: c_int, buf: [*]const u8, len: usize) isize {
             std.mem.writeInt(u32, scratch[0..4], af, .big);
             @memcpy(scratch[4 .. 4 + len], buf[0..len]);
             const n = write(fd, &scratch, len + 4);
-            if (n < 0) return -errno();
+            if (n < 0) return -macErrno();
             if (n < 4) return 0;
             return @intCast(@as(usize, @intCast(n)) - 4);
         },
         .linux => {
-            const n = write(fd, buf, len);
-            if (n < 0) return -errno();
+            const n = linux.signed(linux_os.write(fd, buf, len));
             return n;
         },
         else => return -1,
@@ -262,7 +232,11 @@ pub fn write_packet(fd: c_int, buf: [*]const u8, len: usize) isize {
 }
 
 pub fn close_device(fd: c_int) void {
-    _ = close(fd);
+    switch (builtin.os.tag) {
+        .linux => _ = linux_os.close(fd),
+        .macos => _ = close(fd),
+        else => {},
+    }
 }
 
 test "ctl ioctl number matches the documented CTLIOCGINFO value" {

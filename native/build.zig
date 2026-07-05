@@ -4,12 +4,16 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
 
+    // Link libc on macOS (getentropy + utun via libSystem) and Windows
+    // (BCryptGenRandom). On Linux everything goes through raw syscalls
+    // (`std.os.linux`), so the shared library is self-contained and loads on
+    // any glibc/musl host without a `libc.so` dependency.
+    const link_libc = target.result.os.tag != .linux;
     const mod = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
-        // getentropy(2) for CSPRNG seeding lives in libc.
-        .link_libc = true,
+        .link_libc = link_libc,
     });
 
     const lib = b.addLibrary(.{

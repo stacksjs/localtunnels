@@ -1,12 +1,15 @@
 /* eslint-disable node/prefer-global/process */
 /**
- * Deploy a WireGuard VPN (exit node) on Hetzner Cloud via ts-cloud's Hetzner
- * client. Idempotent: re-running reuses an existing server/firewall by name.
+ * Deploy a localtunnels VPN (exit node) on Hetzner Cloud.
+ *
+ * Provisions the server + firewall via ts-cloud's Hetzner client, then runs the
+ * localtunnels VPN stack (our own Zig/bun:ffi WireGuard implementation) on it —
+ * NOT stock kernel WireGuard. Idempotent: re-running reuses server/firewall and
+ * re-syncs the service.
  *
  *   bun run deploy/hetzner-vpn/deploy.ts
  */
 import { readFileSync, writeFileSync } from 'node:fs'
-import { encodeKey, generateKeyPair } from '../../src/vpn'
 import { buildClientConfig, buildCloudInit } from './cloud-init'
 import {
   CLIENT_CONF_PATH,
@@ -14,11 +17,20 @@ import {
   FIREWALL_NAME,
   HetznerClient,
   IMAGE,
+  LOCAL_BIN,
+  LOCAL_LIB,
   LOCATION,
   loadHetznerToken,
   normalizeSshPublicKey,
+  REMOTE_BIN,
+  REMOTE_LIB,
+  REMOTE_SETUP,
+  REPO_ROOT,
+  run,
+  scp,
   SERVER_NAME,
   SERVER_TYPE,
+  SETUP_SCRIPT,
   SSH_PUB_KEY_PATH,
   SSH_KEY_NAME,
   ssh,
@@ -50,7 +62,7 @@ async function ensureSshKey(client: InstanceType<typeof HetznerClient>): Promise
 async function ensureFirewall(client: InstanceType<typeof HetznerClient>): Promise<number> {
   const rules = [
     { direction: 'in' as const, protocol: 'tcp' as const, port: '22', source_ips: ['0.0.0.0/0', '::/0'], description: 'SSH' },
-    { direction: 'in' as const, protocol: 'udp' as const, port: String(WG_PORT), source_ips: ['0.0.0.0/0', '::/0'], description: 'WireGuard' },
+    { direction: 'in' as const, protocol: 'udp' as const, port: String(WG_PORT), source_ips: ['0.0.0.0/0', '::/0'], description: 'localtunnels VPN' },
     { direction: 'in' as const, protocol: 'icmp' as const, source_ips: ['0.0.0.0/0', '::/0'], description: 'ping' },
   ]
   const existing = (await client.listFirewalls()).find(f => f.name === FIREWALL_NAME)
@@ -60,18 +72,39 @@ async function ensureFirewall(client: InstanceType<typeof HetznerClient>): Promi
     return existing.id
   }
   const { firewall } = await client.createFirewall({ name: FIREWALL_NAME, rules })
-  log(`Firewall: created "${FIREWALL_NAME}" (#${firewall.id}) — ssh/22, wg/${WG_PORT}, icmp`)
+  log(`Firewall: created "${FIREWALL_NAME}" (#${firewall.id})`)
   return firewall.id
+}
+
+/** Build the linux-x64 CLI binary + self-contained native lib locally. */
+async function buildArtifacts(): Promise<void> {
+  log('Building linux-x64 artifacts (CLI + libltvpn.so)...')
+  await run([
+    'bun',
+    'build',
+    './bin/cli.ts',
+    '--compile',
+    '--minify',
+    '--external',
+    '@stacksjs/ts-analytics',
+    '--target=bun-linux-x64',
+    `--outfile=${LOCAL_BIN}`,
+  ], REPO_ROOT)
+  // Self-contained musl build (no libc.so dependency → loads on any glibc host).
+  await run(['zig', 'build', '-Dtarget=x86_64-linux-musl'], `${REPO_ROOT}/native`)
+  await run(['cp', `${REPO_ROOT}/native/zig-out/lib/libltvpn.so`, LOCAL_LIB])
+  // Restore the local (host) native lib so local tests keep working.
+  await run(['zig', 'build'], `${REPO_ROOT}/native`)
+  log('Artifacts built.')
 }
 
 async function main(): Promise<void> {
   const client = new HetznerClient({ apiToken: loadHetznerToken() })
 
-  log('Provisioning Hetzner WireGuard VPN...')
+  log('Provisioning Hetzner localtunnels VPN...')
   const sshKeyId = await ensureSshKey(client)
   const firewallId = await ensureFirewall(client)
 
-  // Idempotent: reuse an existing server with our name.
   let server = (await client.listServers()).find(s => s.name === SERVER_NAME)
   if (server) {
     log(`Server: reusing "${SERVER_NAME}" (#${server.id})`)
@@ -91,6 +124,9 @@ async function main(): Promise<void> {
     log(`Server: creating "${SERVER_NAME}" (#${server.id}, ${SERVER_TYPE}, ${IMAGE}, ${LOCATION})`)
   }
 
+  // Build artifacts while the server boots.
+  const artifactsBuilt = buildArtifacts()
+
   log('Waiting for server to reach running state...')
   server = await client.waitForServerRunning(server.id)
   const publicIp = server.public_net.ipv4?.ip
@@ -100,29 +136,34 @@ async function main(): Promise<void> {
 
   log('Waiting for SSH...')
   await waitForSsh(publicIp)
-  log('Waiting for cloud-init (WireGuard install + config)...')
+  log('Waiting for cloud-init...')
   await waitForCloudInit(publicIp)
+  await artifactsBuilt
 
-  // Confirm the interface actually came up.
-  const wgReady = await ssh(publicIp, 'test -f /etc/wireguard/.ready && wg show wg0 >/dev/null 2>&1 && echo ok || echo no')
-  if (!wgReady.stdout.includes('ok'))
-    throw new Error('WireGuard interface wg0 not up after cloud-init')
-  log('WireGuard wg0 is up.')
+  log('Shipping localtunnels binary + native lib + setup script...')
+  // Stop the service first so the running binary/lib aren't busy (ETXTBSY).
+  await ssh(publicIp, 'systemctl stop localtunnels-vpn.service 2>/dev/null || true')
+  await scp(publicIp, [LOCAL_BIN, LOCAL_LIB, SETUP_SCRIPT], '/root/')
+  await sshOrThrow(publicIp, `chmod +x ${REMOTE_BIN} ${REMOTE_SETUP}`)
 
-  const serverPublicKey = (await sshOrThrow(publicIp, 'cat /etc/wireguard/server_public.key')).trim()
+  log('Configuring the localtunnels VPN service...')
+  const setupOut = await sshOrThrow(publicIp, `bash ${REMOTE_SETUP}`)
+  const kv: Record<string, string> = {}
+  for (const line of setupOut.split('\n')) {
+    const eq = line.indexOf('=')
+    if (eq > 0)
+      kv[line.slice(0, eq)] = line.slice(eq + 1).trim()
+  }
+  if (kv.SERVICE !== 'active')
+    throw new Error(`localtunnels VPN service not active (status: ${kv.SERVICE || 'unknown'})`)
+  log(`Service: localtunnels-vpn ${kv.SERVICE}`)
 
-  // Generate a client keypair with our OWN WireGuard-compatible keygen and add
-  // it as a peer — a real interop check that localtunnels keys work with stock
-  // kernel WireGuard.
-  const kp = generateKeyPair()
-  const clientPrivateKey = encodeKey(kp.privateKey)
-  const clientPublicKey = encodeKey(kp.publicKey)
+  const serverPublicKey = kv.SERVER_PUB
+  const clientPublicKey = kv.CLIENT_PUB
+  const clientPrivateKey = kv.CLIENT_PRIV
 
-  await sshOrThrow(publicIp, `wg set wg0 peer ${clientPublicKey} allowed-ips ${CLIENT_WG_IP}/32`)
-  // Persist the peer so it survives a reboot / wg-quick restart.
-  await sshOrThrow(publicIp, `grep -q '${clientPublicKey}' /etc/wireguard/wg0.conf || printf '\\n[Peer]\\nPublicKey = ${clientPublicKey}\\nAllowedIPs = ${CLIENT_WG_IP}/32\\n' >> /etc/wireguard/wg0.conf`)
-  log(`Client peer added (${CLIENT_WG_IP}).`)
-
+  // A WireGuard-compatible client config (our protocol is WireGuard v1), so the
+  // client works with `lt vpn up` OR a stock WireGuard client.
   const clientConf = buildClientConfig({ clientPrivateKey, serverPublicKey, endpoint: publicIp })
   writeFileSync(CLIENT_CONF_PATH, clientConf, { mode: 0o600 })
 
@@ -138,12 +179,13 @@ async function main(): Promise<void> {
 
   log('')
   log('╔══════════════════════════════════════════════════════════╗')
-  log('║           Hetzner WireGuard VPN is UP                     ║')
+  log('║        localtunnels VPN is UP on Hetzner                  ║')
   log('╚══════════════════════════════════════════════════════════╝')
   log('')
   log(`  Server:      ${SERVER_NAME} (#${server.id}) @ ${publicIp}`)
-  log(`  WireGuard:   udp/${WG_PORT}, server ${serverPublicKey}`)
-  log(`  Client cfg:  ${CLIENT_CONF_PATH}`)
+  log(`  Datapath:    localtunnels lt vpn (systemd: localtunnels-vpn)`)
+  log(`  Listening:   udp/${WG_PORT}, server key ${serverPublicKey}`)
+  log(`  Client:      ${CLIENT_WG_IP}, config at ${CLIENT_CONF_PATH}`)
   log('')
   log(`  Verify e2e:  bun run deploy/hetzner-vpn/verify.ts`)
   log(`  Tear down:   bun run deploy/hetzner-vpn/destroy.ts`)

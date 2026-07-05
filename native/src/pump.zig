@@ -7,10 +7,26 @@
 //! UDP socket in production, or pipes in tests. Reads are expected to be
 //! message-oriented (one packet per read), as with TUN and datagram sockets.
 const std = @import("std");
+const builtin = @import("builtin");
 const transport = @import("transport.zig");
+const linux_os = std.os.linux;
 
 extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
+
+// fd I/O — raw syscalls on Linux (no libc), libc elsewhere.
+fn sysRead(fd: c_int, buf: [*]u8, n: usize) isize {
+    return switch (builtin.os.tag) {
+        .linux => @bitCast(linux_os.read(fd, buf, n)),
+        else => read(fd, buf, n),
+    };
+}
+fn sysWrite(fd: c_int, buf: [*]const u8, n: usize) isize {
+    return switch (builtin.os.tag) {
+        .linux => @bitCast(linux_os.write(fd, buf, n)),
+        else => write(fd, buf, n),
+    };
+}
 
 const max_wire = transport.header_len + transport.max_plaintext_len + transport.tag_len;
 
@@ -22,10 +38,10 @@ pub fn forwardEncrypt(session: *transport.Session, in_fd: c_int, out_fd: c_int, 
     var wire: [max_wire]u8 = undefined;
     var count: usize = 0;
     while (count < max_packets) {
-        const n = read(in_fd, &plain, plain.len);
+        const n = sysRead(in_fd, &plain, plain.len);
         if (n <= 0) break;
         const wn = session.encrypt(plain[0..@intCast(n)], &wire) catch break;
-        if (write(out_fd, &wire, wn) < 0) break;
+        if (sysWrite(out_fd, &wire, wn) < 0) break;
         count += 1;
     }
     return count;
@@ -40,12 +56,12 @@ pub fn forwardDecrypt(session: *transport.Session, in_fd: c_int, out_fd: c_int, 
     var count: usize = 0;
     var attempts: usize = 0;
     while (attempts < max_packets) {
-        const n = read(in_fd, &wire, wire.len);
+        const n = sysRead(in_fd, &wire, wire.len);
         if (n <= 0) break;
         attempts += 1;
         const pn = session.decrypt(wire[0..@intCast(n)], &plain) catch continue;
         if (pn == 0) continue; // keepalive
-        if (write(out_fd, &plain, pn) < 0) break;
+        if (sysWrite(out_fd, &plain, pn) < 0) break;
         count += 1;
     }
     return count;
@@ -57,8 +73,6 @@ extern "c" fn pipe(fds: [*]c_int) c_int;
 extern "c" fn close(fd: c_int) c_int;
 extern "c" fn socketpair(domain: c_int, sock_type: c_int, protocol: c_int, sv: [*]c_int) c_int;
 extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
-
-const builtin = @import("builtin");
 
 /// Mark a descriptor non-blocking so a drained read returns EAGAIN (→ the pump
 /// stops) instead of blocking — matching production TUN/UDP sockets.

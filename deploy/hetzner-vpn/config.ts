@@ -30,6 +30,18 @@ export const CLIENT_WG_IP = '10.8.0.2'
 export const SSH_KEY_PATH = join(homedir(), '.ssh', 'id_ed25519')
 export const SSH_PUB_KEY_PATH = `${SSH_KEY_PATH}.pub`
 
+/** Repo root (deploy/hetzner-vpn → ../../). */
+export const REPO_ROOT = join(import.meta.dir, '..', '..')
+
+/** Local build outputs shipped to the server. */
+export const LOCAL_BIN = '/tmp/lt-linux-x64'
+export const LOCAL_LIB = '/tmp/libltvpn-linux-x64.so'
+/** Remote paths on the server. */
+export const REMOTE_BIN = '/root/lt-linux-x64'
+export const REMOTE_LIB = '/root/libltvpn-linux-x64.so'
+export const REMOTE_SETUP = '/root/lt-server-setup.sh'
+export const SETUP_SCRIPT = join(import.meta.dir, 'lt-server-setup.sh')
+
 /** Local state file recording what was provisioned (for verify + destroy). */
 export const STATE_PATH = join(import.meta.dir, '.state.json')
 export const CLIENT_CONF_PATH = join(import.meta.dir, 'client-lt.conf')
@@ -86,6 +98,32 @@ export async function ssh(ip: string, command: string): Promise<SshResult> {
   ])
   const code = await proc.exited
   return { code, stdout, stderr }
+}
+
+/** Copy local files to the server via scp. */
+export async function scp(ip: string, localPaths: string[], remoteDir: string): Promise<void> {
+  const proc = Bun.spawn(['scp', ...SSH_OPTS, ...localPaths, `root@${ip}:${remoteDir}`], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const code = await proc.exited
+  if (code !== 0) {
+    const err = await new Response(proc.stderr).text()
+    throw new Error(`scp failed (${code}): ${err.trim()}`)
+  }
+}
+
+/** Run a local command, throwing on non-zero exit. */
+export async function run(cmd: string[], cwd?: string): Promise<string> {
+  const proc = Bun.spawn(cmd, { cwd, stdout: 'pipe', stderr: 'pipe' })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const code = await proc.exited
+  if (code !== 0)
+    throw new Error(`\`${cmd.join(' ')}\` failed (${code}): ${stderr.trim() || stdout.trim()}`)
+  return stdout
 }
 
 /** Run a command over SSH, throwing on non-zero exit. */
