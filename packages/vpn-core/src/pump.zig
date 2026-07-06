@@ -6,9 +6,13 @@
 //! `in_fd`/`out_fd` are raw file descriptors — a TUN device and a connected
 //! UDP socket in production, or pipes in tests. Reads are expected to be
 //! message-oriented (one packet per read), as with TUN and datagram sockets.
+//! macOS utun descriptors are detected automatically and their 4-byte AF
+//! framing is stripped on read / prepended on write, so only bare IP packets
+//! ever enter or leave the tunnel.
 const std = @import("std");
 const builtin = @import("builtin");
 const transport = @import("transport.zig");
+const tun = @import("tun.zig");
 const linux_os = std.os.linux;
 
 extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
@@ -34,11 +38,17 @@ const max_wire = transport.header_len + transport.max_plaintext_len + transport.
 /// write the wire messages to `out_fd`. Returns the number of packets
 /// forwarded (stops early when a read yields no data or a write fails).
 pub fn forwardEncrypt(session: *transport.Session, in_fd: c_int, out_fd: c_int, max_packets: usize) usize {
+    // A macOS utun source delivers AF-framed packets; read through the TUN
+    // layer so only the bare IP packet is encrypted.
+    const in_is_tun = tun.is_framed_tun(in_fd);
     var plain: [transport.max_plaintext_len]u8 = undefined;
     var wire: [max_wire]u8 = undefined;
     var count: usize = 0;
     while (count < max_packets) {
-        const n = sysRead(in_fd, &plain, plain.len);
+        const n = if (in_is_tun)
+            tun.read_packet(in_fd, &plain, plain.len)
+        else
+            sysRead(in_fd, &plain, plain.len);
         if (n <= 0) break;
         const wn = session.encrypt(plain[0..@intCast(n)], &wire) catch break;
         if (sysWrite(out_fd, &wire, wn) < 0) break;
@@ -51,6 +61,9 @@ pub fn forwardEncrypt(session: *transport.Session, in_fd: c_int, out_fd: c_int, 
 /// the recovered plaintext to `out_fd`. Packets that fail to decrypt (replay,
 /// tamper) are skipped without aborting the batch. Returns packets written.
 pub fn forwardDecrypt(session: *transport.Session, in_fd: c_int, out_fd: c_int, max_packets: usize) usize {
+    // A macOS utun sink needs the AF header prepended; write through the TUN
+    // layer so the kernel accepts the packet.
+    const out_is_tun = tun.is_framed_tun(out_fd);
     var wire: [max_wire]u8 = undefined;
     var plain: [transport.max_plaintext_len]u8 = undefined;
     var count: usize = 0;
@@ -61,7 +74,11 @@ pub fn forwardDecrypt(session: *transport.Session, in_fd: c_int, out_fd: c_int, 
         attempts += 1;
         const pn = session.decrypt(wire[0..@intCast(n)], &plain) catch continue;
         if (pn == 0) continue; // keepalive
-        if (sysWrite(out_fd, &plain, pn) < 0) break;
+        const wrc = if (out_is_tun)
+            tun.write_packet(out_fd, &plain, pn)
+        else
+            sysWrite(out_fd, &plain, pn);
+        if (wrc < 0) break;
         count += 1;
     }
     return count;

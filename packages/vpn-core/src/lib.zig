@@ -237,13 +237,15 @@ export fn ltvpn_tun_close(fd: i32) void {
 // ── Native packet pump (M5) ──────────────────────────────────────────────────
 
 /// Drain up to `max_packets` plaintext packets from `in_fd`, encrypt each with
-/// `session`, and write them to `out_fd`. Returns packets forwarded.
+/// `session`, and write them to `out_fd`. Returns packets forwarded. macOS
+/// utun descriptors are detected and their 4-byte AF framing handled.
 export fn ltvpn_forward_encrypt(s: *transport.Session, in_fd: i32, out_fd: i32, max_packets: usize) usize {
     return pump.forwardEncrypt(s, in_fd, out_fd, max_packets);
 }
 
 /// Drain up to `max_packets` wire messages from `in_fd`, decrypt each with
 /// `session`, and write the plaintext to `out_fd`. Returns packets written.
+/// macOS utun descriptors are detected and their 4-byte AF framing handled.
 export fn ltvpn_forward_decrypt(s: *transport.Session, in_fd: i32, out_fd: i32, max_packets: usize) usize {
     return pump.forwardDecrypt(s, in_fd, out_fd, max_packets);
 }

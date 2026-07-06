@@ -18,6 +18,7 @@ extern "c" fn socket(domain: c_int, sock_type: c_int, protocol: c_int) c_int;
 extern "c" fn connect(fd: c_int, addr: *const anyopaque, len: u32) c_int;
 extern "c" fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
 extern "c" fn getsockopt(fd: c_int, level: c_int, optname: c_int, optval: *anyopaque, optlen: *u32) c_int;
+extern "c" fn getpeername(fd: c_int, addr: *anyopaque, len: *u32) c_int;
 extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 extern "c" fn close(fd: c_int) c_int;
@@ -49,6 +50,9 @@ const macos = struct {
     const SOCK_DGRAM: c_int = 2;
     const UTUN_OPT_IFNAME: c_int = 2;
     const O_NONBLOCK: c_int = 0x0004;
+    const EINTR = 4;
+    const EAGAIN = 35;
+    const EMSGSIZE = 40;
     const utun_control_name = "com.apple.net.utun_control";
 
     // CTLIOCGINFO = _IOWR('N', 3, struct ctl_info); computed to avoid a header.
@@ -79,6 +83,7 @@ const linux = struct {
     const IFF_NO_PI: c_short = 0x1000;
     // TUNSETIFF = _IOW('T', 202, int)
     const TUNSETIFF: u32 = 0x400454ca;
+    const EINTR = 4;
     const EAGAIN = 11;
 
     const ifreq = extern struct {
@@ -177,30 +182,59 @@ fn openLinux(dev: *Device) i32 {
     return 0;
 }
 
+/// True when `fd` is a TUN device whose frames carry framing beyond the bare
+/// IP packet (the macOS utun 4-byte AF header). A utun fd is a connected
+/// PF_SYSTEM control socket, so we require the peer family to be AF_SYSTEM
+/// and UTUN_OPT_IFNAME to yield a "utun*" name — getsockopt alone is not
+/// discriminating enough (it also succeeds on e.g. AF_UNIX sockets). Linux
+/// TUN (IFF_TUN | IFF_NO_PI) and every other descriptor move bare IP packets.
+pub fn is_framed_tun(fd: c_int) bool {
+    switch (builtin.os.tag) {
+        .macos => {
+            // sockaddr layout on macOS: sa_len(u8), sa_family(u8), data...
+            var addr: [128]u8 = undefined;
+            var addr_len: u32 = @intCast(addr.len);
+            if (getpeername(fd, &addr, &addr_len) != 0) return false;
+            if (addr_len < 2 or addr[1] != macos.AF_SYSTEM) return false;
+            var name: [32]u8 = undefined;
+            var name_len: u32 = @intCast(name.len);
+            if (getsockopt(fd, macos.SYSPROTO_CONTROL, macos.UTUN_OPT_IFNAME, &name, &name_len) != 0) return false;
+            return std.mem.startsWith(u8, &name, "utun");
+        },
+        else => return false,
+    }
+}
+
 /// Read one IP packet into `buf`. Returns bytes read, 0 if none available
 /// (non-blocking), or a negative errno. On macOS the 4-byte AF header is
-/// stripped so `buf` holds a bare IP packet.
+/// stripped so `buf` holds a bare IP packet. EINTR is retried.
 pub fn read_packet(fd: c_int, buf: [*]u8, cap: usize) isize {
     switch (builtin.os.tag) {
         .macos => {
             var scratch: [max_packet + 4]u8 = undefined;
             const want = @min(cap + 4, scratch.len);
-            const n = read(fd, &scratch, want);
-            if (n < 0) {
-                const e = macErrno();
-                return if (e == 35) 0 else -e; // 35 = EAGAIN on macOS
+            while (true) {
+                const n = read(fd, &scratch, want);
+                if (n < 0) {
+                    const e = macErrno();
+                    if (e == macos.EINTR) continue;
+                    return if (e == macos.EAGAIN) 0 else -e;
+                }
+                if (n <= 4) return 0;
+                const payload: usize = @intCast(n - 4);
+                const copy = @min(payload, cap);
+                @memcpy(buf[0..copy], scratch[4 .. 4 + copy]);
+                return @intCast(copy);
             }
-            if (n <= 4) return 0;
-            const payload: usize = @intCast(n - 4);
-            const copy = @min(payload, cap);
-            @memcpy(buf[0..copy], scratch[4 .. 4 + copy]);
-            return @intCast(copy);
         },
         .linux => {
-            const n = linux.signed(linux_os.read(fd, buf, cap));
-            if (n < 0)
-                return if (n == -linux.EAGAIN) 0 else n;
-            return n;
+            while (true) {
+                const n = linux.signed(linux_os.read(fd, buf, cap));
+                if (n == -linux.EINTR) continue;
+                if (n < 0)
+                    return if (n == -linux.EAGAIN) 0 else n;
+                return n;
+            }
         },
         else => return -1,
     }
@@ -208,24 +242,34 @@ pub fn read_packet(fd: c_int, buf: [*]u8, cap: usize) isize {
 
 /// Write one IP packet. Returns bytes written (packet length) or -errno. On
 /// macOS the required 4-byte AF header is prepended based on the IP version.
+/// EINTR is retried.
 pub fn write_packet(fd: c_int, buf: [*]const u8, len: usize) isize {
     if (len == 0) return 0;
     switch (builtin.os.tag) {
         .macos => {
-            if (len > max_packet) return -1;
+            if (len > max_packet) return -macos.EMSGSIZE;
             var scratch: [max_packet + 4]u8 = undefined;
             const version = buf[0] >> 4;
             const af: u32 = if (version == 6) 30 else 2; // AF_INET6 / AF_INET
             std.mem.writeInt(u32, scratch[0..4], af, .big);
             @memcpy(scratch[4 .. 4 + len], buf[0..len]);
-            const n = write(fd, &scratch, len + 4);
-            if (n < 0) return -macErrno();
-            if (n < 4) return 0;
-            return @intCast(@as(usize, @intCast(n)) - 4);
+            while (true) {
+                const n = write(fd, &scratch, len + 4);
+                if (n < 0) {
+                    const e = macErrno();
+                    if (e == macos.EINTR) continue;
+                    return -e;
+                }
+                if (n < 4) return 0;
+                return @intCast(@as(usize, @intCast(n)) - 4);
+            }
         },
         .linux => {
-            const n = linux.signed(linux_os.write(fd, buf, len));
-            return n;
+            while (true) {
+                const n = linux.signed(linux_os.write(fd, buf, len));
+                if (n == -linux.EINTR) continue;
+                return n;
+            }
         },
         else => return -1,
     }
@@ -254,12 +298,37 @@ test "linux tun structs have the expected sizes" {
 test "opening a tun device without privileges fails cleanly" {
     // In CI / normal test runs we are unprivileged: open_device must return a
     // negative errno, never trap. If we happen to be root, it may succeed —
-    // in that case just close it again.
+    // verify the framing probe recognizes it, then close it again.
     var dev: Device = undefined;
     const rc = open_device(&dev);
     if (rc == 0) {
+        if (builtin.os.tag == .macos) try std.testing.expect(is_framed_tun(dev.fd));
         close_device(dev.fd);
     } else {
         try std.testing.expect(rc < 0);
     }
+}
+
+extern "c" fn pipe(fds: [*]c_int) c_int;
+extern "c" fn socketpair(domain: c_int, sock_type: c_int, protocol: c_int, sv: [*]c_int) c_int;
+
+test "is_framed_tun is false for ordinary descriptors" {
+    var fds: [2]c_int = undefined;
+    try std.testing.expect(pipe(&fds) == 0);
+    defer for (fds) |fd| {
+        _ = close(fd);
+    };
+    try std.testing.expect(!is_framed_tun(fds[0]));
+    try std.testing.expect(!is_framed_tun(fds[1]));
+    try std.testing.expect(!is_framed_tun(-1));
+
+    // Connected AF_UNIX datagram sockets (the pump's test transport, and the
+    // closest lookalike to a utun control socket) must not probe as TUN.
+    const AF_UNIX: c_int = 1;
+    var sv: [2]c_int = undefined;
+    try std.testing.expect(socketpair(AF_UNIX, macos.SOCK_DGRAM, 0, &sv) == 0);
+    defer for (sv) |fd| {
+        _ = close(fd);
+    };
+    try std.testing.expect(!is_framed_tun(sv[0]));
 }
