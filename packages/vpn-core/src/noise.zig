@@ -198,31 +198,44 @@ pub const HandshakeState = struct {
             return error.InvalidMac;
         }
 
-        self.peer_index = std.mem.readInt(u32, msg[4..8], .little);
+        // mac1 is computable by anyone who knows our public key, so a forged
+        // message can reach this point. Stage C/H (and everything derived) in
+        // locals and commit only after full authentication — a failed message
+        // must leave the state untouched for the genuine peer.
+        var c = self.c;
+        var h = self.h;
+        errdefer std.crypto.secureZero(u8, &c);
 
         // Ephemeral
-        @memcpy(&self.peer_eph_pub, msg[8..40]);
-        kdf.kdf1(&self.c, &self.c, &self.peer_eph_pub);
-        self.mixHash(msg[8..40]);
+        const peer_eph: [32]u8 = msg[8..40].*;
+        kdf.kdf1(&c, &c, &peer_eph);
+        kdf.hash(&h, &.{ &h, msg[8..40] });
 
         // Decrypt static
         var k: [32]u8 = undefined;
-        var dh1 = keys.dh(&self.static_priv, &self.peer_eph_pub) catch return error.WeakKey;
-        kdf.kdf2(&self.c, &k, &self.c, &dh1);
+        defer std.crypto.secureZero(u8, &k);
+        var dh1 = keys.dh(&self.static_priv, &peer_eph) catch return error.WeakKey;
+        kdf.kdf2(&c, &k, &c, &dh1);
         std.crypto.secureZero(u8, &dh1);
         var peer_static: [32]u8 = undefined;
-        try aeadOpen(&peer_static, &k, 0, msg[40..88], &self.h);
-        self.peer_static_pub = peer_static;
-        self.mixHash(msg[40..88]);
+        try aeadOpen(&peer_static, &k, 0, msg[40..88], &h);
+        kdf.hash(&h, &.{ &h, msg[40..88] });
 
         // Decrypt timestamp
-        var dh2 = keys.dh(&self.static_priv, &self.peer_static_pub) catch return error.WeakKey;
-        kdf.kdf2(&self.c, &k, &self.c, &dh2);
+        var dh2 = keys.dh(&self.static_priv, &peer_static) catch return error.WeakKey;
+        kdf.kdf2(&c, &k, &c, &dh2);
         std.crypto.secureZero(u8, &dh2);
-        try aeadOpen(&self.peer_timestamp, &k, 0, msg[88..116], &self.h);
-        self.mixHash(msg[88..116]);
-        std.crypto.secureZero(u8, &k);
+        var ts: [12]u8 = undefined;
+        try aeadOpen(&ts, &k, 0, msg[88..116], &h);
+        kdf.hash(&h, &.{ &h, msg[88..116] });
 
+        // Commit.
+        self.c = c;
+        self.h = h;
+        self.peer_eph_pub = peer_eph;
+        self.peer_static_pub = peer_static;
+        self.peer_timestamp = ts;
+        self.peer_index = std.mem.readInt(u32, msg[4..8], .little);
         self.state = .consumed_initiation;
     }
 
@@ -302,30 +315,39 @@ pub const HandshakeState = struct {
             return error.InvalidMac;
         }
 
-        self.peer_index = std.mem.readInt(u32, msg[4..8], .little);
+        // As in consumeInitiation: mac1 alone does not authenticate the
+        // sender, so stage all updates and commit only on success.
+        var c = self.c;
+        var h = self.h;
+        errdefer std.crypto.secureZero(u8, &c);
 
-        @memcpy(&self.peer_eph_pub, msg[12..44]);
-        kdf.kdf1(&self.c, &self.c, &self.peer_eph_pub);
-        self.mixHash(msg[12..44]);
+        const peer_eph: [32]u8 = msg[12..44].*;
+        kdf.kdf1(&c, &c, &peer_eph);
+        kdf.hash(&h, &.{ &h, msg[12..44] });
 
-        var dh1 = keys.dh(&self.eph_priv, &self.peer_eph_pub) catch return error.WeakKey;
-        kdf.kdf1(&self.c, &self.c, &dh1);
+        var dh1 = keys.dh(&self.eph_priv, &peer_eph) catch return error.WeakKey;
+        kdf.kdf1(&c, &c, &dh1);
         std.crypto.secureZero(u8, &dh1);
-        var dh2 = keys.dh(&self.static_priv, &self.peer_eph_pub) catch return error.WeakKey;
-        kdf.kdf1(&self.c, &self.c, &dh2);
+        var dh2 = keys.dh(&self.static_priv, &peer_eph) catch return error.WeakKey;
+        kdf.kdf1(&c, &c, &dh2);
         std.crypto.secureZero(u8, &dh2);
 
         var tau: [32]u8 = undefined;
         var k: [32]u8 = undefined;
-        kdf.kdf3(&self.c, &tau, &k, &self.c, &self.psk);
-        self.mixHash(&tau);
+        defer std.crypto.secureZero(u8, &k);
+        kdf.kdf3(&c, &tau, &k, &c, &self.psk);
+        kdf.hash(&h, &.{ &h, &tau });
         std.crypto.secureZero(u8, &tau);
 
         var empty: [0]u8 = undefined;
-        try aeadOpen(&empty, &k, 0, msg[44..60], &self.h);
-        self.mixHash(msg[44..60]);
-        std.crypto.secureZero(u8, &k);
+        try aeadOpen(&empty, &k, 0, msg[44..60], &h);
+        kdf.hash(&h, &.{ &h, msg[44..60] });
 
+        // Commit.
+        self.c = c;
+        self.h = h;
+        self.peer_eph_pub = peer_eph;
+        self.peer_index = std.mem.readInt(u32, msg[4..8], .little);
         self.state = .consumed_response;
     }
 
@@ -458,6 +480,76 @@ test "tampered initiation is rejected by mac1 before decryption" {
     try ini.createInitiation(1, 1_700_000_000, 0, &m1);
     m1[50] ^= 0xff;
     try testing.expectError(error.InvalidMac, res.consumeInitiation(&m1));
+}
+
+test "forged initiation with valid mac1 does not poison responder state" {
+    const ikp = try testKeypair(12);
+    const rkp = try testKeypair(13);
+
+    var ini = try HandshakeState.init(.initiator, &ikp.priv, &rkp.pub_key, null);
+    var res = try HandshakeState.init(.responder, &rkp.priv, null, null);
+    defer ini.deinit();
+    defer res.deinit();
+
+    // An attacker who knows the responder's PUBLIC key can compute a valid
+    // mac1 over an otherwise garbage initiation, passing the cheap check and
+    // reaching the DH/decrypt stage before failing.
+    var forged: [initiation_len]u8 = @splat(0xaa);
+    @memset(forged[0..4], 0);
+    forged[0] = message_type_initiation;
+    var m1key: [32]u8 = undefined;
+    mac1Key(&m1key, &rkp.pub_key);
+    kdf.mac(forged[116..132], &m1key, forged[0..116]);
+    @memset(forged[132..148], 0);
+    try testing.expectError(error.DecryptFailed, res.consumeInitiation(&forged));
+
+    // The genuine initiation must still be accepted afterwards.
+    var m1: [initiation_len]u8 = undefined;
+    try ini.createInitiation(1, 1_700_000_000, 0, &m1);
+    try res.consumeInitiation(&m1);
+    try testing.expectEqualSlices(u8, &ikp.pub_key, &res.peer_static_pub);
+}
+
+test "forged response with valid mac1 does not poison initiator state" {
+    const ikp = try testKeypair(14);
+    const rkp = try testKeypair(15);
+
+    var ini = try HandshakeState.init(.initiator, &ikp.priv, &rkp.pub_key, null);
+    var res = try HandshakeState.init(.responder, &rkp.priv, null, null);
+    defer ini.deinit();
+    defer res.deinit();
+
+    var m1: [initiation_len]u8 = undefined;
+    try ini.createInitiation(0x42, 1_700_000_000, 0, &m1);
+    try res.consumeInitiation(&m1);
+
+    // The attacker sees the sender index on the wire and knows the
+    // initiator's public key — enough for a valid header + mac1.
+    var forged: [response_len]u8 = @splat(0x55);
+    @memset(forged[0..4], 0);
+    forged[0] = message_type_response;
+    std.mem.writeInt(u32, forged[4..8], 0x999, .little);
+    std.mem.writeInt(u32, forged[8..12], 0x42, .little);
+    var m1key: [32]u8 = undefined;
+    mac1Key(&m1key, &ikp.pub_key);
+    kdf.mac(forged[60..76], &m1key, forged[0..60]);
+    @memset(forged[76..92], 0);
+    try testing.expectError(error.DecryptFailed, ini.consumeResponse(&forged));
+
+    // The genuine response still completes the handshake with agreeing keys.
+    var m2: [response_len]u8 = undefined;
+    try res.createResponse(0x77, &m2);
+    try ini.consumeResponse(&m2);
+    try testing.expectEqual(@as(u32, 0x77), ini.peer_index);
+
+    var i_send: [32]u8 = undefined;
+    var i_recv: [32]u8 = undefined;
+    var r_send: [32]u8 = undefined;
+    var r_recv: [32]u8 = undefined;
+    try ini.deriveTransportKeys(&i_send, &i_recv);
+    try res.deriveTransportKeys(&r_send, &r_recv);
+    try testing.expectEqualSlices(u8, &i_send, &r_recv);
+    try testing.expectEqualSlices(u8, &i_recv, &r_send);
 }
 
 test "initiation for a different responder key is rejected" {
