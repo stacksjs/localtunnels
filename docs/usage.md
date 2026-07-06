@@ -49,7 +49,23 @@ localtunnels info            # Show help information
 localtunnels version         # Show version
 ```
 
-A fully-automated VPN / exit-node deployment (running the localtunnels WireGuard stack) also ships in [`deploy/`](https://github.com/stacksjs/localtunnels/tree/main/deploy) — run it with `bun run deploy:vpn` (Hetzner by default, `--provider aws` for EC2). Provisioning goes through ts-cloud, so more providers land as ts-cloud grows.
+### VPN commands
+
+localtunnels also ships an encrypted, WireGuard‑style layer‑3 VPN (`lt` is the short alias):
+
+```bash
+lt vpn:keygen        # Generate (or show) this machine's VPN identity
+lt vpn:selftest      # Verify the native core (handshake + encryption + replay)
+lt vpn:demo          # Two peers over real UDP exchanging encrypted traffic
+lt vpn:tun-check     # Check whether a TUN device can be opened (needs root)
+lt vpn:up            # Bring up a layer-3 VPN interface bridged to a peer (root)
+lt vpn:coordinator   # Run the peer-discovery + IP-assignment server
+lt vpn:mesh-demo     # Coordinator + two auto-discovering nodes, end-to-end
+```
+
+See [VPN Mode](/features/vpn) for the full guide and library API.
+
+A fully-automated VPN / exit-node **deployment** also ships in [`deploy/`](https://github.com/stacksjs/localtunnels/tree/main/deploy) — run it with `bun run deploy:vpn` (Hetzner by default, `--provider aws` for EC2). See [VPN Deployment](/advanced/vpn-deployment).
 
 ## Library
 

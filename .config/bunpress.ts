@@ -33,17 +33,31 @@ const config: BunpressConfig = {
         items: [
           { text: 'Local Tunneling', link: '/features/local-tunneling' },
           { text: 'Custom Subdomains', link: '/features/custom-subdomains' },
+          { text: 'Request Forwarding', link: '/features/forwarding' },
           { text: 'HTTPS Support', link: '/features/https-support' },
+          { text: 'WebSocket Support', link: '/features/websocket' },
           { text: 'Self-Hosting', link: '/features/self-hosting' },
+          { text: 'VPN Mode', link: '/features/vpn' },
+        ],
+      },
+      {
+        text: 'Reference',
+        items: [
+          { text: 'API Reference', link: '/api-reference' },
+          { text: 'Configuration', link: '/config' },
         ],
       },
       {
         text: 'Advanced',
         items: [
           { text: 'Configuration', link: '/advanced/configuration' },
+          { text: 'Client Config', link: '/advanced/client-config' },
           { text: 'Server Setup', link: '/advanced/server-setup' },
+          { text: 'VPN Deployment', link: '/advanced/vpn-deployment' },
+          { text: 'Security', link: '/advanced/security' },
           { text: 'Performance', link: '/advanced/performance' },
           { text: 'Benchmarks', link: '/benchmarks' },
+          { text: 'Troubleshooting', link: '/advanced/troubleshooting' },
           { text: 'CI/CD Integration', link: '/advanced/ci-cd-integration' },
         ],
       },

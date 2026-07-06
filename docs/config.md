@@ -91,6 +91,10 @@ interface TunnelOptions {
 | `APP_NAME` | Used as the default subdomain (slugified). e.g. `My Cool App` becomes `my-cool-app` |
 | `TUNNEL_SERVER` | Default tunnel server URL |
 | `TUNNEL_SUBDOMAIN` | Default subdomain to request |
+| `HCLOUD_TOKEN` / `HETZNER_API_TOKEN` | Hetzner API token for `deploy:tunnel --provider hetzner` and `deploy:vpn` |
+| `AWS_REGION` | AWS region for `deploy:vpn --provider aws` (default `us-east-1`) |
+| `PORKBUN_API_KEY` / `PORKBUN_SECRET_KEY` | Porkbun DNS-01 credentials for wildcard TLS (`--enable-ssl`) |
+| `DEPLOY_PROVIDER` | Default provider for the `deploy:vpn` scripts (`hetzner` or `aws`) |
 
 ## CLI Flags
 
@@ -115,14 +119,23 @@ interface TunnelOptions {
 | `--domain <domain>` | Domain for tunnel URLs | `localhost` |
 | `--verbose` | Enable verbose logging | `false` |
 
-### `localtunnels deploy`
+### `localtunnels deploy:tunnel`
+
+Deploys the tunnel server to the cloud. `--provider` selects the cloud (AWS EC2 or Hetzner Cloud, via ts-cloud).
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--region <region>` | AWS region | `us-east-1` |
+| `--provider <provider>` | Cloud provider: `aws` or `hetzner` | `aws` |
+| `--region <region>` | AWS region (AWS only) | `us-east-1` |
+| `--server-type <type>` | Hetzner server type (Hetzner only) | `cx23` |
+| `--location <location>` | Hetzner location (Hetzner only) | `fsn1` |
 | `--prefix <prefix>` | Resource name prefix | `localtunnel` |
-| `--domain <domain>` | Domain for tunnel URLs | |
-| `--instance-type <type>` | EC2 instance type | `t3.micro` |
-| `--key-name <name>` | EC2 key pair name for SSH | |
-| `--enable-ssl` | Enable SSL via Let's Encrypt | `false` |
+| `--domain <domain>` | Domain for tunnel URLs (AWS sets up Route53; Hetzner prints records) | |
+| `--instance-type <type>` | EC2 instance type (AWS only) | `t3.micro` |
+| `--key-name <name>` | EC2 key pair name for SSH (AWS only) | |
+| `--enable-ssl` | Wildcard Let's Encrypt TLS via Porkbun DNS-01 | `false` |
+| `--porkbun-api-key <key>` | Porkbun API key (or the `PORKBUN_API_KEY` env var) | |
+| `--porkbun-secret-key <key>` | Porkbun secret key (or the `PORKBUN_SECRET_KEY` env var) | |
 | `--verbose` | Enable verbose logging | `false` |
+
+For the VPN / exit-node deployment and its `deploy:vpn` / `verify:vpn` / `destroy:vpn` scripts, see [VPN Deployment](/advanced/vpn-deployment).

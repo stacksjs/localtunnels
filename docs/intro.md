@@ -36,6 +36,14 @@ localtunnels start --port 3000
   Press Ctrl+C to stop sharing
 ```
 
+## Next Steps
+
+- [Usage](/usage) — the CLI and library in depth
+- [Custom Subdomains](/features/custom-subdomains) and [Request Forwarding](/features/forwarding)
+- [Self-Hosting](/features/self-hosting) — run your own tunnel server, or deploy to AWS/Hetzner
+- [VPN Mode](/features/vpn) — the encrypted layer-3 mesh and exit node
+- [API Reference](/api-reference) — full client/server/VPN API
+
 ## Changelog
 
 Please see our [releases](https://github.com/stacksjs/localtunnels/releases) page for more information on what has changed recently.

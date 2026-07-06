@@ -65,19 +65,35 @@ await client.connect()
 
 ## Infrastructure Setup
 
-### AWS Deployment
+### One-command cloud deploy (AWS or Hetzner)
 
-localtunnels includes Infrastructure as Code (IaC) support for AWS:
+localtunnels includes Infrastructure as Code (IaC) support powered by [ts-cloud](https://github.com/stacksjs/ts-cloud). Every deploy takes a `--provider` flag, so the same command targets either cloud (more providers land as ts-cloud grows):
+
+```bash
+# AWS EC2 (also automates Route53 DNS)
+localtunnels deploy:tunnel --domain tunnels.yourcompany.com --enable-ssl
+
+# Hetzner Cloud (prints the DNS records to create)
+localtunnels deploy:tunnel --provider hetzner --domain tunnels.yourcompany.com --enable-ssl
+
+# Tear it down
+localtunnels destroy --provider hetzner --domain tunnels.yourcompany.com
+```
+
+With `--enable-ssl` the server obtains a wildcard Let's Encrypt certificate (Porkbun DNS-01) and serves TLS directly via Bun's native TLS — no reverse proxy required. Provide the Porkbun credentials via the `PORKBUN_API_KEY` and `PORKBUN_SECRET_KEY` environment variables (or the `--porkbun-api-key` / `--porkbun-secret-key` flags).
+
+From the library, the same flows are available from the `localtunnels/cloud` subpath:
 
 ```typescript
-// Using the cloud module
-import { deployTunnelStack } from 'localtunnels/cloud'
+import { deployTunnelHetzner, deployTunnelInfrastructure } from 'localtunnels/cloud'
 
-await deployTunnelStack({
-  region: 'us-east-1',
-  domain: 'tunnels.yourcompany.com',
-})
+await deployTunnelInfrastructure({ region: 'us-east-1', domain: 'tunnels.yourcompany.com', enableSsl: true })
+// or
+await deployTunnelHetzner({ domain: 'tunnels.yourcompany.com', enableSsl: true })
 ```
+
+> [!TIP]
+> Looking for the encrypted layer-3 VPN / exit node instead of the HTTP tunnel? See [VPN Deployment](/advanced/vpn-deployment).
 
 ### Docker Deployment
 
@@ -159,23 +175,43 @@ Configure wildcard DNS to route all subdomains to your server:
 
 ## SSL/TLS Configuration
 
-### Using Nginx as Reverse Proxy
+### Built-in TLS (no reverse proxy)
+
+The server can terminate TLS itself — pass PEM paths via the `ssl` option and Bun serves HTTPS/WSS directly:
+
+```typescript
+const server = new TunnelServer({
+  port: 443,
+  host: '0.0.0.0',
+  secure: true,
+  ssl: {
+    key: '/etc/ssl/tunnels/privkey.pem',
+    cert: '/etc/ssl/tunnels/fullchain.pem',
+  },
+})
+```
+
+For automatic certificates, the server exposes an on-demand TLS `ask` endpoint (`/tls-check?domain=<host>`) that a reverse proxy like Caddy can call before issuing a certificate — it only authorizes the apex, `api.`/`www.` hosts, and live tunnel subdomains.
+
+### Using Nginx as a reverse proxy
+
+If you prefer to terminate TLS at nginx instead:
 
 ```nginx
 server {
     listen 443 ssl;
-    server*name *.tunnels.yourcompany.com;
+    server_name *.tunnels.yourcompany.com;
 
-    ssl*certificate /etc/letsencrypt/live/tunnels.yourcompany.com/fullchain.pem;
-    ssl*certificate*key /etc/letsencrypt/live/tunnels.yourcompany.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/tunnels.yourcompany.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tunnels.yourcompany.com/privkey.pem;
 
     location / {
-        proxy*pass http://localhost:3000;
-        proxy*http*version 1.1;
-        proxy*set*header Upgrade $http*upgrade;
-        proxy*set*header Connection "upgrade";
-        proxy*set*header Host $host;
-        proxy*set*header X-Real-IP $remote_addr;
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```

@@ -138,11 +138,28 @@ Returns server statistics including active connections, request count, and uptim
 
 ### Built-in Endpoints
 
+The server answers these on its own host (each also has a `_`-prefixed alias, e.g. `/_health`):
+
 | Path | Description |
 |------|-------------|
 | `/health` | Health check (returns `OK`) |
-| `/status` | JSON server stats |
+| `/status` | JSON server stats (version, connections, requests, bytes, uptime) |
 | `/metrics` | Prometheus-format metrics |
+| `/tls-check?domain=<host>` | On-demand TLS authorization for a Caddy `ask` endpoint — `200` for the apex, `api.`/`www.` hosts, and live tunnel subdomains; `404` otherwise |
+
+On a subdomain host (`<sub>.<domain>`) the server also serves an inspector:
+
+| Path | Description |
+|------|-------------|
+| `/devtools` | Built-in request inspector UI for that tunnel |
+| `/devtools/api/requests` | JSON of the last 100 requests (credential headers redacted) |
+| `/devtools/api/stats` | Per-subdomain status-code and latency summary |
+
+### Request forwarding
+
+- **Binary-safe** — text bodies travel as-is; anything not recognized as text (fonts, archives, media, wasm, uploads, unknown content types) is base64-encoded so it survives the tunnel byte-for-byte in both directions.
+- **Proxy headers** — the server adds `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` to forwarded requests so your local app sees the real client IP, original host, and scheme.
+- **Failure codes** — `502` when no client is connected or the client drops mid-request; `504` when the client doesn't respond within `timeout`.
 
 ---
 
@@ -204,3 +221,11 @@ const ip = await resolveHostname('localtunnel.dev', true)
 | `request` | `id`, `method`, `url`, `path`, `headers`, `body`, `isBase64Encoded` | HTTP request to forward |
 | `pong` | - | Keep-alive response |
 | `error` | `message` | Error message |
+
+On `subdomain_taken`, the client automatically retries with a suffixed name (`myapp` → `myapp-2` → …), switches to fresh random names after a few attempts, and gives up with a clear error rather than looping forever.
+
+---
+
+## VPN API
+
+The layer-3 VPN primitives are exported from the `localtunnels/vpn` subpath — `generateKeyPair()`, `VpnPeer`, `VpnCoordinator`, `VpnNode`, `TunDevice`, `Handshake`/`Session`, `RoutingTable`, `isVpnAvailable()`, and the key/packet helpers. See [VPN Mode](/features/vpn) for the full reference and examples, and [VPN Deployment](/advanced/vpn-deployment) for provisioning a cloud VPN.
