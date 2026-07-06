@@ -9,6 +9,7 @@
         "@stacksjs/ts-cloud": "^0.7.7",
         "better-dx": "^0.2.15",
         "mitata": "^1.0.34",
+        "pickier": "^0.1.37",
       },
     },
     "packages/localtunnels": {
@@ -234,7 +235,7 @@
 
     "path-scurry": ["path-scurry@1.11.1", "", { "dependencies": { "lru-cache": "^10.2.0", "minipass": "^5.0.0 || ^6.0.2 || ^7.0.0" } }, "sha512-Xa4Nw17FS9ApQFJ9umLiJS4orGjm7ZzwUrwamcGQuHSzDyth9boKDaycYdDcZDuqYATXw4HFXgaqWTctW/v1HA=="],
 
-    "pickier": ["pickier@0.1.35", "", { "dependencies": { "@stacksjs/clapp": "^0.2.3", "@stacksjs/clarity": "^0.3.24" }, "optionalDependencies": { "@stacksjs/ts-spell-check": "^0.1.0" }, "bin": { "pickier": "./dist/bin/cli.js" } }, "sha512-tX9iaOkD3hWYqf+NgkjnaTVh2lRK/L42IpqfOVosso713aN2PCkW9I7HTZ/D5xQdF425k7FKCgzwWqENs55hxg=="],
+    "pickier": ["pickier@0.1.37", "", { "dependencies": { "@stacksjs/clapp": "^0.2.3", "@stacksjs/clarity": "^0.3.24" }, "optionalDependencies": { "@stacksjs/ts-spell-check": "^0.1.0" }, "bin": { "pickier": "./dist/bin/cli.js" } }, "sha512-wna4oJxKm59QuTCwGEMuxowaEeXmj0L1tzHtAkgJ593KM6eKGurp7fDclMdnnnCk1eHlCuxDBI20qvK3DUC4KQ=="],
 
     "process": ["process@0.11.10", "", {}, "sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A=="],
 
@@ -314,11 +315,15 @@
 
     "@stacksjs/components/@stacksjs/stx": ["@stacksjs/stx@0.2.78", "", { "dependencies": { "@cwcss/crosswind": "^0.2.6", "@stacksjs/clapp": "^0.2.0", "@stacksjs/desktop": "0.2.78", "@stacksjs/sanitizer": "0.2.78", "@stacksjs/ts-craft": "^0.0.2", "@stacksjs/ts-i18n": "^0.1.11", "bun-plugin-stx": "0.2.78", "bunfig": "^0.15.6", "stx-router": "0.2.78", "ts-broadcasting": "^0.0.4", "ts-images": "^0.1.8", "ts-syntax-highlighter": "^0.2.1" }, "bin": { "stx": "./dist/cli.js" } }, "sha512-W3Ej3mnyGl2kP3ec+7JeBQ2YLGHZVna3/nsEUjjCkpWUfWXdvGr3NspEPCvVM8hsrysn40FtHLYrZWWtYWdjMQ=="],
 
+    "@stacksjs/logsmith/pickier": ["pickier@0.1.35", "", { "dependencies": { "@stacksjs/clapp": "^0.2.3", "@stacksjs/clarity": "^0.3.24" }, "optionalDependencies": { "@stacksjs/ts-spell-check": "^0.1.0" }, "bin": { "pickier": "./dist/bin/cli.js" } }, "sha512-tX9iaOkD3hWYqf+NgkjnaTVh2lRK/L42IpqfOVosso713aN2PCkW9I7HTZ/D5xQdF425k7FKCgzwWqENs55hxg=="],
+
     "@stacksjs/stx/@cwcss/crosswind": ["@cwcss/crosswind@0.2.4", "", { "dependencies": { "@stacksjs/clapp": "^0.2.0", "bunfig": "^0.15.0" }, "bin": { "crosswind": "./dist/cli.js" } }, "sha512-LKcLryQl7Ue4LTbS3l1pBgcr2t4wIXdBtEJB1nlW5uJmS1o+cwR1uMASb2r9b1mtmfkp4xIouSRUvRRGAGbxww=="],
 
     "@stacksjs/stx/bun-plugin-stx": ["bun-plugin-stx@0.2.70", "", { "dependencies": { "@stacksjs/stx": "0.2.70", "stx-router": "0.2.70" }, "bin": { "serve": "./dist/serve.js", "stx-serve": "./dist/serve.js" } }, "sha512-7bJ6uzQLWqNM5p9Pgha9fNhVTz0gBT4LJyXEEmkMOIljevp7zKiWBa0r2F1CM0eXqSlUfqgI659mtfkhB9MiSA=="],
 
     "@stacksjs/ts-analytics/@stacksjs/stx": ["@stacksjs/stx@0.2.78", "", { "dependencies": { "@cwcss/crosswind": "^0.2.6", "@stacksjs/clapp": "^0.2.0", "@stacksjs/desktop": "0.2.78", "@stacksjs/sanitizer": "0.2.78", "@stacksjs/ts-craft": "^0.0.2", "@stacksjs/ts-i18n": "^0.1.11", "bun-plugin-stx": "0.2.78", "bunfig": "^0.15.6", "stx-router": "0.2.78", "ts-broadcasting": "^0.0.4", "ts-images": "^0.1.8", "ts-syntax-highlighter": "^0.2.1" }, "bin": { "stx": "./dist/cli.js" } }, "sha512-W3Ej3mnyGl2kP3ec+7JeBQ2YLGHZVna3/nsEUjjCkpWUfWXdvGr3NspEPCvVM8hsrysn40FtHLYrZWWtYWdjMQ=="],
+
+    "better-dx/pickier": ["pickier@0.1.35", "", { "dependencies": { "@stacksjs/clapp": "^0.2.3", "@stacksjs/clarity": "^0.3.24" }, "optionalDependencies": { "@stacksjs/ts-spell-check": "^0.1.0" }, "bin": { "pickier": "./dist/bin/cli.js" } }, "sha512-tX9iaOkD3hWYqf+NgkjnaTVh2lRK/L42IpqfOVosso713aN2PCkW9I7HTZ/D5xQdF425k7FKCgzwWqENs55hxg=="],
 
     "bun-plugin-stx/@stacksjs/stx": ["@stacksjs/stx@0.2.78", "", { "dependencies": { "@cwcss/crosswind": "^0.2.6", "@stacksjs/clapp": "^0.2.0", "@stacksjs/desktop": "0.2.78", "@stacksjs/sanitizer": "0.2.78", "@stacksjs/ts-craft": "^0.0.2", "@stacksjs/ts-i18n": "^0.1.11", "bun-plugin-stx": "0.2.78", "bunfig": "^0.15.6", "stx-router": "0.2.78", "ts-broadcasting": "^0.0.4", "ts-images": "^0.1.8", "ts-syntax-highlighter": "^0.2.1" }, "bin": { "stx": "./dist/cli.js" } }, "sha512-W3Ej3mnyGl2kP3ec+7JeBQ2YLGHZVna3/nsEUjjCkpWUfWXdvGr3NspEPCvVM8hsrysn40FtHLYrZWWtYWdjMQ=="],
 
