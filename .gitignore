@@ -17,7 +17,7 @@ bin/localtunnels
 bin/localtunnels*
 pantry
 .env
-/docs/.bunpress
+/dist/.bunpress
 /packages/vpn-core/.zig-cache
 /packages/vpn-core/zig-out
 # synced into the package by packages/localtunnels/build.ts
