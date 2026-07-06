@@ -10,6 +10,9 @@ const builtin = @import("builtin");
 
 extern "c" fn getentropy(buf: [*]u8, len: usize) c_int;
 
+/// errno for a syscall interrupted by a signal handler before any data moved.
+const EINTR = 4;
+
 // BCryptGenRandom(hAlgorithm, pbBuffer, cbBuffer, dwFlags) → NTSTATUS (0 = ok).
 const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
 extern "bcrypt" fn BCryptGenRandom(hAlgorithm: ?*anyopaque, pbBuffer: [*]u8, cbBuffer: u32, dwFlags: u32) i32;
@@ -24,7 +27,13 @@ pub fn bytes(buf: []u8) Error!void {
             while (off < buf.len) {
                 const rc = std.os.linux.getrandom(buf.ptr + off, buf.len - off, 0);
                 const signed: isize = @bitCast(rc);
-                if (signed < 0) return error.EntropyUnavailable;
+                if (signed < 0) {
+                    // A signal delivered before any bytes were produced returns
+                    // -EINTR; that is not an entropy failure, so retry rather
+                    // than abort key generation. Any other error is fatal.
+                    if (signed == -EINTR) continue;
+                    return error.EntropyUnavailable;
+                }
                 if (signed == 0) return error.EntropyUnavailable;
                 off += @intCast(signed);
             }
