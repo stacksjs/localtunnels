@@ -179,4 +179,25 @@ describeVpn('vpn/rekey', () => {
     await until(() => received.includes('after-rekey'))
     expect(received.length).toBeGreaterThanOrEqual(20)
   }, 12_000)
+
+  it('drops undersized data/response datagrams without reading out of bounds', async () => {
+    const aKeys = generateKeyPair()
+    const a = new VpnPeer({ keyPair: aKeys, host: '127.0.0.1', keepaliveInterval: 0, rekeyAfter: 0 })
+    peers.push(a)
+    await a.start()
+
+    const errors: Error[] = []
+    a.on('error', e => errors.push(e))
+
+    // Frames shorter than the fields they'd index into must be dropped, not
+    // parsed — previously an unbounded DataView read past the datagram.
+    for (const type of [2, 4]) { // MSG_RESPONSE, MSG_DATA
+      for (const len of [4, 5, 8, 11, 16, 31]) {
+        const frame = new Uint8Array(len)
+        frame[0] = type
+        expect(() => a.receiveRelayFrame('unknown-peer', frame)).not.toThrow()
+      }
+    }
+    expect(errors).toHaveLength(0)
+  })
 })

@@ -378,8 +378,12 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   }
 
   private handleResponse(buf: Uint8Array, _via: Via): void {
-    // Response receiver index (our localIndex) sits at bytes 8..12.
-    const localIndex = new DataView(buf.buffer, buf.byteOffset).getUint32(8, true)
+    // Response receiver index (our localIndex) sits at bytes 8..12. Bound the
+    // view to the datagram length so a short/pooled buffer can't read the
+    // index out of bounds (Bun may hand back a slice of a larger pool).
+    if (buf.length < 12)
+      return
+    const localIndex = new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(8, true)
     const pending = this.pending.get(localIndex)
     if (!pending)
       return
@@ -403,8 +407,12 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   }
 
   private handleData(buf: Uint8Array, via: Via): void {
-    // Data receiver index (our localIndex) sits at bytes 4..8.
-    const localIndex = new DataView(buf.buffer, buf.byteOffset).getUint32(4, true)
+    // Data receiver index (our localIndex) sits at bytes 4..8. A valid data
+    // message is at least a 16-byte header + 16-byte tag; anything shorter
+    // can't decrypt, so drop it before the (bounds-checked) index read.
+    if (buf.length < 32)
+      return
+    const localIndex = new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(4, true)
     const established = this.sessions.get(localIndex)
     if (!established)
       return
