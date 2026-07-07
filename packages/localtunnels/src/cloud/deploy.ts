@@ -45,6 +45,14 @@ export interface TunnelDeployConfig {
   keyName?: string
 
   /**
+   * CIDR block allowed to reach SSH (port 22). Restrict this to your own
+   * address (e.g. '203.0.113.4/32') so the box isn't exposed to the whole
+   * internet. Falls back to the LT_SSH_CIDR env var, then '0.0.0.0/0' (open,
+   * with a warning). HTTP/HTTPS stay world-open — that's the point of a tunnel.
+   */
+  sshCidr?: string
+
+  /**
    * Enable verbose logging during deployment
    * @default false
    */
@@ -368,11 +376,20 @@ export async function deployTunnelInfrastructure(
     securityGroupId = sgResult.GroupId!
     log(`Created security group: ${securityGroupId}`)
 
-    // Add ingress rules for SSH, HTTP, HTTPS
+    // Add ingress rules for SSH, HTTP, HTTPS. SSH is scoped to sshCidr; only
+    // HTTP/HTTPS are world-open (a tunnel server must be publicly reachable).
+    const sshCidr = config.sshCidr || process.env.LT_SSH_CIDR || '0.0.0.0/0'
+    if (sshCidr === '0.0.0.0/0') {
+      log('WARNING: SSH (port 22) is open to the entire internet (0.0.0.0/0).')
+      log('         Pass --ssh-cidr <your-ip>/32 or set LT_SSH_CIDR to restrict it.')
+    }
+    else {
+      log(`SSH (port 22) restricted to ${sshCidr}`)
+    }
     await ec2.authorizeSecurityGroupIngress({
       GroupId: securityGroupId,
       IpPermissions: [
-        { IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'SSH' }] },
+        { IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: sshCidr, Description: 'SSH' }] },
         { IpProtocol: 'tcp', FromPort: 80, ToPort: 80, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTP' }] },
         { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTPS' }] },
       ],
@@ -922,7 +939,9 @@ export function generateTunnelServerUserData(opts: {
 
   const lines = [
     '#!/bin/bash',
-    'set -x',
+    // Fail loud: abort on any error, unset var, or failed pipe stage, so a
+    // half-provisioned box never silently starts a broken service.
+    'set -euxo pipefail',
     '',
     '# Set HOME explicitly (cloud-init does not always set it)',
     'export HOME=/root',
@@ -930,7 +949,14 @@ export function generateTunnelServerUserData(opts: {
     '# Install Bun (its installer needs unzip, preinstalled on AL2023 only)',
     ...(distro === 'ubuntu' ? ['apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y unzip'] : []),
     'export BUN_INSTALL="/root/.bun"',
-    'curl -fsSL https://bun.sh/install | bash',
+    // Download the installer to a file and verify it is non-empty before
+    // running it, rather than piping curl straight into bash — a truncated or
+    // failed download then aborts (set -e) instead of executing a partial
+    // script. Transport is already HTTPS; to pin further, operators can fetch
+    // a specific Bun release tag.
+    'curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh',
+    'test -s /tmp/bun-install.sh',
+    'bash /tmp/bun-install.sh',
     'export PATH="$BUN_INSTALL/bin:$PATH"',
     '',
     '# Create app directory',
@@ -955,9 +981,24 @@ export function generateTunnelServerUserData(opts: {
       distro === 'ubuntu'
         ? 'apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y socat cron unzip'
         : 'dnf install -y socat cronie',
-      `curl -fsSL https://get.acme.sh | sh -s email=admin@${domain}`,
+      // Download-then-run (see the Bun installer note above) instead of curl|sh.
+      'curl -fsSL https://get.acme.sh -o /tmp/acme-install.sh',
+      'test -s /tmp/acme-install.sh',
+      `sh /tmp/acme-install.sh email=admin@${domain}`,
       '',
       'mkdir -p /etc/ssl/localtunnel',
+      '',
+      '# Store Porkbun credentials in a root-only env file rather than inline',
+      '# in the systemd unit (which is world-readable via systemctl cat). The',
+      '# unit and provision-certs.sh both pull them in via EnvironmentFile.',
+      '# NOTE: the value still lives in EC2 user-data (readable via IMDS); a',
+      '# stricter setup would source it from AWS Secrets Manager at boot.',
+      'mkdir -p /etc/localtunnel',
+      'cat > /etc/localtunnel/porkbun.env << \'PORKBUNENV\'',
+      `PORKBUN_API_KEY=${porkbunApiKey}`,
+      `PORKBUN_SECRET_API_KEY=${porkbunSecretKey}`,
+      'PORKBUNENV',
+      'chmod 600 /etc/localtunnel/porkbun.env',
       '',
       '# Create cert provisioning script (called by systemd before server start)',
       'cat > /opt/localtunnel/provision-certs.sh << \'CERTSCRIPT\'',
@@ -1023,8 +1064,7 @@ export function generateTunnelServerUserData(opts: {
       'WorkingDirectory=/opt/localtunnel',
       'Environment=BUN_INSTALL=/root/.bun',
       'Environment=PATH=/root/.acme.sh:/root/.bun/bin:/usr/local/bin:/usr/bin:/bin',
-      `Environment=PORKBUN_API_KEY=${porkbunApiKey}`,
-      `Environment=PORKBUN_SECRET_API_KEY=${porkbunSecretKey}`,
+      'EnvironmentFile=/etc/localtunnel/porkbun.env',
       'TimeoutStartSec=600',
       'ExecStartPre=/opt/localtunnel/provision-certs.sh',
       'ExecStart=/root/.bun/bin/bun run server.ts',

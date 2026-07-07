@@ -80,7 +80,13 @@ localtunnels deploy:tunnel --provider hetzner --domain tunnels.yourcompany.com -
 localtunnels destroy --provider hetzner --domain tunnels.yourcompany.com
 ```
 
-With `--enable-ssl` the server obtains a wildcard Let's Encrypt certificate (Porkbun DNS-01) and serves TLS directly via Bun's native TLS — no reverse proxy required. Provide the Porkbun credentials via the `PORKBUN_API_KEY` and `PORKBUN_SECRET_KEY` environment variables (or the `--porkbun-api-key` / `--porkbun-secret-key` flags).
+With `--enable-ssl` the server obtains a wildcard Let's Encrypt certificate (Porkbun DNS-01) and serves TLS directly via Bun's native TLS — no reverse proxy required. Provide the Porkbun credentials via the `PORKBUN_API_KEY` and `PORKBUN_SECRET_KEY` environment variables (or the `--porkbun-api-key` / `--porkbun-secret-key` flags). On the server, those credentials are written to a root-only (`0600`) `EnvironmentFile` rather than inlined in the systemd unit.
+
+By default the AWS deploy opens SSH (port 22) to the whole internet. Restrict it to your own address with `--ssh-cidr` (or the `LT_SSH_CIDR` env var); HTTP/HTTPS stay world-open because a tunnel server must be publicly reachable:
+
+```bash
+localtunnels deploy:tunnel --domain tunnels.yourcompany.com --enable-ssl --ssh-cidr 203.0.113.4/32
+```
 
 From the library, the same flows are available from the `localtunnels/cloud` subpath:
 
