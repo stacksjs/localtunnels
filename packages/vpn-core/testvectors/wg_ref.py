@@ -220,6 +220,20 @@ def response(c, h, s_priv_r, s_pub_i, e_priv_r, e_pub_r, e_pub_i, psk, sender_in
     return bytes(msg), t1, t2  # responder: send=t2, recv=t1
 
 
+def transport_message(key, counter, receiver_index, plaintext):
+    """Type-4 data message (whitepaper §5.4.6): zero-pad to 16 bytes, nonce is
+    the little-endian counter in bytes 4..12, empty AAD."""
+    padded = plaintext + bytes((-len(plaintext)) % 16)
+    nonce = bytes(4) + struct.pack('<Q', counter)
+    ct = chacha20poly1305_encrypt(key, nonce, padded, b"")
+    msg = bytearray()
+    msg += bytes([4, 0, 0, 0])
+    msg += struct.pack('<I', receiver_index)
+    msg += struct.pack('<Q', counter)
+    msg += ct
+    return bytes(msg)
+
+
 def self_test():
     # RFC 7748 §5.2 X25519 test vector.
     scalar = bytes.fromhex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4")
@@ -275,6 +289,10 @@ def main():
         "initiator_recv_key": t2.hex(),
         "initial_chain_key": blake2s(CONSTRUCTION).hex(),
         "initial_hash": blake2s(blake2s(CONSTRUCTION), IDENTIFIER).hex(),
+        # First data packet initiator → responder (counter 0, receiver is the
+        # responder's sender index) and a responder → initiator keepalive.
+        "transport_first_packet": transport_message(t1, 0, sender_r, b"ping-from-initiator!").hex(),
+        "transport_keepalive": transport_message(t2, 0, sender_i, b"").hex(),
     }
     json.dump(vec, sys.stdout, indent=2)
     sys.stdout.write("\n")

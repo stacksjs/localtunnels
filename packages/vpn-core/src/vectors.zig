@@ -1,17 +1,18 @@
 //! Known-answer tests for the WireGuard v1 handshake.
 //!
 //! The vectors below are produced by an INDEPENDENT reference implementation
-//! (`native/testvectors/wg_ref.py`) written in Python with hand-rolled X25519
+//! (`testvectors/wg_ref.py`) written in Python with hand-rolled X25519
 //! and ChaCha20-Poly1305 that are themselves validated against the RFC 7748 /
 //! RFC 8439 / RFC 7693 test vectors. Byte-for-byte agreement between that
 //! reference and this Zig core is strong evidence of wire-correctness — the
 //! same guarantee the official WireGuard test vectors provide.
 //!
-//! Regenerate with:  python3 native/testvectors/wg_ref.py
+//! Regenerate with:  python3 testvectors/wg_ref.py
 const std = @import("std");
 const kdf = @import("kdf.zig");
 const keys = @import("keys.zig");
 const noise = @import("noise.zig");
+const transport = @import("transport.zig");
 
 const testing = std.testing;
 
@@ -36,6 +37,10 @@ const INITIATION = "01000000040302017b0d47d93427f8311160781c7c733fd89f88970aef49
 const RESPONSE = "020000000d0c0b0a04030201ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6bcb8edaa29bd1262cc9d09bbd6f6473b05258104e4c52f2783addcc73afd9df5b00000000000000000000000000000000";
 const INITIATOR_SEND_KEY = "a007faf842d83f5bd3be20a14e0ffcec34c84867b78b051980602713205922de";
 const INITIATOR_RECV_KEY = "d982d5cd10d34a7802b6c19fa441cd9164d70e4f4d62007ab416879ee8bd1b99";
+// First data packet initiator → responder (counter 0, "ping-from-initiator!")
+// and a responder → initiator keepalive, over the transport keys above.
+const TRANSPORT_FIRST_PACKET = "040000000d0c0b0a00000000000000007c3924f9324b9da2d0706f221e65422c6b218482c97a8d49d501917cb576355356a7e2473ca4dd2ea312f843419f5597";
+const TRANSPORT_KEEPALIVE = "040000000403020100000000000000004546b4bebf67c6c95055c71188ff8c4e";
 
 fn unhex(comptime hexstr: []const u8) [hexstr.len / 2]u8 {
     var out: [hexstr.len / 2]u8 = undefined;
@@ -98,4 +103,27 @@ test "handshake produces byte-identical messages and transport keys" {
     try res.deriveTransportKeys(&r_send, &r_recv);
     try testing.expectEqualSlices(u8, &i_send, &r_recv);
     try testing.expectEqualSlices(u8, &i_recv, &r_send);
+}
+
+test "transport data messages match the reference byte-for-byte" {
+    const send_key = unhex(INITIATOR_SEND_KEY);
+    const recv_key = unhex(INITIATOR_RECV_KEY);
+    var ini = transport.Session.init(&send_key, &recv_key, SENDER_I, SENDER_R);
+    var res = transport.Session.init(&recv_key, &send_key, SENDER_R, SENDER_I);
+
+    // First initiator → responder packet (counter 0) is byte-exact.
+    const payload = "ping-from-initiator!";
+    var wire: [transport.encryptedLen(payload.len)]u8 = undefined;
+    const n = try ini.encrypt(payload, &wire);
+    try testing.expectEqualSlices(u8, &unhex(TRANSPORT_FIRST_PACKET), wire[0..n]);
+    var plain: [64]u8 = undefined;
+    const pn = try res.decrypt(wire[0..n], &plain);
+    try testing.expect(pn >= payload.len);
+    try testing.expectEqualSlices(u8, payload, plain[0..payload.len]);
+
+    // Responder → initiator keepalive (counter 0) is byte-exact too.
+    var ka: [transport.encryptedLen(0)]u8 = undefined;
+    const kn = try res.encrypt(&.{}, &ka);
+    try testing.expectEqualSlices(u8, &unhex(TRANSPORT_KEEPALIVE), ka[0..kn]);
+    try testing.expectEqual(@as(usize, 0), try ini.decrypt(ka[0..kn], &plain));
 }
