@@ -631,7 +631,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
 
               // Check if subdomain is already in use by another client
               if (this.subdomainSockets.has(subdomain) && this.subdomainSockets.get(subdomain)!.size > 0) {
-                ws.send(`{"type":"subdomain_taken","subdomain":"${subdomain}"}`)
+                ws.send(JSON.stringify({ type: 'subdomain_taken', subdomain }))
                 debugLog('server', `Subdomain ${subdomain} already in use, notifying client`, this.options.verbose)
                 return
               }
@@ -647,7 +647,11 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
 
               // Confirm registration
               const proto = this.options.secure ? 'https' : 'http'
-              ws.send(`{"type":"registered","subdomain":"${subdomain}","url":"${proto}://${subdomain}.${this.options.domain}"}`)
+              ws.send(JSON.stringify({
+                type: 'registered',
+                subdomain,
+                url: `${proto}://${subdomain}.${this.options.domain}`,
+              }))
             }
             else if (data.type === 'response') {
               const handler = this.responseHandlers.get(data.id)
