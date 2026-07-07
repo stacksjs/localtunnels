@@ -28,6 +28,14 @@ jobs:
       - name: Build Packages
         run: bun run build
 
+      # Gate the publish on the same checks CI runs — a tagged release must
+      # never ship code that fails typecheck or tests.
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
       - name: Compile Binaries
         run: bun run compile:all && bun run zip
 
