@@ -104,12 +104,18 @@ cli
         if (shuttingDown) return
         shuttingDown = true
         console.log('\n  Closing tunnel...')
-        await client.disconnect()
+        try {
+          await client.disconnect()
+        }
+        catch {
+          // Best-effort shutdown: a failed disconnect must still exit the
+          // process rather than surface as an unhandled rejection that hangs.
+        }
         process.exit(0)
       }
 
-      process.on('SIGINT', () => { cleanup() })
-      process.on('SIGTERM', () => { cleanup() })
+      process.on('SIGINT', () => { void cleanup() })
+      process.on('SIGTERM', () => { void cleanup() })
 
       // Set up event listeners
       client.on('request', (req) => {
