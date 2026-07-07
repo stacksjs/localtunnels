@@ -7,7 +7,10 @@ const std = @import("std");
 const base: u64 = 0x400000000000000a;
 
 pub fn encode(out: *[12]u8, unix_sec: u64, nano: u32) void {
-    std.mem.writeInt(u64, out[0..8], base + unix_sec, .big);
+    // Saturate rather than overflow: unix_sec crosses the FFI boundary
+    // unvalidated, and wrap-around would be UB in ReleaseFast (and would
+    // break monotonicity, the one property that matters here).
+    std.mem.writeInt(u64, out[0..8], base +| unix_sec, .big);
     std.mem.writeInt(u32, out[8..12], nano, .big);
 }
 

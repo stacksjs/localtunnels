@@ -2,8 +2,15 @@
 const std = @import("std");
 
 /// REJECT_AFTER_MESSAGES = 2^64 - 2^13 - 1
-pub const reject_after_messages: u64 = std.math.maxInt(u64) - 8192 - 1;
+/// (maxInt is 2^64 - 1, so subtracting 8192 alone lands on the spec value.)
+pub const reject_after_messages: u64 = std.math.maxInt(u64) - 8192;
 
+/// REKEY_AFTER_MESSAGES = 2^60 — after this many sent messages a peer should
+/// initiate a new handshake (enforced by the session manager, not this core).
+pub const rekey_after_messages: u64 = 1 << 60;
+
+/// Not internally synchronized — callers that share a window across threads
+/// must serialize access (transport.Session does this with its own mutex).
 pub const ReplayWindow = struct {
     const num_words = 32;
     const word_bits = 64;

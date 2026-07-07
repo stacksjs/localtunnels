@@ -25,7 +25,8 @@ extern "c" fn close(fd: c_int) c_int;
 extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 extern "c" fn __error() *c_int; // macOS errno
 
-fn macErrno() i32 {
+/// Current errno on macOS (also used by pump.zig for its raw fd I/O).
+pub fn macErrno() i32 {
     return @intCast(__error().*);
 }
 

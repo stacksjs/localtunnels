@@ -18,18 +18,36 @@ const linux_os = std.os.linux;
 extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 
-// fd I/O — raw syscalls on Linux (no libc), libc elsewhere.
+const EINTR = 4; // same value on Linux and macOS
+
+// fd I/O — raw syscalls on Linux (no libc), libc elsewhere. Normalized to
+// return -errno on failure on every platform, with EINTR retried so a signal
+// mid-batch neither drops a packet nor ends the pump early.
 fn sysRead(fd: c_int, buf: [*]u8, n: usize) isize {
-    return switch (builtin.os.tag) {
-        .linux => @bitCast(linux_os.read(fd, buf, n)),
-        else => read(fd, buf, n),
-    };
+    while (true) {
+        const rc: isize = switch (builtin.os.tag) {
+            .linux => @bitCast(linux_os.read(fd, buf, n)),
+            else => blk: {
+                const r = read(fd, buf, n);
+                break :blk if (r < 0) -@as(isize, tun.macErrno()) else r;
+            },
+        };
+        if (rc == -EINTR) continue;
+        return rc;
+    }
 }
 fn sysWrite(fd: c_int, buf: [*]const u8, n: usize) isize {
-    return switch (builtin.os.tag) {
-        .linux => @bitCast(linux_os.write(fd, buf, n)),
-        else => write(fd, buf, n),
-    };
+    while (true) {
+        const rc: isize = switch (builtin.os.tag) {
+            .linux => @bitCast(linux_os.write(fd, buf, n)),
+            else => blk: {
+                const r = write(fd, buf, n);
+                break :blk if (r < 0) -@as(isize, tun.macErrno()) else r;
+            },
+        };
+        if (rc == -EINTR) continue;
+        return rc;
+    }
 }
 
 const max_wire = transport.header_len + transport.max_plaintext_len + transport.tag_len;

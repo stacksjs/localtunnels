@@ -39,8 +39,14 @@ pub fn bytes(buf: []u8) Error!void {
             }
         },
         .windows => {
-            if (BCryptGenRandom(null, buf.ptr, @intCast(buf.len), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-                return error.EntropyUnavailable;
+            // cbBuffer is a u32; chunk so huge buffers can't truncate the cast.
+            var off: usize = 0;
+            while (off < buf.len) {
+                const chunk: u32 = @intCast(@min(buf.len - off, 1 << 30));
+                if (BCryptGenRandom(null, buf.ptr + off, chunk, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
+                    return error.EntropyUnavailable;
+                off += chunk;
+            }
         },
         else => {
             // macOS: getentropy caps a single call at 256 bytes; fill in chunks.
