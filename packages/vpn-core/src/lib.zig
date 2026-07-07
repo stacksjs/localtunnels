@@ -210,8 +210,11 @@ export fn ltvpn_session_send_counter(s: ?*const transport.Session) u64 {
     return sess.sendCount();
 }
 
-/// Bytes required to hold an encrypted packet for `plain_len` plaintext bytes.
+/// Bytes required to hold an encrypted packet for `plain_len` plaintext
+/// bytes, or 0 if `plain_len` exceeds the per-packet maximum (unvalidated
+/// input must not reach the padding arithmetic — overflow is UB).
 export fn ltvpn_encrypted_len(plain_len: usize) usize {
+    if (plain_len > transport.max_plaintext_len) return 0;
     return transport.encryptedLen(plain_len);
 }
 
@@ -367,6 +370,10 @@ test "C ABI end-to-end: keypair → handshake → transport" {
     defer ltvpn_session_free(si);
     defer ltvpn_session_free(sr);
 
+    // A second derivation from the same handshake would duplicate keys and
+    // counters (nonce reuse) — it must fail.
+    try testing.expect(ltvpn_session_from_handshake(ini) == null);
+
     const payload = "ip packet goes here";
     var wire: [256]u8 = undefined;
     const wn = ltvpn_session_encrypt(si, payload.ptr, payload.len, &wire, wire.len);
@@ -417,4 +424,12 @@ test "C ABI rejects null pointers instead of crashing" {
     const wn = ltvpn_session_encrypt(s, null, 0, &wire, wire.len);
     try testing.expectEqual(@as(isize, transport.header_len + transport.tag_len), wn);
     try testing.expectEqual(inval, @as(i32, @intCast(ltvpn_session_encrypt(s, null, 8, &wire, wire.len))));
+
+    // Oversize lengths yield 0 instead of overflowing the padding arithmetic.
+    try testing.expectEqual(@as(usize, 0), ltvpn_encrypted_len(std.math.maxInt(usize)));
+    try testing.expectEqual(@as(usize, 0), ltvpn_encrypted_len(transport.max_plaintext_len + 1));
+    try testing.expectEqual(
+        transport.encryptedLen(transport.max_plaintext_len),
+        ltvpn_encrypted_len(transport.max_plaintext_len),
+    );
 }

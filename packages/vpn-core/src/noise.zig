@@ -26,6 +26,15 @@ pub const message_type_data: u8 = 4;
 pub const initiation_len = 148;
 pub const response_len = 92;
 
+comptime {
+    // Wire layouts (§5.4.2 / §5.4.3): the field offsets hardcoded throughout
+    // this file must tile the message lengths exactly.
+    // initiation: hdr(4) + sender(4) + eph(32) + enc_static(32+16) + enc_ts(12+16) + mac1(16) + mac2(16)
+    std.debug.assert(4 + 4 + 32 + (32 + 16) + (12 + 16) + 16 + 16 == initiation_len);
+    // response: hdr(4) + sender(4) + receiver(4) + eph(32) + enc_empty(0+16) + mac1(16) + mac2(16)
+    std.debug.assert(4 + 4 + 4 + 32 + 16 + 16 + 16 == response_len);
+}
+
 pub const Error = error{
     WrongState,
     InvalidMessage,
@@ -43,6 +52,8 @@ const State = enum {
     consumed_initiation,
     created_response,
     consumed_response,
+    /// Terminal: transport keys were derived and the chaining key wiped.
+    derived,
 };
 
 fn aeadSeal(out: []u8, key: *const [32]u8, counter: u64, plaintext: []const u8, ad: []const u8) void {
@@ -95,6 +106,9 @@ pub const HandshakeState = struct {
     peer_timestamp: [12]u8 = @splat(0),
 
     pub fn init(role: Role, static_priv: *const [32]u8, peer_static_pub: ?*const [32]u8, psk: ?*const [32]u8) Error!HandshakeState {
+        // An initiator must know who it is talking to; validate before doing
+        // any curve work.
+        if (role == .initiator and peer_static_pub == null) return error.InvalidMessage;
         var hs = HandshakeState{
             .role = role,
             .static_priv = static_priv.*,
@@ -109,7 +123,6 @@ pub const HandshakeState = struct {
             .initiator => &hs.peer_static_pub,
             .responder => &hs.static_pub,
         };
-        if (role == .initiator and peer_static_pub == null) return error.InvalidMessage;
         kdf.hash(&hs.c, &.{construction});
         var tmp: [32]u8 = undefined;
         kdf.hash(&tmp, &.{ &hs.c, identifier });
@@ -378,6 +391,11 @@ pub const HandshakeState = struct {
 
     /// Derive transport keys after the handshake completes.
     /// (T_send, T_recv) = KDF2(C, ε), swapped for the responder.
+    ///
+    /// One-shot: on success the chaining key, ephemeral private key, and psk
+    /// are wiped and the state becomes terminal. Deriving twice would hand
+    /// out two sessions with identical keys whose send counters both start
+    /// at zero — AEAD nonce reuse — so a second call returns WrongState.
     pub fn deriveTransportKeys(self: *HandshakeState, out_send: *[32]u8, out_recv: *[32]u8) Error!void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -399,6 +417,12 @@ pub const HandshakeState = struct {
         }
         std.crypto.secureZero(u8, &t1);
         std.crypto.secureZero(u8, &t2);
+        // Handshake secrets are dead now; drop them eagerly rather than
+        // waiting for deinit (forward-secrecy hygiene).
+        std.crypto.secureZero(u8, &self.c);
+        std.crypto.secureZero(u8, &self.eph_priv);
+        std.crypto.secureZero(u8, &self.psk);
+        self.state = .derived;
     }
 };
 
@@ -472,6 +496,35 @@ test "handshake without psk also agrees" {
     try res.deriveTransportKeys(&r_send, &r_recv);
     try testing.expectEqualSlices(u8, &i_send, &r_recv);
     try testing.expectEqualSlices(u8, &i_recv, &r_send);
+}
+
+test "transport keys can only be derived once" {
+    const ikp = try testKeypair(16);
+    const rkp = try testKeypair(17);
+
+    var ini = try HandshakeState.init(.initiator, &ikp.priv, &rkp.pub_key, null);
+    var res = try HandshakeState.init(.responder, &rkp.priv, null, null);
+    defer ini.deinit();
+    defer res.deinit();
+
+    var m1: [initiation_len]u8 = undefined;
+    try ini.createInitiation(1, 1_700_000_000, 0, &m1);
+    try res.consumeInitiation(&m1);
+    var m2: [response_len]u8 = undefined;
+    try res.createResponse(2, &m2);
+    try ini.consumeResponse(&m2);
+
+    var send: [32]u8 = undefined;
+    var recv: [32]u8 = undefined;
+    try ini.deriveTransportKeys(&send, &recv);
+    // A second derivation would mint a duplicate session with the same keys
+    // and a fresh counter — nonce reuse — so it must be refused.
+    try testing.expectError(error.WrongState, ini.deriveTransportKeys(&send, &recv));
+}
+
+test "initiator without a peer public key is rejected at init" {
+    const ikp = try testKeypair(18);
+    try testing.expectError(error.InvalidMessage, HandshakeState.init(.initiator, &ikp.priv, null, null));
 }
 
 test "psk mismatch fails response decryption" {

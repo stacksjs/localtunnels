@@ -58,6 +58,9 @@ pub const Session = struct {
     pub fn deinit(self: *Session) void {
         std.crypto.secureZero(u8, &self.send_key);
         std.crypto.secureZero(u8, &self.recv_key);
+        // Fail closed if a stale handle keeps calling in: exhaust the send
+        // counter so encrypt errors instead of sealing with a zeroed key.
+        self.send_counter.store(std.math.maxInt(u64), .monotonic);
     }
 
     /// Messages sent so far (== the next counter to be used).
@@ -228,6 +231,13 @@ test "counters increment across packets" {
         _ = try s.b.decrypt(wire[0..n], &plain);
     }
     try testing.expectEqual(@as(u64, 100), s.a.sendCount());
+}
+
+test "deinit poisons the session against further encryption" {
+    var s = testSessions();
+    s.a.deinit();
+    var wire: [encryptedLen(4)]u8 = undefined;
+    try testing.expectError(error.CounterExhausted, s.a.encrypt("ping", &wire));
 }
 
 test "concurrent encrypt never reuses a nonce and everything decrypts" {
