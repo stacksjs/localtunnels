@@ -121,6 +121,18 @@ export interface TunnelOptions {
    * If not specified, derived from host by stripping 'api.' prefix.
    */
   domain?: string
+
+  /**
+   * Skip TLS certificate verification when connecting to the tunnel server.
+   *
+   * Normally the client verifies the server's certificate against the tunnel
+   * hostname — even on the DNS-bypass path, where it connects to a resolved IP
+   * but validates the cert via SNI against the real host. Set this only when
+   * the server presents a self-signed or mismatched certificate you trust;
+   * it disables that protection and exposes the connection to MITM.
+   * @default false
+   */
+  insecure?: boolean
 }
 
 /**

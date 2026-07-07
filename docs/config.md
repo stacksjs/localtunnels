@@ -108,7 +108,10 @@ interface TunnelOptions {
 | `--server <url>` | Tunnel server URL | `localtunnel.dev` |
 | `--verbose` | Enable verbose logging | `false` |
 | `--secure` | Use secure WebSocket (wss://) | `false` |
+| `--insecure` | Skip TLS certificate verification (self-signed/mismatched certs only) | `false` |
 | `--no-manage-hosts` | Disable auto DNS resolution | `false` |
+
+When the system resolver can't reach the server and `manageHosts` resolves the IP directly, the client still verifies the server's certificate against the tunnel hostname (via SNI) rather than trusting the connection blindly. Pass `--insecure` only if your server presents a self-signed or mismatched certificate you trust — it disables that check and exposes the connection to MITM.
 
 ### `localtunnels server`
 

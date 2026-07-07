@@ -143,6 +143,7 @@ export class TunnelServer extends TypedEventEmitter<TunnelServerEvents> {
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
       manageHosts: false,
+      insecure: options.insecure || false,
       domain: options.domain || (host.startsWith('api.') ? host.slice(4) : host),
       ...(options.ssl ? { ssl: options.ssl } : {}),
     }
@@ -807,6 +808,7 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
       maxReconnectAttempts: options.maxReconnectAttempts || 10,
       apiKey: options.apiKey || '',
       manageHosts: options.manageHosts !== false,
+      insecure: options.insecure || false,
       domain: options.domain || (host.startsWith('api.') ? host.slice(4) : host),
     }
     // Cache the local URL prefix to avoid building it on every request
@@ -873,11 +875,22 @@ export class TunnelClient extends TypedEventEmitter<TunnelClientEvents> {
 
       debugLog('client', `Connecting to WebSocket server at ${url}`, this.options.verbose)
 
-      // When connecting to an IP directly, set the Host header and disable strict TLS
-      // so the TLS handshake uses the right SNI but doesn't reject the IP-based cert
-      const wsOptions = this.resolvedIp
-        ? { headers: { Host: this.options.host }, tls: { rejectUnauthorized: false } }
-        : undefined
+      // When bypassing DNS we connect to a raw IP, so the default TLS check
+      // (cert must match the connection host) would reject a valid cert for
+      // the domain. Instead of turning verification off, pin SNI + the Host
+      // header to the real hostname: the handshake still validates the cert
+      // against the domain, just over an IP socket. `insecure` restores the
+      // old skip-verification behavior for self-signed / mismatched certs.
+      let wsOptions: { headers?: Record<string, string>, tls?: Record<string, unknown> } | undefined
+      if (this.resolvedIp) {
+        wsOptions = { headers: { Host: this.options.host } }
+        wsOptions.tls = this.options.insecure
+          ? { rejectUnauthorized: false }
+          : { serverName: this.options.host, rejectUnauthorized: true }
+      }
+      else if (this.options.insecure && this.options.secure) {
+        wsOptions = { tls: { rejectUnauthorized: false } }
+      }
 
       this.ws = new WebSocket(url, wsOptions as any)
 

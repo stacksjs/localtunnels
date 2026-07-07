@@ -15,6 +15,7 @@ interface TunnelOptions {
   server?: string
   verbose?: boolean
   secure?: boolean
+  insecure?: boolean
   manageHosts?: boolean
 }
 
@@ -34,6 +35,7 @@ interface DeployOptions {
   serverType?: string
   location?: string
   keyName?: string
+  sshCidr?: string
   enableSsl?: boolean
   porkbunApiKey?: string
   porkbunSecretKey?: string
@@ -60,6 +62,7 @@ cli
   .option('--server <server>', 'Tunnel server URL', { default: DEFAULT_SERVER })
   .option('--verbose', 'Enable verbose logging')
   .option('--secure', 'Use secure WebSocket (wss://)')
+  .option('--insecure', 'Skip TLS certificate verification (only for self-signed/mismatched server certs)')
   .option('--no-manage-hosts', 'Disable automatic /etc/hosts management')
   .action(async (options: TunnelOptions) => {
     const localPort = Number.parseInt(options.port)
@@ -96,6 +99,7 @@ cli
         localHost: options.host || 'localhost',
         subdomain,
         manageHosts: options.manageHosts,
+        insecure: options.insecure,
       })
 
       // Handle process signals for graceful shutdown
@@ -250,6 +254,7 @@ cli
   .option('--server-type <type>', 'Hetzner server type', { default: 'cx23' })
   .option('--location <location>', 'Hetzner location', { default: 'fsn1' })
   .option('--key-name <name>', 'EC2 key pair name for SSH access')
+  .option('--ssh-cidr <cidr>', 'CIDR allowed to reach SSH, e.g. 203.0.113.4/32 (AWS; default open, or set LT_SSH_CIDR)')
   .option('--enable-ssl', 'Enable SSL (HTTPS/WSS) via Caddy reverse proxy')
   .option('--porkbun-api-key <key>', 'Porkbun API key for DNS-01 TLS challenge (or set PORKBUN_API_KEY env)')
   .option('--porkbun-secret-key <key>', 'Porkbun secret key for DNS-01 TLS challenge (or set PORKBUN_SECRET_KEY env)')
@@ -304,6 +309,7 @@ cli
           domain: options.domain,
           instanceType: options.instanceType,
           keyName: options.keyName,
+          sshCidr: options.sshCidr,
           enableSsl: options.enableSsl,
           porkbunApiKey: options.porkbunApiKey,
           porkbunSecretKey: options.porkbunSecretKey,
