@@ -8,6 +8,7 @@
 const std = @import("std");
 const kdf = @import("kdf.zig");
 const keys = @import("keys.zig");
+const sync = @import("sync.zig");
 const tai64n = @import("tai64n.zig");
 
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
@@ -64,9 +65,13 @@ fn mac1Key(out: *[32]u8, static_pub: *const [32]u8) void {
     kdf.hash(out, &.{ label_mac1, static_pub });
 }
 
+/// Thread-safe: every public method serializes on an internal mutex, so the
+/// state machine cannot be corrupted by concurrent FFI calls. `deinit` must
+/// not race in-flight operations (the `ltvpn_hs_free` contract).
 pub const HandshakeState = struct {
     role: Role,
     state: State = .fresh,
+    mutex: sync.Mutex = .{},
 
     static_priv: [32]u8,
     static_pub: [32]u8,
@@ -114,6 +119,8 @@ pub const HandshakeState = struct {
 
     /// Wipe secret material.
     pub fn deinit(self: *HandshakeState) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         std.crypto.secureZero(u8, &self.static_priv);
         std.crypto.secureZero(u8, &self.eph_priv);
         std.crypto.secureZero(u8, &self.psk);
@@ -126,18 +133,25 @@ pub const HandshakeState = struct {
 
     /// Initiator → responder, first message (type 1).
     pub fn createInitiation(self: *HandshakeState, sender_index: u32, unix_sec: u64, nano: u32, out: *[initiation_len]u8) Error!void {
-        if (self.role != .initiator or self.state != .fresh) return error.WrongState;
+        self.mutex.lock();
+        defer self.mutex.unlock();
         var eph_priv: [32]u8 = undefined;
+        defer std.crypto.secureZero(u8, &eph_priv);
         var eph_pub: [32]u8 = undefined;
         try keys.generate(&eph_priv, &eph_pub);
-        try self.createInitiationWithEphemeral(sender_index, &eph_priv, unix_sec, nano, out);
-        std.crypto.secureZero(u8, &eph_priv);
+        try self.initiationImpl(sender_index, &eph_priv, unix_sec, nano, out);
     }
 
     /// As `createInitiation`, but with a caller-supplied ephemeral key. For
     /// deterministic test vectors only — production code must use a fresh
     /// random ephemeral via `createInitiation`.
     pub fn createInitiationWithEphemeral(self: *HandshakeState, sender_index: u32, eph_priv: *const [32]u8, unix_sec: u64, nano: u32, out: *[initiation_len]u8) Error!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.initiationImpl(sender_index, eph_priv, unix_sec, nano, out);
+    }
+
+    fn initiationImpl(self: *HandshakeState, sender_index: u32, eph_priv: *const [32]u8, unix_sec: u64, nano: u32, out: *[initiation_len]u8) Error!void {
         if (self.role != .initiator or self.state != .fresh) return error.WrongState;
         self.local_index = sender_index;
 
@@ -155,6 +169,7 @@ pub const HandshakeState = struct {
 
         // Encrypted static
         var k: [32]u8 = undefined;
+        defer std.crypto.secureZero(u8, &k);
         var dh1 = keys.dh(&self.eph_priv, &self.peer_static_pub) catch return error.WeakKey;
         kdf.kdf2(&self.c, &k, &self.c, &dh1);
         std.crypto.secureZero(u8, &dh1);
@@ -169,7 +184,6 @@ pub const HandshakeState = struct {
         tai64n.encode(&ts, unix_sec, nano);
         aeadSeal(out[88..116], &k, 0, &ts, &self.h);
         self.mixHash(out[88..116]);
-        std.crypto.secureZero(u8, &k);
 
         // mac1 (keyed by receiver's static public key), mac2 = 0 (no cookie)
         var m1key: [32]u8 = undefined;
@@ -184,6 +198,8 @@ pub const HandshakeState = struct {
     /// (exposed as `peer_static_pub` — the caller MUST verify it is an
     /// authorized peer) and timestamp (`peer_timestamp`).
     pub fn consumeInitiation(self: *HandshakeState, msg: *const [initiation_len]u8) Error!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.role != .responder or self.state != .fresh) return error.WrongState;
         if (msg[0] != message_type_initiation or msg[1] != 0 or msg[2] != 0 or msg[3] != 0) {
             return error.InvalidMessage;
@@ -241,17 +257,24 @@ pub const HandshakeState = struct {
 
     /// Responder → initiator, second message (type 2).
     pub fn createResponse(self: *HandshakeState, sender_index: u32, out: *[response_len]u8) Error!void {
-        if (self.role != .responder or self.state != .consumed_initiation) return error.WrongState;
+        self.mutex.lock();
+        defer self.mutex.unlock();
         var eph_priv: [32]u8 = undefined;
+        defer std.crypto.secureZero(u8, &eph_priv);
         var eph_pub: [32]u8 = undefined;
         try keys.generate(&eph_priv, &eph_pub);
-        try self.createResponseWithEphemeral(sender_index, &eph_priv, out);
-        std.crypto.secureZero(u8, &eph_priv);
+        try self.responseImpl(sender_index, &eph_priv, out);
     }
 
     /// As `createResponse`, but with a caller-supplied ephemeral key. For
     /// deterministic test vectors only.
     pub fn createResponseWithEphemeral(self: *HandshakeState, sender_index: u32, eph_priv: *const [32]u8, out: *[response_len]u8) Error!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.responseImpl(sender_index, eph_priv, out);
+    }
+
+    fn responseImpl(self: *HandshakeState, sender_index: u32, eph_priv: *const [32]u8, out: *[response_len]u8) Error!void {
         if (self.role != .responder or self.state != .consumed_initiation) return error.WrongState;
         self.local_index = sender_index;
 
@@ -279,6 +302,7 @@ pub const HandshakeState = struct {
         // psk2
         var tau: [32]u8 = undefined;
         var k: [32]u8 = undefined;
+        defer std.crypto.secureZero(u8, &k);
         kdf.kdf3(&self.c, &tau, &k, &self.c, &self.psk);
         self.mixHash(&tau);
         std.crypto.secureZero(u8, &tau);
@@ -286,7 +310,6 @@ pub const HandshakeState = struct {
         // Encrypted empty payload
         aeadSeal(out[44..60], &k, 0, &.{}, &self.h);
         self.mixHash(out[44..60]);
-        std.crypto.secureZero(u8, &k);
 
         // mac1 keyed by the initiator's static public key
         var m1key: [32]u8 = undefined;
@@ -299,6 +322,8 @@ pub const HandshakeState = struct {
 
     /// Initiator consumes the response (type 2).
     pub fn consumeResponse(self: *HandshakeState, msg: *const [response_len]u8) Error!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.role != .initiator or self.state != .created_initiation) return error.WrongState;
         if (msg[0] != message_type_response or msg[1] != 0 or msg[2] != 0 or msg[3] != 0) {
             return error.InvalidMessage;
@@ -354,6 +379,8 @@ pub const HandshakeState = struct {
     /// Derive transport keys after the handshake completes.
     /// (T_send, T_recv) = KDF2(C, ε), swapped for the responder.
     pub fn deriveTransportKeys(self: *HandshakeState, out_send: *[32]u8, out_recv: *[32]u8) Error!void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
         const done = (self.role == .initiator and self.state == .consumed_response) or
             (self.role == .responder and self.state == .created_response);
         if (!done) return error.WrongState;

@@ -3,6 +3,7 @@
 const std = @import("std");
 const noise = @import("noise.zig");
 const replay = @import("replay.zig");
+const sync = @import("sync.zig");
 
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 
@@ -30,6 +31,10 @@ pub fn encryptedLen(plain_len: usize) usize {
     return header_len + paddedLen(plain_len) + tag_len;
 }
 
+/// Thread-safe: concurrent `encrypt` calls reserve counters atomically, and
+/// concurrent `decrypt` calls serialize replay-window access on an internal
+/// mutex. `deinit` must not race in-flight operations (the FFI contract for
+/// `ltvpn_session_free` already requires this).
 pub const Session = struct {
     send_key: [32]u8,
     recv_key: [32]u8,
@@ -37,8 +42,9 @@ pub const Session = struct {
     local_index: u32,
     /// Index we put in messages addressed to the peer.
     peer_index: u32,
-    send_counter: u64 = 0,
+    send_counter: std.atomic.Value(u64) = .init(0),
     recv_window: replay.ReplayWindow = .{},
+    recv_mutex: sync.Mutex = .{},
 
     pub fn init(send_key: *const [32]u8, recv_key: *const [32]u8, local_index: u32, peer_index: u32) Session {
         return .{
@@ -54,15 +60,26 @@ pub const Session = struct {
         std.crypto.secureZero(u8, &self.recv_key);
     }
 
+    /// Messages sent so far (== the next counter to be used).
+    pub fn sendCount(self: *const Session) u64 {
+        return self.send_counter.load(.monotonic);
+    }
+
     /// Encrypt one packet (empty plaintext = keepalive). Returns bytes written.
     pub fn encrypt(self: *Session, plaintext: []const u8, out: []u8) Error!usize {
         if (plaintext.len > max_plaintext_len) return error.PayloadTooLarge;
         const total = encryptedLen(plaintext.len);
         if (out.len < total) return error.BufferTooSmall;
-        if (self.send_counter >= replay.reject_after_messages) return error.CounterExhausted;
 
-        const counter = self.send_counter;
-        self.send_counter += 1;
+        // Atomically reserve a nonce. Re-check after the reservation so a
+        // counter at the limit is never used, even under contention. (The
+        // few counters burned by losing racers are irrelevant next to the
+        // 2^64 - 2^13 - 1 limit.)
+        if (self.send_counter.load(.monotonic) >= replay.reject_after_messages) {
+            return error.CounterExhausted;
+        }
+        const counter = self.send_counter.fetchAdd(1, .monotonic);
+        if (counter >= replay.reject_after_messages) return error.CounterExhausted;
 
         @memset(out[0..4], 0);
         out[0] = noise.message_type_data;
@@ -101,7 +118,14 @@ pub const Session = struct {
             return error.WrongReceiver;
         }
         const counter = std.mem.readInt(u64, msg[8..16], .little);
-        if (!self.recv_window.isFresh(counter)) return error.Replay;
+        // Cheap pre-filter so obvious replays skip the AEAD work. The window
+        // is shared mutable state, so reads take the mutex too; the post-auth
+        // update below is the authoritative check.
+        {
+            self.recv_mutex.lock();
+            defer self.recv_mutex.unlock();
+            if (!self.recv_window.isFresh(counter)) return error.Replay;
+        }
 
         const plen = msg.len - header_len - tag_len;
         if (plen % 16 != 0 or plen > max_plaintext_len) return error.InvalidMessage;
@@ -120,7 +144,10 @@ pub const Session = struct {
             self.recv_key,
         ) catch return error.DecryptFailed;
 
-        // Only mark the counter after successful authentication.
+        // Only mark the counter after successful authentication. update()
+        // re-checks freshness, so a racing duplicate loses here.
+        self.recv_mutex.lock();
+        defer self.recv_mutex.unlock();
         if (!self.recv_window.update(counter)) return error.Replay;
         return plen;
     }
@@ -200,5 +227,76 @@ test "counters increment across packets" {
         const n = try s.a.encrypt("x", &wire);
         _ = try s.b.decrypt(wire[0..n], &plain);
     }
-    try testing.expectEqual(@as(u64, 100), s.a.send_counter);
+    try testing.expectEqual(@as(u64, 100), s.a.sendCount());
+}
+
+test "concurrent encrypt never reuses a nonce and everything decrypts" {
+    var s = testSessions();
+    const threads = 4;
+    const per_thread = 200;
+
+    var wires: [threads][per_thread][encryptedLen(8)]u8 = undefined;
+    const worker = struct {
+        fn run(sess: *Session, slot: *[per_thread][encryptedLen(8)]u8) void {
+            for (slot) |*wire| {
+                _ = sess.encrypt("payload!", wire) catch unreachable;
+            }
+        }
+    };
+
+    var handles: [threads]std.Thread = undefined;
+    for (&handles, 0..) |*h, i| {
+        h.* = try std.Thread.spawn(.{}, worker.run, .{ &s.a, &wires[i] });
+    }
+    for (&handles) |*h| h.join();
+
+    try testing.expectEqual(@as(u64, threads * per_thread), s.a.sendCount());
+
+    // Every packet carries a unique counter and authenticates.
+    var seen = std.AutoHashMap(u64, void).init(testing.allocator);
+    defer seen.deinit();
+    var plain: [64]u8 = undefined;
+    for (&wires) |*slot| {
+        for (slot) |*wire| {
+            const counter = std.mem.readInt(u64, wire[8..16], .little);
+            try testing.expect(!seen.contains(counter));
+            try seen.put(counter, {});
+            _ = try s.b.decrypt(wire, &plain);
+        }
+    }
+}
+
+test "concurrent decrypt accepts each packet exactly once" {
+    var s = testSessions();
+    const total = 400;
+
+    var wires: [total][encryptedLen(4)]u8 = undefined;
+    for (&wires) |*wire| _ = try s.a.encrypt("ping", wire);
+
+    // Two threads race over the SAME packet list; across both, each packet
+    // must decrypt exactly once and replay exactly once.
+    var accepted = std.atomic.Value(u64).init(0);
+    var replayed = std.atomic.Value(u64).init(0);
+    const worker = struct {
+        fn run(sess: *Session, list: *[total][encryptedLen(4)]u8, ok: *std.atomic.Value(u64), dup: *std.atomic.Value(u64)) void {
+            var plain: [64]u8 = undefined;
+            for (list) |*wire| {
+                if (sess.decrypt(wire, &plain)) |_| {
+                    _ = ok.fetchAdd(1, .monotonic);
+                } else |err| {
+                    std.debug.assert(err == error.Replay);
+                    _ = dup.fetchAdd(1, .monotonic);
+                }
+            }
+        }
+    };
+
+    var handles: [2]std.Thread = undefined;
+    for (&handles) |*h| {
+        h.* = try std.Thread.spawn(.{}, worker.run, .{ &s.b, &wires, &accepted, &replayed });
+    }
+    for (&handles) |*h| h.join();
+
+    try testing.expectEqual(@as(u64, total), accepted.load(.monotonic));
+    try testing.expectEqual(@as(u64, total), replayed.load(.monotonic));
 }
