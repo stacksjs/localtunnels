@@ -19,7 +19,7 @@ export class VpnUnavailableError extends Error {
 }
 
 /** ABI version this TypeScript layer expects from the native library. */
-export const EXPECTED_ABI_VERSION = 3
+export const EXPECTED_ABI_VERSION = 4
 
 const LIB_BASENAME = `libltvpn.${suffix}`
 
@@ -84,6 +84,7 @@ const symbols = {
     returns: FFIType.ptr,
   },
   ltvpn_session_free: { args: [FFIType.ptr], returns: FFIType.void },
+  ltvpn_session_send_counter: { args: [FFIType.ptr], returns: FFIType.u64 },
   ltvpn_encrypted_len: { args: [FFIType.u64], returns: FFIType.u64 },
   ltvpn_session_encrypt: {
     args: [FFIType.ptr, FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.u64],
@@ -123,6 +124,7 @@ export interface LtvpnSymbols {
   ltvpn_session_from_handshake: (hs: PtrArg) => Pointer | null
   ltvpn_session_new: (sendKey: PtrArg, recvKey: PtrArg, localIndex: number, peerIndex: number) => Pointer | null
   ltvpn_session_free: (s: PtrArg) => void
+  ltvpn_session_send_counter: (s: PtrArg) => bigint
   ltvpn_encrypted_len: (plainLen: bigint) => bigint
   ltvpn_session_encrypt: (s: PtrArg, plaintext: PtrArg, plainLen: bigint, out: PtrArg, outCap: bigint) => bigint
   ltvpn_session_decrypt: (s: PtrArg, msg: PtrArg, msgLen: bigint, out: PtrArg, outCap: bigint) => bigint
@@ -197,6 +199,7 @@ export const ERROR_NAMES: Record<number, string> = {
   [-10]: 'counter_exhausted',
   [-11]: 'out_of_memory',
   [-12]: 'entropy_unavailable',
+  [-13]: 'invalid_argument',
 }
 
 export function errorName(code: number): string {

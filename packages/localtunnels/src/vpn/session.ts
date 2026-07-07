@@ -193,6 +193,14 @@ export class Session {
     return Number(this.lib.ltvpn_forward_decrypt(this.handle(), inFd, outFd, BigInt(maxPackets)))
   }
 
+  /**
+   * Messages sent on this session so far. Initiate a rekey once this passes
+   * REKEY_AFTER_MESSAGES (2^60) per the WireGuard whitepaper.
+   */
+  sendCounter(): bigint {
+    return this.lib.ltvpn_session_send_counter(this.handle())
+  }
+
   free(): void {
     if (this.ptr !== null) {
       this.lib.ltvpn_session_free(this.ptr)
