@@ -30,8 +30,10 @@ pub fn macErrno() i32 {
     return @intCast(__error().*);
 }
 
-/// Largest IP packet we move in one read/write (jumbo-safe headroom).
-pub const max_packet = 2048;
+/// Largest IP packet we move in one read/write — bound to the transport
+/// layer's per-packet maximum so anything the tunnel can carry fits through
+/// the TUN layer too (they drifted apart at 2048 vs 4096 before).
+pub const max_packet = @import("transport.zig").max_plaintext_len;
 
 pub const Error = error{
     Unsupported,
@@ -208,14 +210,17 @@ pub fn is_framed_tun(fd: c_int) bool {
 
 /// Read one IP packet into `buf`. Returns bytes read, 0 if none available
 /// (non-blocking), or a negative errno. On macOS the 4-byte AF header is
-/// stripped so `buf` holds a bare IP packet. EINTR is retried.
+/// stripped so `buf` holds a bare IP packet, and a packet larger than `cap`
+/// is consumed and reported as -EMSGSIZE rather than silently truncated
+/// into a corrupt prefix. EINTR is retried.
 pub fn read_packet(fd: c_int, buf: [*]u8, cap: usize) isize {
+    // A zero-capacity read must not consume (and thereby drop) a packet.
+    if (cap == 0) return 0;
     switch (builtin.os.tag) {
         .macos => {
             var scratch: [max_packet + 4]u8 = undefined;
-            const want = @min(cap + 4, scratch.len);
             while (true) {
-                const n = read(fd, &scratch, want);
+                const n = read(fd, &scratch, scratch.len);
                 if (n < 0) {
                     const e = macErrno();
                     if (e == macos.EINTR) continue;
@@ -223,9 +228,9 @@ pub fn read_packet(fd: c_int, buf: [*]u8, cap: usize) isize {
                 }
                 if (n <= 4) return 0;
                 const payload: usize = @intCast(n - 4);
-                const copy = @min(payload, cap);
-                @memcpy(buf[0..copy], scratch[4 .. 4 + copy]);
-                return @intCast(copy);
+                if (payload > cap) return -macos.EMSGSIZE;
+                @memcpy(buf[0..payload], scratch[4 .. 4 + payload]);
+                return @intCast(payload);
             }
         },
         .linux => {

@@ -25,8 +25,11 @@ export interface TunDeviceEvents {
   error: (error: Error) => void
 }
 
-/** Largest IP packet the native layer will move in one read/write. */
-const MAX_PACKET = 2048
+/**
+ * Largest IP packet the native layer will move in one read/write. Mirrors
+ * `tun.max_packet` in the Zig core (== `transport.max_plaintext_len`).
+ */
+const MAX_PACKET = 4096
 
 /**
  * A layer-3 TUN device. Opening one requires root; without privileges
