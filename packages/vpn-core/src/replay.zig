@@ -87,3 +87,15 @@ test "rejects counters past REJECT_AFTER_MESSAGES" {
     try std.testing.expect(!w.update(reject_after_messages));
     try std.testing.expect(!w.update(std.math.maxInt(u64)));
 }
+
+test "window arithmetic is exact at the reject_after_messages boundary" {
+    var w = ReplayWindow{};
+    const top = reject_after_messages - 1; // largest acceptable counter
+    try std.testing.expect(w.update(top));
+    try std.testing.expect(!w.update(top));
+    // The full window below the top still works, one past it does not.
+    try std.testing.expect(w.update(top - window_edge));
+    try std.testing.expect(!w.update(top - window_edge - 1));
+}
+
+const window_edge = ReplayWindow.window_size;

@@ -7,12 +7,24 @@ pub const X25519 = std.crypto.dh.X25519;
 pub const KeyError = error{ WeakKey, EntropyUnavailable };
 
 pub fn generate(out_priv: *[32]u8, out_pub: *[32]u8) KeyError!void {
-    var seed: [32]u8 = undefined;
-    rand.bytes(&seed) catch return error.EntropyUnavailable;
-    const kp = X25519.KeyPair.generateDeterministic(seed) catch return error.WeakKey;
-    std.crypto.secureZero(u8, &seed);
-    out_priv.* = kp.secret_key;
-    out_pub.* = kp.public_key;
+    // A weak seed (public key derivation lands on the identity) is a ~2^-250
+    // accident of the draw, not a persistent condition — retry with fresh
+    // entropy like other WireGuard implementations instead of failing the
+    // caller. The bound only guards against a broken RNG looping forever.
+    var attempts: u8 = 0;
+    while (true) : (attempts += 1) {
+        var seed: [32]u8 = undefined;
+        defer std.crypto.secureZero(u8, &seed);
+        rand.bytes(&seed) catch return error.EntropyUnavailable;
+        var kp = X25519.KeyPair.generateDeterministic(seed) catch {
+            if (attempts >= 7) return error.WeakKey;
+            continue;
+        };
+        out_priv.* = kp.secret_key;
+        out_pub.* = kp.public_key;
+        std.crypto.secureZero(u8, &kp.secret_key);
+        return;
+    }
 }
 
 pub fn publicFromPrivate(priv: *const [32]u8, out_pub: *[32]u8) KeyError!void {

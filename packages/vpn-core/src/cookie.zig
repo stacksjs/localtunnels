@@ -5,12 +5,14 @@
 //! source address before committing work.
 const std = @import("std");
 const kdf = @import("kdf.zig");
+const noise = @import("noise.zig");
 const rand = @import("rand.zig");
 
 const XChaCha20Poly1305 = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 
-pub const label_cookie = "cookie--";
-pub const message_type_cookie_reply: u8 = 3;
+// Single source of truth for protocol constants shared with the handshake.
+pub const label_cookie = noise.label_cookie;
+pub const message_type_cookie_reply = noise.message_type_cookie_reply;
 
 pub const cookie_reply_len = 64; // type(1)+res(3) | receiver(4) | nonce(24) | enc_cookie(16+16)
 
