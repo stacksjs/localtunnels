@@ -33,17 +33,14 @@
   ],
   "exports": {
     ".": {
-      "bun": "./src/index.ts",
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
     },
     "./cloud": {
-      "bun": "./src/cloud/index.ts",
       "types": "./dist/src/cloud/index.d.ts",
       "import": "./dist/src/cloud/index.js"
     },
     "./vpn": {
-      "bun": "./src/vpn/index.ts",
       "types": "./dist/src/vpn/index.d.ts",
       "import": "./dist/src/vpn/index.js"
     }
@@ -58,8 +55,7 @@
     "README.md",
     "dist",
     "native/build.zig",
-    "native/src",
-    "src"
+    "native/src"
   ],
   "scripts": {
     "build": "bun build.ts",
