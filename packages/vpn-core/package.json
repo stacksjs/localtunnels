@@ -1,7 +1,7 @@
 {
   "name": "@localtunnels/vpn-core",
   "type": "module",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "description": "WireGuard v1 protocol core for localtunnels (libltvpn): Noise_IKpsk2 handshake, ChaCha20-Poly1305 transport, replay protection, and TUN I/O in dependency-free Zig, consumed from Bun over bun:ffi.",
   "author": "Chris Breuer <chris@stacksjs.com>",
