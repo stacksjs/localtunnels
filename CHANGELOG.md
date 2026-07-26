@@ -1,5 +1,19 @@
 # Changelog
 
+[Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.10...v0.2.11)
+
+## 🐛 Bug Fixes
+
+- **pkg**: drop sideEffects:false, it emits a broken dist ([3d70a64](https://github.com/stacksjs/localtunnels/commit/3d70a64)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 🧹 Chores
+
+- release v0.2.11 ([2bdc13f](https://github.com/stacksjs/localtunnels/commit/2bdc13f)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## Contributors
+
+- _Chris <chrisbreuer93@gmail.com>_
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.9...v0.2.10)
 
 ## 🐛 Bug Fixes
