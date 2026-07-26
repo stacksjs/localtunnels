@@ -33,6 +33,7 @@
     "fresh": "bunx rimraf node_modules/ bun.lock && bun i",
     "changelog": "bunx changelogen --output CHANGELOG.md",
     "release": "bun --bun run changelog && bunx --bun bumpp package.json packages/*/package.json --all",
+    "release:patch": "bunx --bun bumpx patch --recursive --commit --tag --push --yes",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit --project tsconfig.json",
     "dev:docs": "bun --bun bunpress dev docs",
