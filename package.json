@@ -1,7 +1,7 @@
 {
   "name": "localtunnels-monorepo",
   "type": "module",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "description": "A simple and smart tunneling solution. Expose your localhost to the world.",
   "author": "Chris Breuer <chris@stacksjs.com>",

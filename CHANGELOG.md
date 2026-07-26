@@ -1,5 +1,31 @@
 # Changelog
 
+[Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.9...v0.2.10)
+
+## 🐛 Bug Fixes
+
+- **test**: scope the test run to this repo's packages ([7fe130a](https://github.com/stacksjs/localtunnels/commit/7fe130a)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **pkg**: drop bun→src export condition, stop shipping src ([abf4fa8](https://github.com/stacksjs/localtunnels/commit/abf4fa8)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 📚 Documentation
+
+- link the community as stacksjs.com/discord ([b6de7f7](https://github.com/stacksjs/localtunnels/commit/b6de7f7)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 🧹 Chores
+
+- release v0.2.10 ([d0fe6a9](https://github.com/stacksjs/localtunnels/commit/d0fe6a9)) _(by Chris <chrisbreuer93@gmail.com>)_
+- release v0.2.9 ([2c899f5](https://github.com/stacksjs/localtunnels/commit/2c899f5)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **release**: add a non-interactive release:patch script ([b76c3c3](https://github.com/stacksjs/localtunnels/commit/b76c3c3)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **pkg**: add sideEffects:false to localtunnels (publint) ([d3567c2](https://github.com/stacksjs/localtunnels/commit/d3567c2)) _(by Chris <chrisbreuer93@gmail.com>)_
+- release v0.2.8 ([849a4ec](https://github.com/stacksjs/localtunnels/commit/849a4ec)) _(by Chris <chrisbreuer93@gmail.com>)_
+- upgrade to TypeScript 7 ([f649f10](https://github.com/stacksjs/localtunnels/commit/f649f10)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **deps**: refresh bun.lock to pick up pickier 0.1.37 ([b8e7814](https://github.com/stacksjs/localtunnels/commit/b8e7814)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+
+## Contributors
+
+- _Chris <chrisbreuer93@gmail.com>_
+- _glennmichael123 <gtorregosa@gmail.com>_
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.8...v0.2.9)
 
 ## 🐛 Bug Fixes
