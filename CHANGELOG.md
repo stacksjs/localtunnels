@@ -1,5 +1,31 @@
 # Changelog
 
+[Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.8...v0.2.9)
+
+## 🐛 Bug Fixes
+
+- **pkg**: drop bun→src export condition, stop shipping src ([bee5808](https://github.com/stacksjs/localtunnels/commit/bee5808)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 📚 Documentation
+
+- link the community as stacksjs.com/discord ([b22163a](https://github.com/stacksjs/localtunnels/commit/b22163a)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 🧹 Chores
+
+- release v0.2.9 ([9c4e83f](https://github.com/stacksjs/localtunnels/commit/9c4e83f)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **release**: add a non-interactive release:patch script ([474cf2f](https://github.com/stacksjs/localtunnels/commit/474cf2f)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **deps**: bump @stacksjs/ts-cloud to ^0.7.26 ([cff1b35](https://github.com/stacksjs/localtunnels/commit/cff1b35)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **pkg**: add sideEffects:false to localtunnels (publint) ([957933c](https://github.com/stacksjs/localtunnels/commit/957933c)) _(by Chris <chrisbreuer93@gmail.com>)_
+- upgrade to TypeScript 7 ([bed975a](https://github.com/stacksjs/localtunnels/commit/bed975a)) _(by Chris <chrisbreuer93@gmail.com>)_
+- **deps**: refresh bun.lock to pick up pickier 0.1.37 ([7d43438](https://github.com/stacksjs/localtunnels/commit/7d43438)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+- release v0.2.8 ([462fff0](https://github.com/stacksjs/localtunnels/commit/462fff0)) _(by Chris <chrisbreuer93@gmail.com>)_
+- upgrade to TypeScript 7 ([5e4ba88](https://github.com/stacksjs/localtunnels/commit/5e4ba88)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## Contributors
+
+- _Chris <chrisbreuer93@gmail.com>_
+- _glennmichael123 <gtorregosa@gmail.com>_
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.7...v0.2.8)
 
 ## 💥 Breaking Changes
