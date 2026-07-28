@@ -25,6 +25,9 @@ await Bun.build({
   format: 'esm',
   target: 'bun',
   minify: true,
+  define: {
+    'process.env.NODE_ENV': '"production"',
+  },
   splitting: true,
   external: ['ts-cloud', '@stacksjs/ts-cloud', '@stacksjs/ts-cloud/*', '@stacksjs/ts-analytics'],
   // root: '.' emits declarations at dist/src/... and dist/bin/... to match
