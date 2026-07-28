@@ -1,5 +1,23 @@
 # Changelog
 
+[Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.11...v0.2.12)
+
+## ⚡ Performance Improvements
+
+- compile tunnel servers for production ([9fab579](https://github.com/stacksjs/localtunnels/commit/9fab579)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 📦 Build System
+
+- use Bun production mode ([a2ab9b5](https://github.com/stacksjs/localtunnels/commit/a2ab9b5)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## 🧹 Chores
+
+- release v0.2.12 ([5c6e1aa](https://github.com/stacksjs/localtunnels/commit/5c6e1aa)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## Contributors
+
+- _Chris <chrisbreuer93@gmail.com>_
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.10...v0.2.11)
 
 ## 🐛 Bug Fixes
