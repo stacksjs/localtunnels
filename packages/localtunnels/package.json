@@ -64,11 +64,11 @@
   },
   "dependencies": {
     "@stacksjs/ts-analytics": "github:stacksjs/ts-analytics",
-    "bunfig": "^0.15.6"
+    "bunfig": "^0.15.17"
   },
   "devDependencies": {
-    "@stacksjs/clapp": "^0.2.0",
-    "@stacksjs/ts-cloud": "^0.7.7",
-    "better-dx": "^0.2.15"
+    "@stacksjs/clapp": "^0.2.12",
+    "@stacksjs/ts-cloud": "^0.7.108",
+    "better-dx": "^0.2.22"
   }
 }
