@@ -61,11 +61,11 @@
     "format:fix": "bunx --bun pickier . --format --write"
   },
   "devDependencies": {
-    "@stacksjs/bunpress": "^0.1.1",
-    "@stacksjs/ts-cloud": "^0.7.7",
-    "better-dx": "^0.2.15",
+    "@stacksjs/bunpress": "^0.1.21",
+    "@stacksjs/ts-cloud": "^0.7.108",
+    "better-dx": "^0.2.22",
     "mitata": "^1.0.34",
-    "pickier": "^0.1.37"
+    "pickier": "^0.1.49"
   },
   "git-hooks": {
     "pre-commit": {
