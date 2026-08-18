@@ -6,7 +6,16 @@ pub fn build(b: *std.Build) void {
     // preferred mode only applies when `--release` is passed, so a bare
     // `zig build` (what `bun run build:native` runs) would ship a Debug
     // crypto hot path. -Doptimize=... still overrides for debugging.
-    const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default: ReleaseFast)") orelse .ReleaseFast;
+    //
+    // Spelled as a qualified reference rather than the `.ReleaseFast` enum
+    // literal because CI tracks zig master, which renamed these fields to
+    // debug/safe/fast/small (0.17.0-dev.1786). `ReleaseFast` survives there as
+    // a deprecated `pub const ReleaseFast: @This() = .fast`, so a qualified
+    // lookup resolves on both sides of the rename while a literal resolves on
+    // neither: `.fast` is not a field before it and `.ReleaseFast` is not a
+    // field after it. Switch to `.fast` once the floor is past the rename --
+    // upstream keeps the alias until after 0.18.0.
+    const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default: ReleaseFast)") orelse std.builtin.OptimizeMode.ReleaseFast;
 
     // Link libc on macOS (getentropy + utun via libSystem) and Windows
     // (BCryptGenRandom). On Linux everything goes through raw syscalls
