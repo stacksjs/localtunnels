@@ -63,11 +63,11 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@stacksjs/ts-analytics": "github:stacksjs/ts-analytics",
     "bunfig": "^0.15.6"
   },
   "devDependencies": {
     "@stacksjs/clapp": "^0.2.0",
+    "@stacksjs/ts-analytics": "github:stacksjs/ts-analytics",
     "@stacksjs/ts-cloud": "^0.7.7",
     "better-dx": "^0.2.15"
   }

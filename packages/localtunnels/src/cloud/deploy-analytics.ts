@@ -72,7 +72,10 @@ export async function deployAnalytics(config: AnalyticsDeployConfig = {}): Promi
   catch {
     throw new Error(
       '@stacksjs/ts-analytics package is required for analytics deployment.\n'
-      + 'Install it with: bun add @stacksjs/ts-analytics',
+      // The git ref, not the registry copy: step 3 below bundles
+      // deploy/lambda-handler.ts straight out of this package, and the
+      // published tarball ships only bin/ and dist/.
+      + 'Install it with: bun add github:stacksjs/ts-analytics',
     )
   }
 
@@ -153,7 +156,8 @@ export async function deployAnalytics(config: AnalyticsDeployConfig = {}): Promi
   if (!await handlerFile.exists()) {
     throw new Error(
       `ts-analytics lambda-handler not found at ${handlerPath}.\n`
-      + 'Ensure @stacksjs/ts-analytics is installed with source files.',
+      + 'Ensure @stacksjs/ts-analytics is installed from git (bun add github:stacksjs/ts-analytics) —\n'
+      + 'the published npm tarball contains only bin/ and dist/, so it has no deploy/ sources to bundle.',
     )
   }
 
