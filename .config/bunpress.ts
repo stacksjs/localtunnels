@@ -1,7 +1,7 @@
-import type { BunpressConfig } from 'bunpress'
+import type { BunPressConfig } from '@stacksjs/bunpress'
 
-const config: BunpressConfig = {
-  name: 'localtunnels',
+const config: BunPressConfig = {
+  title: 'localtunnels',
   description: 'A simple and smart tunneling alternative',
   url: 'https://localtunnel.dev',
 
