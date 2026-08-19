@@ -1,5 +1,21 @@
 # Changelog
 
+[Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.12...v0.2.13)
+
+## 🐛 Bug Fixes
+
+- **vpn**: survive zig master's Optimize field rename ([e535064](https://github.com/stacksjs/localtunnels/commit/e535064)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+- **deps**: demote @stacksjs/ts-analytics to a devDependency ([3aabc4f](https://github.com/stacksjs/localtunnels/commit/3aabc4f)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+
+## 🧹 Chores
+
+- release v0.2.13 ([2ec22e8](https://github.com/stacksjs/localtunnels/commit/2ec22e8)) _(by Chris <chrisbreuer93@gmail.com>)_
+
+## Contributors
+
+- _Chris <chrisbreuer93@gmail.com>_
+- _glennmichael123 <gtorregosa@gmail.com>_
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.11...v0.2.12)
 
 ## ⚡ Performance Improvements
