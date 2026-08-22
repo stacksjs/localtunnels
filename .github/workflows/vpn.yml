@@ -35,7 +35,7 @@ jobs:
         run: cd packages/vpn-core && zig build
 
       - name: Upload libltvpn
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: libltvpn-linux
           path: packages/vpn-core/zig-out/lib/*
