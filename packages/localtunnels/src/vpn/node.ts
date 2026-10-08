@@ -1,3 +1,4 @@
+import type { PeerRecord } from './protocol'
 import type { VpnKeyPair } from './types'
 import { TypedEventEmitter } from '../types'
 import { VpnCoordinatorClient } from './client'
@@ -28,6 +29,13 @@ export interface VpnNodeOptions {
 export interface VpnNodeEvents {
   /** Registered with the coordinator and assigned a tunnel IP. */
   ready: (info: { assignedIp: string, network: string }) => void
+  /**
+   * The coordinator's view of the other members changed. Carries the full
+   * directory, not a delta, so a listener can reconcile by replacing its copy
+   * — which is what cryptokey routing needs in order to drop routes for peers
+   * that have left.
+   */
+  peers: (peers: PeerRecord[]) => void
   /** An encrypted link to a peer is up. */
   link: (info: { peerPublicKey: string }) => void
   /** An application message arrived from a peer. */
@@ -92,6 +100,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
       authKey: this.authKey,
     })
     this.client.on('peers', records => this.onPeers(records))
+
     // A peer asked us to punch toward it: open our NAT mapping so its handshake
     // (or ours) can traverse.
     this.client.on('punch', (_from, endpoint) => this.peer.punch(endpoint.host, endpoint.port))
@@ -112,7 +121,8 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     this.peer.send(peerPublicKeyB64, data)
   }
 
-  private onPeers(records: { publicKey: string, endpoint: { host: string, port: number } }[]): void {
+  private onPeers(records: PeerRecord[]): void {
+    this.emit('peers', records)
     for (const rec of records) {
       this.peer.addPeer({ publicKey: decodeKey(rec.publicKey), endpoint: rec.endpoint })
 
@@ -125,7 +135,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     }
   }
 
-  private dial(rec: { publicKey: string, endpoint: { host: string, port: number } }): void {
+  private dial(rec: PeerRecord): void {
     const pub = decodeKey(rec.publicKey)
 
     if (this.relayPolicy === 'always') {

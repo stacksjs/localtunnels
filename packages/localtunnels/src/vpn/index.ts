@@ -96,6 +96,18 @@ export {
   TunBridge,
 } from './bridge'
 
+export {
+  tunnelGateway,
+  VpnInterface,
+} from './interface'
+
+export type {
+  StaticPeer,
+  VpnInterfaceEvents,
+  VpnInterfaceInfo,
+  VpnInterfaceOptions,
+} from './interface'
+
 export type {
   BridgePeer,
   BridgeResult,
