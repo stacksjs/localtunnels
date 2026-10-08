@@ -36,8 +36,17 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Compile Binaries
-        run: bun run compile:all && bun run zip
+      # The release zips carry the native library beside the CLI, so this job
+      # cross-compiles libltvpn for all five targets. Without Zig here the
+      # binaries ship alone, and every VPN command in a download fails with
+      # "native libltvpn not found".
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - name: Package Binaries
+        run: bun run package
 
       - name: Publish
         run: pantry publish --npm --access public
