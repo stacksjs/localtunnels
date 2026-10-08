@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /* eslint-disable node/prefer-global/process */
 import type { TunDevice as TunDeviceT } from '../src/vpn'
+import { randomBytes } from 'node:crypto'
 import { CLI } from '@stacksjs/clapp'
 import { version } from '../package.json'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
@@ -964,11 +965,22 @@ cli
   .option('-p, --port <port>', 'Port to listen on', { default: '51821' })
   .option('-h, --host <host>', 'Host to bind to', { default: '0.0.0.0' })
   .option('--network <cidr>', 'Tunnel network to assign IPs from', { default: '100.100.0.0/16' })
-  .action(async (options: { port: string, host: string, network: string }) => {
+  .option('--auth-key <key>', 'Shared secret nodes must present to join (generated if omitted)')
+  .option('--insecure-no-auth', 'Accept any node that can reach the port — localhost/testing only')
+  .action(async (options: { port: string, host: string, network: string, authKey?: string, insecureNoAuth?: boolean }) => {
     try {
       const { VpnCoordinator } = await import('../src/vpn')
       const port = Number.parseInt(options.port) || 51821
-      const coordinator = new VpnCoordinator({ port, host: options.host, network: options.network })
+
+      // Secure by default: without a key the coordinator hands a tunnel IP and
+      // the whole peer directory to anyone who can reach the port, so one is
+      // minted here unless the operator explicitly opts out.
+      const generated = !options.authKey && !options.insecureNoAuth
+      const authKey = options.insecureNoAuth
+        ? undefined
+        : options.authKey || randomBytes(32).toString('base64url')
+
+      const coordinator = new VpnCoordinator({ port, host: options.host, network: options.network, authKey })
       coordinator.start()
 
       console.log('')
@@ -976,9 +988,24 @@ cli
       console.log('')
       console.log(`  Listening:  ws://${options.host === '0.0.0.0' ? 'localhost' : options.host}:${coordinator.port}`)
       console.log(`  Network:    ${options.network}`)
+      if (authKey) {
+        console.log(`  Auth key:   ${authKey}${generated ? '  (generated)' : ''}`)
+        if (generated)
+          console.log('              Pass --auth-key to reuse a key across restarts.')
+      }
+      else {
+        console.log('  Auth:       DISABLED — any node that reaches this port can join')
+      }
       console.log('')
-      console.log('  Nodes join with:')
-      console.log(`    lt vpn up --coordinator ws://<this-host>:${coordinator.port}`)
+      console.log('  Nodes join through the VpnNode API:')
+      console.log('    new VpnNode({')
+      console.log('      keyPair,')
+      console.log(`      coordinatorUrl: 'ws://<this-host>:${coordinator.port}',`)
+      if (authKey)
+        console.log('      authKey: \'<the key above>\',')
+      console.log('    })')
+      console.log('')
+      console.log('  `lt vpn:mesh-demo` runs that flow end to end.')
       console.log('')
       console.log('  Press Ctrl+C to stop')
       console.log('')
@@ -1006,12 +1033,15 @@ cli
       const { generateKeyPair, VpnCoordinator, VpnNode } = await import('../src/vpn')
       const count = Number.parseInt(options.count) || 100
 
-      const coordinator = new VpnCoordinator({ host: '127.0.0.1' })
+      // Run the demo the way a real deployment should: an auth key the nodes
+      // have to present, so the happy path exercised here is the closed one.
+      const authKey = randomBytes(32).toString('base64url')
+      const coordinator = new VpnCoordinator({ host: '127.0.0.1', authKey })
       coordinator.start()
       const url = `ws://127.0.0.1:${coordinator.port}`
 
-      const alice = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url })
-      const bob = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url })
+      const alice = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url, authKey })
+      const bob = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url, authKey })
 
       let atBob = 0
       let atAlice = 0

@@ -106,10 +106,44 @@ Instead of exchanging keys and endpoints by hand, run a **coordinator**. Nodes c
 # On a reachable host
 lt vpn:coordinator --network 100.100.0.0/16
 # Listening:  ws://<this-host>:51821
+# Auth key:   <generated>  — nodes must present this to join
+
+# Reuse a key across restarts instead of minting a new one each time
+lt vpn:coordinator --auth-key "$LT_VPN_AUTH_KEY"
 
 # See the whole flow end-to-end (coordinator + two nodes)
 lt vpn:mesh-demo
 ```
+
+#### Joining is authenticated
+
+A coordinator hands out a tunnel IP and the whole peer directory, so it does not
+accept anonymous nodes: every `register` has to carry a shared secret, compared
+in constant time. `lt vpn:coordinator` mints one on startup and prints it unless
+you pass `--auth-key`, and nodes present it as `authKey`:
+
+```ts
+const node = new VpnNode({
+  keyPair,
+  coordinatorUrl: 'ws://coordinator.example:51821',
+  authKey: process.env.LT_VPN_AUTH_KEY,
+})
+```
+
+A public key can also be claimed by only one live connection at a time, so a
+second node cannot register a key someone else is using and draw the relayed
+frames addressed to it. (It could never read them — those are end-to-end
+encrypted between the real peers — but it could strand the node that owns the
+key.) Tunnel IPs are leased per public key and survive a reconnect, so a node
+that drops and returns keeps its address.
+
+`--insecure-no-auth` turns the check off for localhost and testing. On anything
+reachable it means exactly what it says.
+
+> [!NOTE]
+> `lt vpn:up` does not take a `--coordinator` flag yet — the coordinator-driven
+> mesh is reached through the `VpnNode` API (and `lt vpn:mesh-demo`) today.
+> Wiring the two together is tracked in [#33](https://github.com/stacksjs/localtunnels/issues/33).
 
 ## Concepts
 
