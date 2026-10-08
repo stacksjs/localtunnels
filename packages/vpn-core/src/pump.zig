@@ -19,11 +19,25 @@ extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
 
 const EINTR = 4; // same value on Linux and macOS
+const EINVAL = 22;
 
 // fd I/O — raw syscalls on Linux (no libc), libc elsewhere. Normalized to
 // return -errno on failure on every platform, with EINTR retried so a signal
 // mid-batch neither drops a packet nor ends the pump early.
+//
+// Windows has no branch because it has no descriptor to pump: wintun is a
+// ring-buffer API rather than an fd, so there is nothing for this to read
+// from. It returns EINVAL, which stops the batch and reports zero packets
+// forwarded — the same answer the caller would get from an empty device.
+//
+// Returning early also keeps the POSIX errno accessor out of the Windows
+// build. `tun.macErrno` resolves to libc's `__error`, which does not exist
+// there, and referencing it from these two functions was enough to make the
+// whole library fail to link for Windows: `lld-link: undefined symbol:
+// __error`. The crypto core is portable and the rest of tun.zig was already
+// guarded; this was the only thing keeping a Windows library from existing.
 fn sysRead(fd: c_int, buf: [*]u8, n: usize) isize {
+    if (builtin.os.tag == .windows) return -EINVAL;
     while (true) {
         const rc: isize = switch (builtin.os.tag) {
             .linux => @bitCast(linux_os.read(fd, buf, n)),
@@ -37,6 +51,7 @@ fn sysRead(fd: c_int, buf: [*]u8, n: usize) isize {
     }
 }
 fn sysWrite(fd: c_int, buf: [*]const u8, n: usize) isize {
+    if (builtin.os.tag == .windows) return -EINVAL;
     while (true) {
         const rc: isize = switch (builtin.os.tag) {
             .linux => @bitCast(linux_os.write(fd, buf, n)),

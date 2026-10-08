@@ -40,6 +40,43 @@ jobs:
           name: libltvpn-linux
           path: packages/vpn-core/zig-out/lib/*
 
+  # Every target the release ships a library for must keep building. Windows
+  # silently did not: the packet pump referenced libc's `__error`, a POSIX
+  # errno accessor that does not exist there, and the whole library failed to
+  # link with `lld-link: undefined symbol: __error`. Nothing caught it because
+  # nothing built for Windows, and the docs claimed Windows support in the
+  # native core the entire time.
+  cross-compile:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+          - x86_64-windows
+          - x86_64-macos
+          - aarch64-macos
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - name: Build libltvpn for ${{ matrix.target }}
+        run: cd packages/vpn-core && zig build -Dtarget=${{ matrix.target }} --prefix "$RUNNER_TEMP/out"
+
+      - name: Check a library was produced
+        run: |
+          found=$(find "$RUNNER_TEMP/out" -name 'ltvpn.dll' -o -name 'libltvpn.*' | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::no shared library produced for ${{ matrix.target }}"
+            exit 1
+          fi
+          echo "ok: $found"
+
   # TypeScript suite with the native library present, so the VPN datapath /
   # coordinator / relay e2e tests actually run (rather than skip).
   vpn-e2e:
