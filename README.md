@@ -165,10 +165,10 @@ Cloud deployments are powered by [ts-cloud](https://github.com/stacksjs/ts-cloud
 - **Tunnel server** — one command, with optional wildcard Let's Encrypt TLS (Porkbun DNS-01) served by Bun's native TLS:
 
   ```sh
-  # AWS EC2 (also automates Route53 DNS)
+# AWS EC2 (also automates Route53 DNS)
   localtunnels deploy:tunnel --domain mytunnel.example.com --enable-ssl
 
-  # Hetzner Cloud (prints the DNS records to create)
+# Hetzner Cloud (prints the DNS records to create)
   localtunnels deploy:tunnel --provider hetzner --domain mytunnel.example.com --enable-ssl
   ```
 
@@ -215,7 +215,7 @@ sudo lt vpn up --peer <pubkey> --endpoint <host>:51820
 
 Features: X25519 identities, ChaCha20-Poly1305 transport with RFC-6479 replay
 protection, session rekeying, cryptokey routing (allowed-ips), a coordinator for
-zero-config peer discovery and IP assignment, NAT hole punching with an
+zero-config peer discovery and IP assignment, UDP hole punching with an
 encrypted relay fallback (the coordinator only ever sees ciphertext), and TUN
 devices on macOS (`utun`) and Linux (`/dev/net/tun`).
 

@@ -11,7 +11,7 @@ Because the protocol is WireGuard v1, the peers and configs are wire‑compatibl
 
 - **Private mesh** — connect laptops, servers, and CI boxes into one encrypted `10.x`/`100.x` network with automatic peer discovery and IP assignment.
 - **Exit node** — route all of a peer's traffic out through a server's public IP (like a personal VPN), with IP forwarding + NAT handled for you.
-- **Point‑to‑point link** — a direct encrypted tunnel between two machines over raw UDP, with NAT hole‑punching and an encrypted relay fallback.
+- **Point‑to‑point link** — a direct encrypted tunnel between two machines over raw UDP, with UDP hole‑punching and an encrypted relay fallback when a direct path can't be formed.
 
 ## Requirements
 
@@ -127,7 +127,10 @@ With `--exit-node`, the server enables IPv4 forwarding and installs an `iptables
 
 ### NAT traversal and relay
 
-Peers behind NAT use UDP hole‑punching to establish a direct link. When a direct path can't be formed, traffic falls back to an encrypted relay through the coordinator — which still only sees ciphertext.
+Peers behind NAT exchange UDP hole‑punching datagrams to open a direct link. When a direct path can't be formed, traffic falls back to an encrypted relay through the coordinator — which still only sees ciphertext.
+
+> [!NOTE]
+> Endpoint discovery is currently *reflective*, not STUN‑based: the coordinator combines the source address it sees on the node's WebSocket with the UDP port the node reports for itself. That is accurate on a LAN, behind the same NAT, and behind a cone NAT that preserves the port — and those cases punch through to a direct link. A symmetric NAT that rewrites the port per destination gets an endpoint that doesn't match, so the link settles on the encrypted relay instead of a direct path. Real STUN binding discovery is tracked in [#33](https://github.com/stacksjs/localtunnels/issues/33).
 
 ## Library API
 
@@ -211,7 +214,7 @@ alice.send(bob.publicKeyB64, new TextEncoder().encode('mesh hello'))
 - X25519 identities, ChaCha20‑Poly1305 transport with RFC‑6479 replay protection, and session rekeying.
 - Cryptokey routing (allowed‑ips) and an optional preshared key.
 - A coordinator for zero‑config peer discovery and IP assignment.
-- NAT hole‑punching with an encrypted relay fallback (the coordinator only ever sees ciphertext).
+- UDP hole‑punching with an encrypted relay fallback (the coordinator only ever sees ciphertext). See the note under [NAT traversal and relay](#nat-traversal-and-relay) for which NAT types reach a direct path today.
 - IPv6 and exit‑node routing.
 - TUN devices on macOS (`utun`) and Linux (`/dev/net/tun`); Windows support in the native core.
 

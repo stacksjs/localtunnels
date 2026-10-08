@@ -92,9 +92,10 @@ interface TunnelOptions {
 | `TUNNEL_SERVER` | Default tunnel server URL |
 | `TUNNEL_SUBDOMAIN` | Default subdomain to request |
 | `HCLOUD_TOKEN` / `HETZNER_API_TOKEN` | Hetzner API token for `deploy:tunnel --provider hetzner` and `deploy:vpn` |
-| `AWS_REGION` | AWS region for `deploy:vpn --provider aws` (default `us-east-1`) |
+| `AWS_REGION` | Legacy AWS region selector for `deploy:vpn --provider aws`, used only when `--region` is not passed |
 | `PORKBUN_API_KEY` / `PORKBUN_SECRET_KEY` | Porkbun DNS-01 credentials for wildcard TLS (`--enable-ssl`) |
 | `DEPLOY_PROVIDER` | Default provider for the `deploy:vpn` scripts (`hetzner` or `aws`) |
+| `DEPLOY_REGION` | Default region for the `deploy:vpn` scripts (default `us-west`) |
 
 ## CLI Flags
 
