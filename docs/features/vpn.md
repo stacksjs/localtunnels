@@ -140,10 +140,38 @@ that drops and returns keeps its address.
 `--insecure-no-auth` turns the check off for localhost and testing. On anything
 reachable it means exactly what it says.
 
-> [!NOTE]
-> `lt vpn:up` does not take a `--coordinator` flag yet — the coordinator-driven
-> mesh is reached through the `VpnNode` API (and `lt vpn:mesh-demo`) today.
-> Wiring the two together is tracked in [#33](https://github.com/stacksjs/localtunnels/issues/33).
+#### Bringing up an interface on a coordinator
+
+`lt vpn:up --coordinator` joins through the control plane instead of taking
+peers on the command line. The tunnel address is whatever the coordinator
+assigns, and routes are derived from its directory — each peer is routed its own
+assigned address — so a node needs to know nothing about the other members:
+
+```sh
+sudo lt vpn:up \
+  --coordinator ws://coordinator.example:51821 \
+  --auth-key "$LT_VPN_AUTH_KEY"
+```
+
+`--address`, `--peer`, `--allowed-ips` and `--endpoint` are for the static mode
+and are ignored here. Peers appearing and leaving are logged as they happen, and
+a peer that leaves has its routes withdrawn — which also revokes its permission
+to source that address.
+
+The same thing from the library, which is what a GUI would drive:
+
+```ts
+import { VpnInterface, loadOrCreateIdentity } from 'localtunnels'
+
+const vpn = new VpnInterface({
+  keyPair: loadOrCreateIdentity().keyPair,
+  coordinatorUrl: 'ws://coordinator.example:51821',
+  authKey: process.env.LT_VPN_AUTH_KEY,
+})
+const { name, address } = await vpn.up()  // e.g. utun4, 100.100.0.2
+// ... later
+vpn.down()
+```
 
 ## Concepts
 

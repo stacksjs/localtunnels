@@ -147,7 +147,7 @@ export class VpnCoordinator {
           return
         }
         if (!this.authorized(msg.authKey)) {
-          send(ws, { t: 'error', message: 'registration rejected: missing or invalid auth key' })
+          send(ws, { t: 'error', message: 'missing or invalid auth key' })
           ws.close(1008, 'unauthorized')
           return
         }

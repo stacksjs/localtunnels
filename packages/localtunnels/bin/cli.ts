@@ -818,6 +818,8 @@ interface VpnUpOptions {
   exitNode?: boolean
   wan?: string
   mtu: string
+  coordinator?: string
+  authKey?: string
 }
 
 async function detectWan(): Promise<string> {
@@ -848,103 +850,87 @@ cli
   .option('--exit-node', 'Enable IP forwarding + NAT so peer traffic egresses via this host')
   .option('--wan <iface>', 'WAN interface for exit-node NAT (auto-detected if omitted)')
   .option('--mtu <mtu>', 'Tunnel MTU', { default: '1420' })
+  .option('--coordinator <url>', 'Join through a coordinator: address and peers come from discovery')
+  .option('--auth-key <key>', 'Shared secret for the coordinator, when it requires one')
   .action(async (options: VpnUpOptions) => {
     try {
-      const { TunDevice, TunError, VpnPeer, RoutingTable, decodeKey, enableExitNode, packetDestination } = await import('../src/vpn')
+      const { TunError, VpnInterface, decodeKey, enableExitNode } = await import('../src/vpn')
       const { loadOrCreateIdentity } = await import('../src/vpn/store')
       const { encodeKey } = await import('../src/vpn/keys')
 
       const identity = loadOrCreateIdentity()
       const listenPort = Number.parseInt(options.listen) || 51820
+      const mtu = Number.parseInt(options.mtu) || 1420
+      const viaCoordinator = !!options.coordinator
       const isClient = !!options.endpoint
-      const [addr, prefix = '24'] = options.address.split('/')
 
-      let tun: TunDeviceT
+      // Static peers, when not joining through a coordinator. With a
+      // coordinator the directory supplies these, so the flags are ignored.
+      const peers = []
+      if (!viaCoordinator && options.peer) {
+        const allowed = (options.allowedIps ?? (isClient ? '0.0.0.0/0' : '')).split(',').map(s => s.trim()).filter(Boolean)
+        if (allowed.length === 0)
+          throw new Error('server mode requires --allowed-ips (the peer\'s tunnel IP, e.g. 10.8.0.2/32)')
+        let endpoint: { host: string, port: number } | undefined
+        if (options.endpoint) {
+          const idx = options.endpoint.lastIndexOf(':')
+          endpoint = { host: options.endpoint.slice(0, idx), port: Number.parseInt(options.endpoint.slice(idx + 1)) }
+        }
+        peers.push({ publicKey: options.peer, allowedIps: allowed, endpoint })
+      }
+      if (viaCoordinator && options.peer)
+        console.log('  Note: --peer is ignored when --coordinator is set; peers come from the directory.')
+
+      const vpn = new VpnInterface({
+        keyPair: identity.keyPair,
+        listenPort,
+        mtu,
+        presharedKey: options.psk ? decodeKey(options.psk) : undefined,
+        coordinatorUrl: options.coordinator,
+        authKey: options.authKey,
+        address: viaCoordinator ? undefined : options.address,
+        peers,
+      })
+
+      vpn.on('peerAdded', p => console.log(`  + peer ${p.publicKey.slice(0, 16)}\u2026 \u2192 ${p.allowedIps.join(', ')}`))
+      vpn.on('peerRemoved', p => console.log(`  - peer ${p.publicKey.slice(0, 16)}\u2026 left`))
+      vpn.on('link', l => console.log(`  \u2713 link up to ${l.peerPublicKey.slice(0, 16)}\u2026`))
+      vpn.on('error', () => { /* transient handshake races and drops are expected */ })
+
+      let info
       try {
-        tun = TunDevice.open()
+        info = await vpn.up()
       }
       catch (err: any) {
         if (err instanceof TunError) {
           console.error(`\n  ${err.message}`)
-          console.error('  `lt vpn up` needs root to create a network interface. Try: sudo lt vpn up ...\n')
+          console.error('  `lt vpn:up` needs root to create a network interface. Try: sudo lt vpn:up ...\n')
           process.exit(1)
         }
         throw err
       }
 
-      // Bring the interface up with its tunnel address + MTU (Linux `ip`).
-      await runCmd(['ip', 'addr', 'add', `${addr}/${prefix}`, 'dev', tun.name])
-      await runCmd(['ip', 'link', 'set', 'dev', tun.name, 'mtu', options.mtu, 'up'])
-
-      // Raw transport: the tunnel carries bare IP packets from the TUN device.
-      const peer = new VpnPeer({ keyPair: identity.keyPair, port: listenPort, presharedKey: options.psk ? decodeKey(options.psk) : undefined, raw: true })
-      const routes = new RoutingTable()
-
-      let peerPubB64: string | null = null
-      if (options.peer) {
-        peerPubB64 = options.peer
-        const allowed = (options.allowedIps ?? (isClient ? '0.0.0.0/0' : '')).split(',').map(s => s.trim()).filter(Boolean)
-        if (allowed.length === 0)
-          throw new Error('server mode requires --allowed-ips (the peer\'s tunnel IP, e.g. 10.8.0.2/32)')
-        peer.addPeer({ publicKey: decodeKey(options.peer) })
-        routes.addPeer(options.peer, allowed)
-      }
-
-      // Bridge: decrypted packets from a peer go into the kernel; packets the
-      // kernel routes to the interface get encrypted and sent to the peer that
-      // owns the destination (cryptokey routing).
-      peer.on('message', (packet) => {
-        try {
-          tun.write(packet)
-        }
-        catch { /* oversized/short packet; drop */ }
-      })
-      tun.on('packet', (packet) => {
-        const dst = packetDestination(packet)
-        const target = dst ? routes.route(dst) : null
-        if (!target)
-          return
-        try {
-          peer.send(target, packet)
-        }
-        catch { /* no link yet; drop */ }
-      })
-      peer.on('error', () => { /* transient drops are expected */ })
-
-      await peer.start()
-      tun.start()
-
       if (options.exitNode) {
         const wan = options.wan ?? await detectWan()
-        await enableExitNode(tun.name, wan)
+        await enableExitNode(info.name, wan)
         console.log(`  Exit node: forwarding + NAT via ${wan}`)
       }
 
       console.log('')
-      console.log(`  Interface:   ${tun.name} (${addr}/${prefix}, mtu ${options.mtu})`)
+      console.log(`  Interface:   ${info.name} (${info.address}/${info.prefix}, mtu ${mtu})`)
       console.log(`  Public key:  ${encodeKey(identity.keyPair.publicKey)}`)
-      console.log(`  Listening:   udp/${peer.port}`)
-      console.log(`  Mode:        ${isClient ? 'client' : 'server (listening)'}`)
-
-      if (isClient && options.peer && options.endpoint) {
-        const idx = options.endpoint.lastIndexOf(':')
-        const host = options.endpoint.slice(0, idx)
-        const port = Number.parseInt(options.endpoint.slice(idx + 1))
-        console.log(`  Connecting to peer ${options.peer.slice(0, 16)}… at ${options.endpoint}`)
-        await peer.connect(decodeKey(options.peer), host, port)
-        console.log(`  Link established.`)
-      }
-      else if (options.peer) {
-        console.log(`  Authorized peer ${options.peer.slice(0, 16)}… → ${options.allowedIps}`)
-      }
+      console.log(`  Listening:   udp/${vpn.datapath?.port ?? listenPort}`)
+      if (viaCoordinator)
+        console.log(`  Mode:        coordinator (${options.coordinator}${info.network ? `, network ${info.network}` : ''})`)
+      else
+        console.log(`  Mode:        ${isClient ? 'client' : 'server (listening)'}`)
       console.log('')
       console.log('  Press Ctrl+C to bring the tunnel down')
       console.log('')
 
       const shutdown = () => {
         console.log('\n  Bringing tunnel down...')
-        tun.close()
-        peer.stop()
+        vpn.down()
         process.exit(0)
       }
       process.on('SIGINT', shutdown)
