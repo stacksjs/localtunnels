@@ -1,8 +1,8 @@
 /* eslint-disable node/prefer-global/process */
 /**
  * Tear down the localtunnels VPN: delete the box and its firewall/security
- * group on whichever provider it was deployed to (recorded in the state file;
- * override with --provider).
+ * group on whichever provider and region it was deployed to (both recorded in
+ * the state file; override with --provider / --region).
  *
  *   bun run destroy:vpn
  */
@@ -11,24 +11,36 @@ import {
   CLIENT_CONF_PATH,
   createProvisioner,
   log,
+  REGIONS,
   resolveProvider,
-  SERVER_NAME,
+  resolveRegion,
+  serverNameFor,
   STATE_PATH,
 } from './config'
 
 async function main(): Promise<void> {
-  // Prefer the provider recorded at deploy time; fall back to flag/env/default
-  // so teardown still works without local state.
-  let provider = resolveProvider()
-  if (!process.argv.includes('--provider') && existsSync(STATE_PATH)) {
-    const state = JSON.parse(readFileSync(STATE_PATH, 'utf8'))
-    if (state.provider === 'hetzner' || state.provider === 'aws')
-      provider = state.provider
-  }
+  // Prefer what was recorded at deploy time; fall back to flag/env/default so
+  // teardown still works without local state.
+  const state = existsSync(STATE_PATH) ? JSON.parse(readFileSync(STATE_PATH, 'utf8')) : null
 
-  const provisioner = await createProvisioner(provider)
-  log(`Destroying "${SERVER_NAME}" on ${provider}...`)
-  const { destroyed } = await provisioner.destroyBox(SERVER_NAME)
+  let provider = resolveProvider()
+  if (!process.argv.includes('--provider') && (state?.provider === 'hetzner' || state?.provider === 'aws'))
+    provider = state.provider
+
+  // The region decides which AWS endpoint the box lives behind, so an explicit
+  // flag wins, then the state file, then the default.
+  let region = resolveRegion(provider).name
+  if (!process.argv.includes('--region') && typeof state?.region === 'string' && REGIONS[provider][state.region])
+    region = state.region
+  const spec = REGIONS[provider][region]
+
+  // Boxes deployed before the name carried a region suffix are recorded in
+  // state under their old name, so that name wins when it is there.
+  const serverName: string = typeof state?.serverName === 'string' ? state.serverName : serverNameFor(region)
+
+  const provisioner = await createProvisioner(provider, spec)
+  log(`Destroying "${serverName}" on ${provider} / ${region} (${spec.label})...`)
+  const { destroyed } = await provisioner.destroyBox(serverName)
   if (destroyed.length === 0)
     log('No matching resources found (already gone).')
   for (const item of destroyed)

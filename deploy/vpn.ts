@@ -3,12 +3,15 @@
  * Deploy the localtunnels VPN (exit node) to the cloud.
  *
  * Provisioning runs through ts-cloud's provider-agnostic box provisioner —
- * pick the provider with `--provider hetzner|aws` (default hetzner) — then
- * the localtunnels VPN stack (our own Zig/bun:ffi WireGuard implementation,
- * NOT stock kernel WireGuard) is shipped and run as a systemd service.
+ * pick the provider with `--provider hetzner|aws` (default hetzner) and the
+ * location with `--region` (default us-west) — then the localtunnels VPN stack
+ * (our own Zig/bun:ffi WireGuard implementation, NOT stock kernel WireGuard) is
+ * shipped and run as a systemd service.
  * Idempotent: re-running reuses the box and re-syncs the service.
  *
- *   bun run deploy:vpn [-- --provider aws]
+ *   bun run deploy:vpn
+ *   bun run deploy:vpn -- --region us-east
+ *   bun run deploy:vpn -- --provider aws --region us-west
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import {
@@ -20,22 +23,20 @@ import {
 } from '@stacksjs/ts-cloud/drivers'
 import { buildClientConfig, VPN_BOOTSTRAP_SCRIPT } from './cloud-init'
 import {
-  AWS_REGION,
-  BOX_SIZES,
   CLI_ENTRY,
   CLIENT_CONF_PATH,
   CLIENT_WG_IP,
   createProvisioner,
   EXEC_OPTS,
-  HETZNER_LOCATION,
   LOCAL_BIN,
   LOCAL_LIB,
   log,
   REMOTE_BIN,
   REMOTE_SETUP,
   resolveProvider,
+  resolveRegion,
   run,
-  SERVER_NAME,
+  serverNameFor,
   SETUP_SCRIPT,
   SSH_PUB_KEY_PATH,
   STATE_PATH,
@@ -67,17 +68,19 @@ async function buildArtifacts(): Promise<void> {
 
 async function main(): Promise<void> {
   const provider = resolveProvider()
-  const provisioner = await createProvisioner(provider)
+  const { name: region, spec } = resolveRegion(provider)
+  const serverName = serverNameFor(region)
+  const provisioner = await createProvisioner(provider, spec)
 
-  log(`Provisioning the localtunnels VPN on ${provider} (via ts-cloud)...`)
+  log(`Provisioning the localtunnels VPN on ${provider} / ${region} (${spec.label}) (via ts-cloud)...`)
 
   // Build artifacts while the box boots.
   const artifactsBuilt = buildArtifacts()
 
   const box = await provisioner.ensureBox({
-    name: SERVER_NAME,
-    size: BOX_SIZES[provider],
-    location: provider === 'hetzner' ? HETZNER_LOCATION : undefined,
+    name: serverName,
+    size: spec.size,
+    location: spec.location,
     ports: [
       { protocol: 'udp', port: WG_PORT },
       { protocol: 'icmp' },
@@ -86,7 +89,7 @@ async function main(): Promise<void> {
     bootstrapScript: VPN_BOOTSTRAP_SCRIPT,
     labels: { 'app': 'localtunnels-vpn', 'managed-by': 'localtunnels-deploy' },
   })
-  log(`Box: ${box.created ? 'created' : 'reusing'} "${box.name}" (#${box.id}, ${BOX_SIZES[provider]}${provider === 'aws' ? `, ${AWS_REGION}` : `, ${HETZNER_LOCATION}`})`)
+  log(`Box: ${box.created ? 'created' : 'reusing'} "${box.name}" (#${box.id}, ${spec.size}, ${spec.location})`)
   log(`Public IP: ${box.publicIp}`)
 
   log('Waiting for SSH...')
@@ -124,6 +127,7 @@ async function main(): Promise<void> {
 
   writeFileSync(STATE_PATH, `${JSON.stringify({
     provider,
+    region,
     serverId: box.id,
     serverName: box.name,
     publicIp: box.publicIp,
@@ -138,7 +142,8 @@ async function main(): Promise<void> {
   log('╚══════════════════════════════════════════════════════════╝')
   log('')
   log(`  Provider:    ${provider}`)
-  log(`  Server:      ${SERVER_NAME} (#${box.id}) @ ${box.publicIp}`)
+  log(`  Region:      ${region} — ${spec.label} (${spec.location}, ${spec.size})`)
+  log(`  Server:      ${serverName} (#${box.id}) @ ${box.publicIp}`)
   log(`  Datapath:    localtunnels lt vpn (systemd: localtunnels-vpn)`)
   log(`  Listening:   udp/${WG_PORT}, server key ${serverPublicKey}`)
   log(`  Client:      ${CLIENT_WG_IP}, config at ${CLIENT_CONF_PATH}`)
