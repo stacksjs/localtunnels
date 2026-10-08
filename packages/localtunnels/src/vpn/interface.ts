@@ -54,6 +54,28 @@ export interface VpnInterfaceOptions {
   coordinatorUrl?: string
   /** Shared secret, when the coordinator requires one. */
   authKey?: string
+  /**
+   * Tell the network this node can carry traffic for the whole internet.
+   *
+   * This only advertises. Forwarding and NAT are a separate, privileged step
+   * — see `enableExitNode` — and advertising without it leaves clients routing
+   * their traffic into a node that drops it.
+   */
+  advertiseExitNode?: boolean
+  /**
+   * Route everything not bound for a tunnel peer through an exit node.
+   *
+   * A base64 public key pins one peer. `'auto'` takes the lowest-sorted peer
+   * advertising itself as an exit, which is deterministic — so every node
+   * agrees and a reconnect does not quietly move traffic to a different
+   * volunteer — but it does trust whoever is advertising. Since the
+   * coordinator cannot verify that claim, pin the key when it matters.
+   *
+   * Only the IPv4 default route is installed: coordinator mode assigns a v4
+   * address, so the kernel has no reason to put v6 traffic on the interface,
+   * and a `::/0` route would only hide that it has nowhere to go.
+   */
+  useExit?: string | 'auto'
 
   /** This node's tunnel address as CIDR (`10.8.0.2/24`). Static mode only. */
   address?: string
@@ -79,6 +101,12 @@ export interface VpnInterfaceEvents {
   peerAdded: (info: { publicKey: string, allowedIps: string[] }) => void
   /** A peer left the directory and its routes were withdrawn. */
   peerRemoved: (info: { publicKey: string }) => void
+  /**
+   * The peer carrying the default route changed. `publicKey` is null when
+   * there is no longer an exit — at which point non-tunnel traffic has no
+   * route and is dropped rather than leaking out of the default interface.
+   */
+  exitChanged: (info: { publicKey: string | null }) => void
   /** An encrypted link to a peer completed its handshake. */
   link: (info: { peerPublicKey: string }) => void
   error: (error: Error) => void
@@ -102,6 +130,8 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
    * without ever leaving the directory.
    */
   private routed = new Map<string, string>()
+  /** The peer currently holding the default route, if any. */
+  private exit: string | null = null
 
   constructor(options: VpnInterfaceOptions) {
     super()
@@ -130,6 +160,11 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
     return this.node?.peer ?? this.peerDatapath
   }
 
+  /** The peer currently carrying the default route, or null. */
+  get exitNode(): string | null {
+    return this.exit
+  }
+
   /**
    * Open the interface, join the network, and start forwarding.
    *
@@ -150,6 +185,7 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
         keyPair,
         coordinatorUrl: this.options.coordinatorUrl,
         authKey: this.options.authKey,
+        exitNode: this.options.advertiseExitNode,
         listenPort,
         presharedKey,
         // The tunnel carries bare IP packets off the TUN device, not framed
@@ -228,10 +264,19 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
    * control plane (or a test) can supply the directory itself.
    */
   applyDirectory(records: PeerRecord[]): void {
+    // Decided before any route is touched, because the exit peer's own route
+    // set includes the default route: folding that in here means a change of
+    // exit is just a change of route set, which the diff below already
+    // handles — the old exit loses the default route and keeps its own
+    // address in a single step.
+    const exit = this.chooseExit(records)
+
     const present = new Set<string>()
     for (const rec of records) {
       present.add(rec.publicKey)
-      const allowedIps = [`${rec.assignedIp}/32`]
+      const allowedIps = rec.publicKey === exit
+        ? [`${rec.assignedIp}/32`, '0.0.0.0/0']
+        : [`${rec.assignedIp}/32`]
       const want = signature(allowedIps)
       const have = this.routed.get(rec.publicKey)
       if (have === want)
@@ -251,6 +296,30 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
       this.routed.delete(pub)
       this.emit('peerRemoved', { publicKey: pub })
     }
+
+    // Announced after the table is consistent, so a listener that reads
+    // `routes` on this event sees the route it is being told about.
+    if (exit !== this.exit) {
+      this.exit = exit
+      this.emit('exitChanged', { publicKey: exit })
+    }
+  }
+
+  /**
+   * Which peer should carry the default route, given the directory.
+   *
+   * A pinned key is honoured whenever that peer is present, whether or not it
+   * advertises: naming a key is already the decision, and refusing to use it
+   * because the flag is missing would be surprising. `'auto'` considers only
+   * peers that advertise, and sorts so the choice is stable.
+   */
+  private chooseExit(records: PeerRecord[]): string | null {
+    const want = this.options.useExit
+    if (!want)
+      return null
+    if (want !== 'auto')
+      return records.some(r => r.publicKey === want) ? want : null
+    return records.filter(r => r.exitNode).map(r => r.publicKey).sort()[0] ?? null
   }
 
   /** Tear the interface down and leave the network. */
@@ -264,6 +333,7 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
     this.bridge = null
     this.info = null
     this.routed.clear()
+    this.exit = null
   }
 }
 
