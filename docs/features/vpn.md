@@ -187,6 +187,38 @@ Like WireGuard, each peer is associated with a set of allowed IP ranges. Outboun
 
 With `--exit-node`, the server enables IPv4 forwarding and installs an `iptables` MASQUERADE rule so a client routing `0.0.0.0/0` through it egresses to the internet via the server's public IP — a personal VPN.
 
+In static mode the client opts in by naming the route: `--allowed-ips 0.0.0.0/0`.
+Through a coordinator it is discovered instead. The server advertises itself, and
+clients ask for an exit by key or by `auto`:
+
+```sh
+# On the server: NAT, and tell the network it is an exit
+sudo lt vpn:up --coordinator ws://coordinator.example:51821 \
+  --auth-key "$LT_VPN_AUTH_KEY" --exit-node
+
+# On a laptop: send everything not bound for a tunnel peer through it
+sudo lt vpn:up --coordinator ws://coordinator.example:51821 \
+  --auth-key "$LT_VPN_AUTH_KEY" --use-exit <server-pubkey>
+```
+
+Tunnel peers keep their direct routes either way — longest prefix wins, so only
+traffic no peer claims takes the default route. With no exit configured, that
+traffic has no route at all and is dropped rather than leaking out of the host's
+own interface.
+
+> [!IMPORTANT]
+> `--use-exit auto` takes the lowest-sorted peer that advertises. The choice is
+> deterministic, so every node agrees and a reconnect will not quietly move your
+> traffic to a different volunteer — but the advertisement is a **claim the
+> coordinator cannot verify**, and any member holding the auth key can make it.
+> Routing all of your traffic through a peer you did not choose means trusting
+> whoever that peer turns out to be. **Pin the public key** for anything you care
+> about; `auto` is for networks where you control every member.
+
+Advertising and NAT are separate steps. `--exit-node` does both, but
+`advertiseExitNode` in the library only advertises — pair it with
+`enableExitNode`, or clients will route traffic into a node that drops it.
+
 ### NAT traversal and relay
 
 Peers behind NAT exchange UDP hole‑punching datagrams to open a direct link. When a direct path can't be formed, traffic falls back to an encrypted relay through the coordinator — which still only sees ciphertext.

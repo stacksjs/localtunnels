@@ -820,6 +820,7 @@ interface VpnUpOptions {
   mtu: string
   coordinator?: string
   authKey?: string
+  useExit?: string
 }
 
 async function detectWan(): Promise<string> {
@@ -852,6 +853,7 @@ cli
   .option('--mtu <mtu>', 'Tunnel MTU', { default: '1420' })
   .option('--coordinator <url>', 'Join through a coordinator: address and peers come from discovery')
   .option('--auth-key <key>', 'Shared secret for the coordinator, when it requires one')
+  .option('--use-exit <key>', 'Route all non-tunnel traffic through an exit node: a public key, or "auto"')
   .action(async (options: VpnUpOptions) => {
     try {
       const { TunError, VpnInterface, decodeKey, enableExitNode } = await import('../src/vpn')
@@ -880,6 +882,8 @@ cli
       }
       if (viaCoordinator && options.peer)
         console.log('  Note: --peer is ignored when --coordinator is set; peers come from the directory.')
+      if (!viaCoordinator && options.useExit)
+        console.log('  Note: --use-exit needs --coordinator; in static mode set --allowed-ips 0.0.0.0/0 instead.')
 
       const vpn = new VpnInterface({
         keyPair: identity.keyPair,
@@ -888,6 +892,10 @@ cli
         presharedKey: options.psk ? decodeKey(options.psk) : undefined,
         coordinatorUrl: options.coordinator,
         authKey: options.authKey,
+        // With a coordinator, --exit-node also tells the network this node is
+        // one. The NAT setup below is what makes the claim true.
+        advertiseExitNode: viaCoordinator && options.exitNode,
+        useExit: viaCoordinator ? options.useExit : undefined,
         address: viaCoordinator ? undefined : options.address,
         peers,
       })
@@ -895,6 +903,9 @@ cli
       vpn.on('peerAdded', p => console.log(`  + peer ${p.publicKey.slice(0, 16)}\u2026 \u2192 ${p.allowedIps.join(', ')}`))
       vpn.on('peerRemoved', p => console.log(`  - peer ${p.publicKey.slice(0, 16)}\u2026 left`))
       vpn.on('link', l => console.log(`  \u2713 link up to ${l.peerPublicKey.slice(0, 16)}\u2026`))
+      vpn.on('exitChanged', e => console.log(e.publicKey
+        ? `  \u2192 exit node: ${e.publicKey.slice(0, 16)}\u2026 (all non-tunnel traffic)`
+        : '  \u2192 no exit node; non-tunnel traffic has no route and is dropped'))
       vpn.on('error', () => { /* transient handshake races and drops are expected */ })
 
       let info
@@ -924,6 +935,10 @@ cli
         console.log(`  Mode:        coordinator (${options.coordinator}${info.network ? `, network ${info.network}` : ''})`)
       else
         console.log(`  Mode:        ${isClient ? 'client' : 'server (listening)'}`)
+      if (viaCoordinator && options.exitNode)
+        console.log(`  Advertising: exit node`)
+      if (options.useExit && viaCoordinator)
+        console.log(`  Exit:        ${options.useExit === 'auto' ? 'auto (lowest-sorted advertised peer)' : options.useExit}`)
       console.log('')
       console.log('  Press Ctrl+C to bring the tunnel down')
       console.log('')
