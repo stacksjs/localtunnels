@@ -26,30 +26,55 @@ const LIB_BASENAME = `libltvpn.${suffix}`
 /**
  * Candidate locations for the shared library, most specific first:
  *   1. `LTVPN_LIB` env override (absolute path to the library file)
- *   2. `dist/native/` — where the published npm package ships prebuilt libs
- *   3. `native/zig-out/lib/` — a source build inside the installed package
- *   4. `../vpn-core/zig-out/lib/` — monorepo dev builds (packages/vpn-core)
+ *   2. beside the executable, and `../lib` of it — how a compiled binary ships
+ *   3. `dist/native/` — where the published npm package ships prebuilt libs
+ *   4. `native/zig-out/lib/` — a source build inside the installed package
+ *   5. `../vpn-core/zig-out/lib/` — monorepo dev builds (packages/vpn-core)
  */
-function candidatePaths(): string[] {
-  const here = dirname(fileURLToPath(import.meta.url))
+export function candidatePaths(): string[] {
   const paths: string[] = []
 
   const override = process.env.LTVPN_LIB
   if (override)
     paths.push(override)
 
-  // src/vpn -> ../../ is the package root in dev; in dist it is dist/src/vpn.
-  const pkgRootDev = join(here, '..', '..')
-  paths.push(join(pkgRootDev, 'dist', 'native', LIB_BASENAME))
-  paths.push(join(pkgRootDev, 'native', 'zig-out', 'lib', LIB_BASENAME))
-  paths.push(join(pkgRootDev, '..', 'vpn-core', 'zig-out', 'lib', LIB_BASENAME))
-  // When running from dist/src/vpn, the package root is one level higher.
-  const pkgRootDist = join(here, '..', '..', '..')
-  paths.push(join(pkgRootDist, 'dist', 'native', LIB_BASENAME))
-  paths.push(join(pkgRootDist, 'native', 'zig-out', 'lib', LIB_BASENAME))
-  paths.push(join(pkgRootDist, '..', 'vpn-core', 'zig-out', 'lib', LIB_BASENAME))
+  // Relative to the executable.
+  //
+  // This is the only group that can work for a `bun build --compile` binary,
+  // which is what `bun run compile` ships. There, `import.meta.url` points
+  // inside the embedded filesystem rather than at a directory on disk, so
+  // every source-relative guess below collapses to nonsense — the binary
+  // reported looking in `/dist/native/libltvpn.dylib` and gave up, leaving
+  // every shipped binary with no VPN at all.
+  //
+  // Under `bun run`, execPath is the bun binary itself and these simply miss,
+  // which costs two `existsSync` calls.
+  const execDir = dirname(process.execPath)
+  paths.push(join(execDir, LIB_BASENAME))
+  paths.push(join(execDir, '..', 'lib', LIB_BASENAME))
 
-  return paths
+  // Relative to this source file, for a normal install or a dev checkout.
+  //
+  // Each root is taken only if it really is a package root, which is what
+  // tells the two situations apart. Inside a compiled binary both candidates
+  // collapse to `/`, and testing the directory itself is not enough to notice
+  // — the embedded filesystem answers `existsSync` happily, so the check has
+  // to be for something only a real package has.
+  //
+  // `src/vpn` puts the root two levels up; the published `dist/src/vpn` puts
+  // it three. Whichever one holds a package.json is the one that exists.
+  const here = dirname(fileURLToPath(import.meta.url))
+  for (const root of [join(here, '..', '..'), join(here, '..', '..', '..')]) {
+    if (!existsSync(join(root, 'package.json')))
+      continue
+    paths.push(join(root, 'dist', 'native', LIB_BASENAME))
+    paths.push(join(root, 'native', 'zig-out', 'lib', LIB_BASENAME))
+    paths.push(join(root, '..', 'vpn-core', 'zig-out', 'lib', LIB_BASENAME))
+  }
+
+  // The dev and dist roots coincide for some layouts, and a duplicated path in
+  // the failure message reads like two different things were tried.
+  return [...new Set(paths)]
 }
 
 const symbols = {

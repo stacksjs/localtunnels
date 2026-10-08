@@ -9,6 +9,7 @@
  * See https://github.com/stacksjs/localtunnels/issues/28 for the roadmap.
  */
 export {
+  candidatePaths,
   EXPECTED_ABI_VERSION,
   errorName,
   isVpnAvailable,
