@@ -92,6 +92,19 @@ export {
   RoutingTable,
 } from './routing'
 
+export {
+  TunBridge,
+} from './bridge'
+
+export type {
+  BridgePeer,
+  BridgeResult,
+  BridgeStats,
+  BridgeTun,
+  DropReason,
+  TunBridgeOptions,
+} from './bridge'
+
 export type {
   HandshakeResult,
   VpnKeyPair,
