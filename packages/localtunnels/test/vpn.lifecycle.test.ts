@@ -122,6 +122,23 @@ describe('vpn/interface-config', () => {
       expect(cmds.some(c => c.startsWith('ip -6 addr add fd7a::1/64'))).toBe(true)
   })
 
+  it('sets the MTU when one is asked for, and leaves it alone otherwise', () => {
+    const withMtu = flat(configureInterfaceCommands('tun9', '100.100.0.1', '100.100.0.2', 16, 1420))
+    expect(withMtu.some(c => c.includes('mtu 1420'))).toBe(true)
+
+    const without = flat(configureInterfaceCommands('tun9', '100.100.0.1', '100.100.0.2', 16))
+    expect(without.some(c => c.includes('mtu'))).toBe(false)
+
+    // The interface still comes up either way.
+    for (const cmds of [withMtu, without])
+      expect(cmds.some(c => c.includes('up'))).toBe(true)
+  })
+
+  it('sets the MTU on IPv6 interfaces too', () => {
+    const cmds = flat(configureInterfaceCommands('tun9', 'fd7a::1', 'fd7a::2', 64, 1280))
+    expect(cmds.some(c => c.includes('mtu 1280'))).toBe(true)
+  })
+
   it('builds exit-node forwarding + NAT commands', () => {
     const cmds = flat(exitNodeCommands('tun9', 'eth0'))
     // Kernel forwarding is enabled on every platform.

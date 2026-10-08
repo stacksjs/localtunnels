@@ -118,15 +118,17 @@ export class TunDevice extends TypedEventEmitter<TunDeviceEvents> {
  * platform tools (`ifconfig` on macOS, `ip` on Linux). Requires root.
  *
  * `address` is this node's tunnel IP; `peer` is the point-to-point remote
- * (macOS utun requires it); `cidrPrefix` sizes the route (default /16).
+ * (macOS utun requires it); `cidrPrefix` sizes the route (default /16); `mtu`
+ * sizes the interface (left alone when omitted).
  */
 export async function configureInterface(
   name: string,
   address: string,
   peer: string,
   cidrPrefix?: number,
+  mtu?: number,
 ): Promise<void> {
-  for (const cmd of configureInterfaceCommands(name, address, peer, cidrPrefix)) {
+  for (const cmd of configureInterfaceCommands(name, address, peer, cidrPrefix, mtu)) {
     const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
     const code = await proc.exited
     if (code !== 0) {
@@ -145,32 +147,39 @@ export function configureInterfaceCommands(
   address: string,
   peer: string,
   cidrPrefix?: number,
+  mtu?: number,
 ): string[][] {
   const v6 = address.includes(':')
   const prefix = cidrPrefix ?? (v6 ? 64 : 16)
 
   if (process.platform === 'darwin') {
+    // `ifconfig` takes one property per invocation reliably, so the MTU goes
+    // in its own command rather than riding along with the address.
+    const setMtu: string[][] = mtu ? [['ifconfig', name, 'mtu', String(mtu)]] : []
     if (v6) {
       return [
         ['ifconfig', name, 'inet6', address, 'prefixlen', String(prefix), 'up'],
+        ...setMtu,
       ]
     }
     return [
       ['ifconfig', name, address, peer, 'up'],
+      ...setMtu,
       ['route', '-n', 'add', '-net', networkOf(address, prefix), '-interface', name],
     ]
   }
 
-  // Linux
+  // Linux: `ip link set` accepts the MTU and the up-state in one call.
+  const linkArgs = mtu ? ['mtu', String(mtu), 'up'] : ['up']
   if (v6) {
     return [
       ['ip', '-6', 'addr', 'add', `${address}/${prefix}`, 'dev', name],
-      ['ip', 'link', 'set', 'dev', name, 'up'],
+      ['ip', 'link', 'set', 'dev', name, ...linkArgs],
     ]
   }
   return [
     ['ip', 'addr', 'add', `${address}/${prefix}`, 'dev', name],
-    ['ip', 'link', 'set', 'dev', name, 'up'],
+    ['ip', 'link', 'set', 'dev', name, ...linkArgs],
   ]
 }
 
