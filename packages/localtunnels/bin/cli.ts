@@ -59,7 +59,7 @@ cli
   .alias('')
   .option('-p, --port <port>', 'Local port to expose', { default: '3000' })
   .option('-s, --subdomain <subdomain>', 'Request a specific subdomain')
-  .option('-h, --host <host>', 'Local hostname to forward to', { default: 'localhost' })
+  .option('--host <host>', 'Local hostname to forward to', { default: 'localhost' })
   .option('--server <server>', 'Tunnel server URL', { default: DEFAULT_SERVER })
   .option('--verbose', 'Enable verbose logging')
   .option('--secure', 'Use secure WebSocket (wss://)')
@@ -173,7 +173,7 @@ cli
 cli
   .command('server', 'Start a tunnel server (self-hosted)')
   .option('-p, --port <port>', 'Port to listen on', { default: '3000' })
-  .option('-h, --host <host>', 'Host to bind to', { default: '0.0.0.0' })
+  .option('--host <host>', 'Host to bind to', { default: '0.0.0.0' })
   .option('--domain <domain>', 'Domain for tunnel URLs', { default: 'localhost' })
   .option('--verbose', 'Enable verbose logging')
   .action(async (options: ServerOptions) => {
@@ -963,7 +963,7 @@ cli
 cli
   .command('vpn:coordinator', 'Run the VPN coordination server (peer discovery + IP assignment)')
   .option('-p, --port <port>', 'Port to listen on', { default: '51821' })
-  .option('-h, --host <host>', 'Host to bind to', { default: '0.0.0.0' })
+  .option('--host <host>', 'Host to bind to', { default: '0.0.0.0' })
   .option('--network <cidr>', 'Tunnel network to assign IPs from', { default: '100.100.0.0/16' })
   .option('--auth-key <key>', 'Shared secret nodes must present to join (generated if omitted)')
   .option('--insecure-no-auth', 'Accept any node that can reach the port — localhost/testing only')

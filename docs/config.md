@@ -105,7 +105,7 @@ interface TunnelOptions {
 |------|-------------|---------|
 | `-p, --port <port>` | Local port to expose | `3000` |
 | `-s, --subdomain <name>` | Request a specific subdomain | auto |
-| `-h, --host <host>` | Local hostname to forward to | `localhost` |
+| `--host <host>` | Local hostname to forward to | `localhost` |
 | `--server <url>` | Tunnel server URL | `localtunnel.dev` |
 | `--verbose` | Enable verbose logging | `false` |
 | `--secure` | Use secure WebSocket (wss://) | `false` |
@@ -119,7 +119,7 @@ When the system resolver can't reach the server and `manageHosts` resolves the I
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-p, --port <port>` | Port to listen on | `3000` |
-| `-h, --host <host>` | Host to bind to | `0.0.0.0` |
+| `--host <host>` | Host to bind to | `0.0.0.0` |
 | `--domain <domain>` | Domain for tunnel URLs | `localhost` |
 | `--verbose` | Enable verbose logging | `false` |
 
