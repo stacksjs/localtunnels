@@ -24,6 +24,8 @@ export interface VpnNodeOptions {
   raw?: boolean
   /** Shared secret, when the coordinator was started with an auth key. */
   authKey?: string
+  /** Advertise this node to the network as an exit node. */
+  exitNode?: boolean
 }
 
 export interface VpnNodeEvents {
@@ -64,6 +66,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   private readonly connecting = new Set<string>()
   private readonly relayPolicy: 'auto' | 'always' | 'never'
   private readonly authKey?: string
+  private readonly exitNode: boolean
   assignedIp: string | null = null
 
   constructor(options: VpnNodeOptions) {
@@ -73,6 +76,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     this.listenPort = options.listenPort ?? 0
     this.relayPolicy = options.relay ?? 'auto'
     this.authKey = options.authKey
+    this.exitNode = options.exitNode ?? false
     this.publicKeyB64 = encodeKey(options.keyPair.publicKey)
     this.peer = new VpnPeer({
       keyPair: options.keyPair,
@@ -98,6 +102,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
       publicKey: this.publicKeyB64,
       listenPort: this.peer.port,
       authKey: this.authKey,
+      exitNode: this.exitNode,
     })
     this.client.on('peers', records => this.onPeers(records))
 

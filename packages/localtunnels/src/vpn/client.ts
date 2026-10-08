@@ -13,6 +13,8 @@ export interface VpnCoordinatorClientOptions {
   heartbeatInterval?: number
   /** Shared secret, when the coordinator was started with an auth key. */
   authKey?: string
+  /** Advertise this node to the network as an exit node. */
+  exitNode?: boolean
 }
 
 export interface VpnCoordinatorClientEvents {
@@ -40,6 +42,7 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
   private readonly listenPort: number
   private readonly heartbeatInterval: number
   private readonly authKey?: string
+  private readonly exitNode: boolean
   /**
    * The last `error` frame the coordinator sent. A rejected registration
    * arrives as an error and *then* a close, so without holding onto the reason
@@ -57,6 +60,7 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
     this.listenPort = options.listenPort
     this.heartbeatInterval = options.heartbeatInterval ?? 20
     this.authKey = options.authKey
+    this.exitNode = options.exitNode ?? false
   }
 
   /** Connect and register. Resolves once the coordinator assigns an IP. */
@@ -73,6 +77,7 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
           publicKey: this.publicKey,
           listenPort: this.listenPort,
           ...(this.authKey ? { authKey: this.authKey } : {}),
+          ...(this.exitNode ? { exitNode: true } : {}),
         }))
       })
 

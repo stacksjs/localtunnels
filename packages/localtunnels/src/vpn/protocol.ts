@@ -18,6 +18,17 @@ export interface PeerRecord {
   assignedIp: string
   /** reflected UDP endpoint (server-observed host + peer-reported port) */
   endpoint: Endpoint
+  /**
+   * This peer offers to carry traffic for the whole internet — it has IP
+   * forwarding and NAT set up and will egress on its own public address.
+   *
+   * It is a *claim*, not a credential. The coordinator relays what a node says
+   * about itself and cannot check it, so any member holding the auth key can
+   * advertise this. A client that routes everything through a peer it did not
+   * choose deliberately is trusting whoever that peer turns out to be; pin the
+   * public key rather than taking whatever is offered.
+   */
+  exitNode?: boolean
 }
 
 // ── client → coordinator ─────────────────────────────────────────────────────
@@ -27,6 +38,8 @@ export interface RegisterMessage {
   publicKey: string
   /** UDP port this node listens on for the datapath */
   listenPort: number
+  /** Advertise this node as an exit node. See {@link PeerRecord.exitNode}. */
+  exitNode?: boolean
   /**
    * Shared secret proving this node is allowed to join. Required when the
    * coordinator was started with an auth key; ignored when it was not.

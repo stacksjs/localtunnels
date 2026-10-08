@@ -49,11 +49,12 @@ describeVpn('vpn/coordinator', () => {
     return `ws://127.0.0.1:${coordinator.port}`
   }
 
-  function makeNode(url: string, opts: { authKey?: string, keyPair?: VpnKeyPair } = {}): Harness {
+  function makeNode(url: string, opts: { authKey?: string, keyPair?: VpnKeyPair, exitNode?: boolean } = {}): Harness {
     const node = new VpnNode({
       keyPair: opts.keyPair ?? generateKeyPair(),
       coordinatorUrl: url,
       authKey: opts.authKey,
+      exitNode: opts.exitNode,
     })
     const links = new Set<string>()
     const messages: { data: string, from: string }[] = []
@@ -213,6 +214,66 @@ describeVpn('vpn/coordinator', () => {
       // a keeps its record, and the impostor never got one of its own.
       expect(coordinator!.registeredPeers.length).toBe(1)
       expect(coordinator!.registeredPeers[0].endpoint.port).not.toBe(51999)
+    })
+  })
+
+  describe('exit nodes', () => {
+    it('advertises an exit node to the rest of the network', async () => {
+      const url = startCoordinator()
+      const exit = makeNode(url, { exitNode: true })
+      const client = makeNode(url)
+
+      const seen: Record<string, boolean | undefined> = {}
+      client.node.on('peers', (records) => {
+        for (const r of records) seen[r.publicKey] = r.exitNode
+      })
+
+      await exit.node.start()
+      await client.node.start()
+      await until(() => Object.keys(seen).length >= 1)
+
+      expect(seen[exit.node.publicKeyB64]).toBe(true)
+    })
+
+    it('leaves ordinary peers unmarked rather than false-advertising them', async () => {
+      const url = startCoordinator()
+      const plain = makeNode(url)
+      const client = makeNode(url)
+
+      const seen: Record<string, boolean | undefined> = {}
+      client.node.on('peers', (records) => {
+        for (const r of records) seen[r.publicKey] = r.exitNode
+      })
+
+      await plain.node.start()
+      await client.node.start()
+      await until(() => Object.keys(seen).length >= 1)
+
+      expect(seen[plain.node.publicKeyB64]).toBeUndefined()
+    })
+
+    it('reflects the claim in the directory the coordinator keeps', async () => {
+      const url = startCoordinator()
+      const exit = makeNode(url, { exitNode: true })
+      const plain = makeNode(url)
+      await exit.node.start()
+      await plain.node.start()
+      await until(() => coordinator!.registeredPeers.length === 2)
+
+      const records = coordinator!.registeredPeers
+      expect(records.find(r => r.publicKey === exit.node.publicKeyB64)?.exitNode).toBe(true)
+      expect(records.find(r => r.publicKey === plain.node.publicKeyB64)?.exitNode).toBeUndefined()
+    })
+
+    it('supports more than one exit node in a network', async () => {
+      const url = startCoordinator()
+      const a = makeNode(url, { exitNode: true })
+      const b = makeNode(url, { exitNode: true })
+      await a.node.start()
+      await b.node.start()
+      await until(() => coordinator!.registeredPeers.length === 2)
+
+      expect(coordinator!.registeredPeers.filter(r => r.exitNode).length).toBe(2)
     })
   })
 

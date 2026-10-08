@@ -13,6 +13,8 @@ interface Registered {
   assignedIp: string
   host: string
   port: number
+  /** The node advertised itself as an exit node. Relayed, never verified. */
+  exitNode: boolean
 }
 
 export interface VpnCoordinatorOptions {
@@ -165,7 +167,14 @@ export class VpnCoordinator {
         const host = ws.remoteAddress || '127.0.0.1'
         const assignedIp = this.assignIp(msg.publicKey)
         ws.data.publicKey = msg.publicKey
-        this.peers.set(msg.publicKey, { ws, publicKey: msg.publicKey, assignedIp, host, port: msg.listenPort })
+        this.peers.set(msg.publicKey, {
+          ws,
+          publicKey: msg.publicKey,
+          assignedIp,
+          host,
+          port: msg.listenPort,
+          exitNode: msg.exitNode === true,
+        })
         send(ws, { t: 'registered', assignedIp, network: this.network })
         this.broadcastPeers()
         break
@@ -229,7 +238,12 @@ export class VpnCoordinator {
 }
 
 function toRecord(p: Registered): PeerRecord {
-  return { publicKey: p.publicKey, assignedIp: p.assignedIp, endpoint: { host: p.host, port: p.port } }
+  return {
+    publicKey: p.publicKey,
+    assignedIp: p.assignedIp,
+    endpoint: { host: p.host, port: p.port },
+    ...(p.exitNode ? { exitNode: true } : {}),
+  }
 }
 
 function send(ws: ServerWebSocket<ConnData>, msg: ServerMessage): void {
