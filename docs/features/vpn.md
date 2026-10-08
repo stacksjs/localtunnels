@@ -16,12 +16,23 @@ Because the protocol is WireGuard v1, the peers and configs are wire‑compatibl
 ## Requirements
 
 - **Bun** (the control plane runs on Bun).
-- The native **`libltvpn`** shared library. It ships prebuilt in the npm package; to build from source you need [Zig](https://ziglang.org):
+- The native **`libltvpn`** shared library, which you build. The npm package
+  ships the Zig source of the core rather than a compiled library, so you need
+  [Zig](https://ziglang.org) once:
 
   ```sh
+  # In a checkout of this repo
   bun run build:native   # → packages/vpn-core/zig-out/lib/libltvpn.*
   bun run test:native    # Zig unit + known-answer + fuzz tests
+
+  # Or inside an installed copy of the package
+  cd node_modules/localtunnels/native && zig build
   ```
+
+  The library is looked for beside the executable and in `../lib` of it first,
+  then under the installed package; `LTVPN_LIB` overrides all of it with an
+  explicit path. A downloaded release binary does not carry the library, so
+  point `LTVPN_LIB` at one you built, or put it next to the binary.
 
 - Bringing up a real network interface (`vpn:up`, `vpn:tun-check`) needs **root** (TUN devices: `utun` on macOS, `/dev/net/tun` on Linux). The crypto/demo commands do not.
 

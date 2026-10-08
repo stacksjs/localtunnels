@@ -27,7 +27,8 @@ const LIB_BASENAME = `libltvpn.${suffix}`
  * Candidate locations for the shared library, most specific first:
  *   1. `LTVPN_LIB` env override (absolute path to the library file)
  *   2. beside the executable, and `../lib` of it — how a compiled binary ships
- *   3. `dist/native/` — where the published npm package ships prebuilt libs
+ *   3. `dist/native/` — kept for a package that does ship a built library;
+ *      the npm tarball currently ships the Zig source for `zig build` instead
  *   4. `native/zig-out/lib/` — a source build inside the installed package
  *   5. `../vpn-core/zig-out/lib/` — monorepo dev builds (packages/vpn-core)
  */
