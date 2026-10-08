@@ -1,5 +1,6 @@
 import type { Server, ServerWebSocket } from 'bun'
 import type { ClientMessage, PeerRecord, ServerMessage } from './protocol'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { parseMessage } from './protocol'
 
 interface ConnData {
@@ -21,6 +22,15 @@ export interface VpnCoordinatorOptions {
   /** Network to allocate tunnel IPs from. Default 100.100.0.0/16. */
   network?: string
   verbose?: boolean
+  /**
+   * Shared secret every node must present in its `register` frame to join.
+   *
+   * Omitting it leaves the coordinator **open**: anyone who can reach the port
+   * is handed a tunnel IP and the full peer directory. That is acceptable for
+   * tests and single-host demos and nowhere else, so `lt vpn:coordinator`
+   * generates a key unless `--insecure-no-auth` is passed.
+   */
+  authKey?: string
 }
 
 /**
@@ -42,15 +52,28 @@ export class VpnCoordinator {
   private readonly network: string
   private readonly baseIp: number
   private readonly prefix: number
+  private readonly authKey: string | null
+  /**
+   * publicKey → tunnel IP, retained across disconnects so a node that drops
+   * and comes back keeps its address. Without this the pool counter climbs on
+   * every reconnect and the "stable per-public-key" promise below is a lie.
+   */
+  private readonly leases = new Map<string, string>()
   private nextHost = 2 // reserve .0.0 (network) and .0.1 (gateway)
 
   constructor(options: VpnCoordinatorOptions = {}) {
     this.bindPort = options.port ?? 0
     this.bindHost = options.host
+    this.authKey = options.authKey || null
     this.network = options.network ?? '100.100.0.0/16'
     const [addr, prefixStr] = this.network.split('/')
     this.prefix = Number.parseInt(prefixStr) || 16
     this.baseIp = ipToInt(addr)
+  }
+
+  /** Whether this coordinator requires an auth key to join. */
+  get requiresAuth(): boolean {
+    return this.authKey !== null
   }
 
   get port(): number {
@@ -96,6 +119,24 @@ export class VpnCoordinator {
     this.server?.stop(true)
     this.server = null
     this.peers.clear()
+    this.leases.clear()
+  }
+
+  /**
+   * Constant-time check of a presented auth key.
+   *
+   * Both sides are hashed to a fixed 32 bytes first, so `timingSafeEqual`
+   * cannot throw on a length mismatch and the comparison leaks neither the
+   * key's content nor its length.
+   */
+  private authorized(presented: string | undefined): boolean {
+    if (!this.authKey)
+      return true
+    if (typeof presented !== 'string' || presented.length === 0)
+      return false
+    const a = createHash('sha256').update(presented).digest()
+    const b = createHash('sha256').update(this.authKey).digest()
+    return timingSafeEqual(a, b)
   }
 
   private onMessage(ws: ServerWebSocket<ConnData>, msg: ClientMessage): void {
@@ -103,6 +144,22 @@ export class VpnCoordinator {
       case 'register': {
         if (!msg.publicKey || typeof msg.listenPort !== 'number') {
           send(ws, { t: 'error', message: 'register requires publicKey and listenPort' })
+          return
+        }
+        if (!this.authorized(msg.authKey)) {
+          send(ws, { t: 'error', message: 'registration rejected: missing or invalid auth key' })
+          ws.close(1008, 'unauthorized')
+          return
+        }
+        // A public key is claimed by at most one live connection. Without this
+        // a second node could register someone else's key and take over its
+        // directory record — it still could not decrypt that peer's traffic,
+        // which is end-to-end encrypted, but it could draw the relay frames
+        // addressed to it and strand the real node.
+        const held = this.peers.get(msg.publicKey)
+        if (held && held.ws !== ws && held.ws.readyState === WebSocket.OPEN) {
+          send(ws, { t: 'error', message: 'public key is already registered by a live connection' })
+          ws.close(1008, 'duplicate public key')
           return
         }
         const host = ws.remoteAddress || '127.0.0.1'
@@ -116,6 +173,8 @@ export class VpnCoordinator {
       case 'heartbeat':
         break
       case 'punch': {
+        if (!ws.data.publicKey)
+          return
         // Relay a punch request: tell `target` to punch back toward the
         // requester, so both open their NAT mappings at about the same time.
         const requester = ws.data.publicKey ? this.peers.get(ws.data.publicKey) : undefined
@@ -130,6 +189,8 @@ export class VpnCoordinator {
         break
       }
       case 'relay': {
+        if (!ws.data.publicKey)
+          return
         // Forward an opaque encrypted frame to the target. The coordinator
         // never inspects `data` — it is WireGuard ciphertext.
         const from = ws.data.publicKey
@@ -143,15 +204,16 @@ export class VpnCoordinator {
 
   /** Stable per-public-key IP assignment from the pool. */
   private assignIp(publicKey: string): string {
-    const existing = this.peers.get(publicKey)
-    if (existing)
-      return existing.assignedIp
+    const leased = this.leases.get(publicKey)
+    if (leased)
+      return leased
     const hostBits = 32 - this.prefix
     const maxHost = (2 ** hostBits) - 2
     if (this.nextHost > maxHost)
       throw new Error('VPN address pool exhausted')
     const ip = intToIp(this.baseIp + this.nextHost)
     this.nextHost += 1
+    this.leases.set(publicKey, ip)
     return ip
   }
 

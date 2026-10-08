@@ -11,6 +11,8 @@ export interface VpnCoordinatorClientOptions {
   listenPort: number
   /** Seconds between heartbeats. 0 disables. Default 20. */
   heartbeatInterval?: number
+  /** Shared secret, when the coordinator was started with an auth key. */
+  authKey?: string
 }
 
 export interface VpnCoordinatorClientEvents {
@@ -37,6 +39,13 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
   private readonly publicKey: string
   private readonly listenPort: number
   private readonly heartbeatInterval: number
+  private readonly authKey?: string
+  /**
+   * The last `error` frame the coordinator sent. A rejected registration
+   * arrives as an error and *then* a close, so without holding onto the reason
+   * the connect promise would reject with a bare "closed before registration".
+   */
+  private lastServerError: string | null = null
 
   assignedIp: string | null = null
   network: string | null = null
@@ -47,17 +56,24 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
     this.publicKey = options.publicKey
     this.listenPort = options.listenPort
     this.heartbeatInterval = options.heartbeatInterval ?? 20
+    this.authKey = options.authKey
   }
 
   /** Connect and register. Resolves once the coordinator assigns an IP. */
   connect(): Promise<{ assignedIp: string, network: string }> {
     return new Promise((resolve, reject) => {
       let settled = false
+      this.lastServerError = null
       const ws = new WebSocket(this.url)
       this.ws = ws
 
       ws.addEventListener('open', () => {
-        ws.send(JSON.stringify({ t: 'register', publicKey: this.publicKey, listenPort: this.listenPort }))
+        ws.send(JSON.stringify({
+          t: 'register',
+          publicKey: this.publicKey,
+          listenPort: this.listenPort,
+          ...(this.authKey ? { authKey: this.authKey } : {}),
+        }))
       })
 
       ws.addEventListener('message', (event) => {
@@ -89,7 +105,9 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
         this.emit('close')
         if (!settled) {
           settled = true
-          reject(new Error('coordinator closed before registration'))
+          reject(new Error(this.lastServerError
+            ? `coordinator rejected registration: ${this.lastServerError}`
+            : 'coordinator closed before registration'))
         }
       })
     })
@@ -114,6 +132,7 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
         this.emit('relayFrame', msg.from, new Uint8Array(Buffer.from(msg.data, 'base64')))
         break
       case 'error':
+        this.lastServerError = msg.message
         this.emit('error', new Error(msg.message))
         break
     }

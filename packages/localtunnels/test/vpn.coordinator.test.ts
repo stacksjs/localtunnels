@@ -1,3 +1,4 @@
+import type { VpnKeyPair } from '../src/vpn'
 import { afterEach, describe, expect, it } from 'bun:test'
 import { generateKeyPair, isVpnAvailable, VpnCoordinator, VpnNode } from '../src/vpn'
 
@@ -42,14 +43,18 @@ describeVpn('vpn/coordinator', () => {
     coordinator = null
   })
 
-  function startCoordinator(): string {
-    coordinator = new VpnCoordinator({ host: '127.0.0.1' })
+  function startCoordinator(authKey?: string): string {
+    coordinator = new VpnCoordinator({ host: '127.0.0.1', authKey })
     coordinator.start()
     return `ws://127.0.0.1:${coordinator.port}`
   }
 
-  function makeNode(url: string): Harness {
-    const node = new VpnNode({ keyPair: generateKeyPair(), coordinatorUrl: url })
+  function makeNode(url: string, opts: { authKey?: string, keyPair?: VpnKeyPair } = {}): Harness {
+    const node = new VpnNode({
+      keyPair: opts.keyPair ?? generateKeyPair(),
+      coordinatorUrl: url,
+      authKey: opts.authKey,
+    })
     const links = new Set<string>()
     const messages: { data: string, from: string }[] = []
     node.on('link', l => links.add(l.peerPublicKey))
@@ -129,5 +134,104 @@ describeVpn('vpn/coordinator', () => {
     nodes = nodes.filter(n => n !== b.node)
     await until(() => coordinator!.registeredPeers.length === 1)
     expect(coordinator!.registeredPeers[0].publicKey).toBe(a.node.publicKeyB64)
+  })
+
+  describe('auth', () => {
+    const AUTH = 'correct-horse-battery-staple'
+
+    it('reports whether it requires auth', () => {
+      startCoordinator(AUTH)
+      expect(coordinator!.requiresAuth).toBe(true)
+      coordinator!.stop()
+      startCoordinator()
+      expect(coordinator!.requiresAuth).toBe(false)
+    })
+
+    it('admits a node presenting the right key', async () => {
+      const url = startCoordinator(AUTH)
+      const a = makeNode(url, { authKey: AUTH })
+      const info = await a.node.start()
+      expect(info.assignedIp).toBe('100.100.0.2')
+      expect(coordinator!.registeredPeers.length).toBe(1)
+    })
+
+    it('rejects a node with no key, naming the reason', async () => {
+      const url = startCoordinator(AUTH)
+      const a = makeNode(url)
+      await expect(a.node.start()).rejects.toThrow(/missing or invalid auth key/)
+      expect(coordinator!.registeredPeers.length).toBe(0)
+    })
+
+    it('rejects a node with the wrong key', async () => {
+      const url = startCoordinator(AUTH)
+      const a = makeNode(url, { authKey: 'wrong' })
+      await expect(a.node.start()).rejects.toThrow(/missing or invalid auth key/)
+      expect(coordinator!.registeredPeers.length).toBe(0)
+    })
+
+    it('rejects a key that only shares a prefix with the real one', async () => {
+      const url = startCoordinator(AUTH)
+      const a = makeNode(url, { authKey: AUTH.slice(0, -1) })
+      await expect(a.node.start()).rejects.toThrow(/missing or invalid auth key/)
+      expect(coordinator!.registeredPeers.length).toBe(0)
+    })
+
+    it('still admits everyone when started without a key', async () => {
+      const url = startCoordinator()
+      const a = makeNode(url)
+      await expect(a.node.start()).resolves.toBeTruthy()
+      expect(coordinator!.registeredPeers.length).toBe(1)
+    })
+
+    it('will not let a second connection claim a registered public key', async () => {
+      const url = startCoordinator(AUTH)
+      const a = makeNode(url, { authKey: AUTH })
+      await a.node.start()
+      await until(() => coordinator!.registeredPeers.length === 1)
+
+      // A raw client that knows the auth key but impersonates a's public key.
+      const ws = new WebSocket(url)
+      const frames: any[] = []
+      await new Promise<void>((resolve, reject) => {
+        ws.addEventListener('open', () => {
+          ws.send(JSON.stringify({
+            t: 'register',
+            publicKey: a.node.publicKeyB64,
+            listenPort: 51999,
+            authKey: AUTH,
+          }))
+        })
+        ws.addEventListener('message', (e: any) => {
+          frames.push(JSON.parse(typeof e.data === 'string' ? e.data : String(e.data)))
+        })
+        ws.addEventListener('close', () => resolve())
+        ws.addEventListener('error', () => reject(new Error('socket error')))
+        setTimeout(() => reject(new Error('impostor was neither rejected nor closed')), 4000)
+      })
+
+      expect(frames.some(f => f.t === 'error' && /already registered/.test(f.message))).toBe(true)
+      // a keeps its record, and the impostor never got one of its own.
+      expect(coordinator!.registeredPeers.length).toBe(1)
+      expect(coordinator!.registeredPeers[0].endpoint.port).not.toBe(51999)
+    })
+  })
+
+  it('gives a reconnecting node its original tunnel IP back', async () => {
+    const url = startCoordinator()
+    const keyPair = generateKeyPair()
+    const first = makeNode(url, { keyPair })
+    const firstIp = (await first.node.start()).assignedIp
+
+    // Take the node away entirely, then bring the same identity back. The
+    // address must follow the key, not the connection order.
+    first.node.stop()
+    nodes = nodes.filter(n => n !== first.node)
+    await until(() => coordinator!.registeredPeers.length === 0)
+
+    const other = makeNode(url)
+    await other.node.start()
+
+    const again = makeNode(url, { keyPair })
+    expect((await again.node.start()).assignedIp).toBe(firstIp)
   })
 })

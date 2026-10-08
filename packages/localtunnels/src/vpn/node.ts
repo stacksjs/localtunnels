@@ -21,6 +21,8 @@ export interface VpnNodeOptions {
   relay?: 'auto' | 'always' | 'never'
   /** Raw (unframed) transport — carry bare IP packets, for TUN datapaths. */
   raw?: boolean
+  /** Shared secret, when the coordinator was started with an auth key. */
+  authKey?: string
 }
 
 export interface VpnNodeEvents {
@@ -53,6 +55,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   private readonly linked = new Set<string>()
   private readonly connecting = new Set<string>()
   private readonly relayPolicy: 'auto' | 'always' | 'never'
+  private readonly authKey?: string
   assignedIp: string | null = null
 
   constructor(options: VpnNodeOptions) {
@@ -61,6 +64,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     this.coordinatorUrl = options.coordinatorUrl
     this.listenPort = options.listenPort ?? 0
     this.relayPolicy = options.relay ?? 'auto'
+    this.authKey = options.authKey
     this.publicKeyB64 = encodeKey(options.keyPair.publicKey)
     this.peer = new VpnPeer({
       keyPair: options.keyPair,
@@ -85,6 +89,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
       url: this.coordinatorUrl,
       publicKey: this.publicKeyB64,
       listenPort: this.peer.port,
+      authKey: this.authKey,
     })
     this.client.on('peers', records => this.onPeers(records))
     // A peer asked us to punch toward it: open our NAT mapping so its handshake

@@ -27,6 +27,11 @@ export interface RegisterMessage {
   publicKey: string
   /** UDP port this node listens on for the datapath */
   listenPort: number
+  /**
+   * Shared secret proving this node is allowed to join. Required when the
+   * coordinator was started with an auth key; ignored when it was not.
+   */
+  authKey?: string
 }
 
 export interface HeartbeatMessage {
