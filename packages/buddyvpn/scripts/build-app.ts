@@ -147,7 +147,55 @@ fs.chmodSync(path.join(macosDir, 'craft-runtime'), 0o755)
 
 fs.cpSync(path.join(PACKAGE_DIR, 'web'), path.join(resourcesDir, 'web'), { recursive: true })
 
-// ── 4. Info.plist ───────────────────────────────────────────────
+// ── 4. The icon ─────────────────────────────────────────────────
+/**
+ * `AppIcon.icns`, rasterized from `icon/icon.svg`.
+ *
+ * Every tool here ships with macOS — `qlmanage` renders the SVG, `sips`
+ * resizes, `iconutil` packs — so the repository keeps the icon as text that
+ * can be diffed and edited rather than a binary blob nobody can open.
+ *
+ * `qlmanage` writes `<name>.png` beside the input and says nothing useful on
+ * failure, so the output is checked for rather than the exit code trusted.
+ */
+function buildIcon(): boolean {
+  const source = path.join(PACKAGE_DIR, 'icon/icon.svg')
+  if (!fs.existsSync(source)) {
+    console.warn('[buddyvpn] no icon/icon.svg — the app will use the generic one')
+    return false
+  }
+
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'buddyvpn-icon-'))
+  try {
+    spawnSync('qlmanage', ['-t', '-s', '1024', '-o', work, source], { stdio: 'ignore' })
+    const rendered = path.join(work, `${path.basename(source)}.png`)
+    if (!fs.existsSync(rendered)) {
+      console.warn('[buddyvpn] qlmanage could not rasterize the icon — using the generic one')
+      return false
+    }
+
+    // The sizes macOS asks for. Each is also needed at @2x, which is simply
+    // the next size up under a different name.
+    const iconset = path.join(work, 'AppIcon.iconset')
+    fs.mkdirSync(iconset)
+    for (const size of [16, 32, 128, 256, 512]) {
+      for (const [scale, suffix] of [[1, ''], [2, '@2x']] as const) {
+        const pixels = size * scale
+        run('sips', ['-z', String(pixels), String(pixels), rendered, '--out', path.join(iconset, `icon_${size}x${size}${suffix}.png`)], work)
+      }
+    }
+
+    run('iconutil', ['-c', 'icns', iconset, '-o', path.join(resourcesDir, 'AppIcon.icns')], work)
+    return true
+  }
+  finally {
+    fs.rmSync(work, { recursive: true, force: true })
+  }
+}
+
+const hasIcon = buildIcon()
+
+// ── 5. Info.plist ───────────────────────────────────────────────
 const overrides = JSON.parse(fs.readFileSync(path.join(PACKAGE_DIR, 'Info.plist.json'), 'utf8')) as Record<string, unknown>
 const plist = {
   CFBundleDisplayName: APP_NAME,
@@ -157,6 +205,7 @@ const plist = {
   CFBundlePackageType: 'APPL',
   CFBundleShortVersionString: APP_VERSION,
   CFBundleVersion: APP_VERSION,
+  ...(hasIcon ? { CFBundleIconFile: 'AppIcon' } : {}),
   ...overrides,
 }
 
@@ -172,7 +221,7 @@ fs.writeFileSync(plistJson, JSON.stringify(plist))
 run('plutil', ['-convert', 'xml1', plistJson, '-o', path.join(APP_DIR, 'Contents/Info.plist')])
 fs.rmSync(plistJson, { force: true })
 
-// ── 5. Seal ─────────────────────────────────────────────────────
+// ── 6. Seal ─────────────────────────────────────────────────────
 // Inside out: nested code first, the bundle last. A bundle sealed before the
 // executables inside it carries hashes of files that then changed.
 const identity = process.env.DESKTOP_SIGNING_IDENTITY
@@ -192,7 +241,7 @@ for (const name of ['craft-runtime', 'localtunnels', 'libltvpn.dylib', APP_NAME]
 run('codesign', [...signArgs, APP_DIR])
 run('codesign', ['--verify', '--deep', '--strict', APP_DIR])
 
-// ── 6. Image ────────────────────────────────────────────────────
+// ── 7. Image ────────────────────────────────────────────────────
 // The volume carries the version, which is the macOS convention and also
 // sidesteps a collision: with the app installed, TCC refuses to let anything
 // create a second `/Volumes/<App>/<App>.app` over the copy it manages.

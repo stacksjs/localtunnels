@@ -1,0 +1,61 @@
+<!--
+  BuddyVPN's icon.
+
+  A paw, because the app is named after a dog, and because a paw survives
+  being 16 pixels wide in a menu bar where a shield with a keyhole in it does
+  not. The shapes are five solid blobs with no interior detail for exactly
+  that reason.
+
+  Kept as SVG in the repository rather than a committed .icns: the build
+  rasterizes it with `qlmanage` and assembles the iconset with `sips` and
+  `iconutil`, all of which ship with macOS. A binary icon in git is a file
+  nobody can diff or edit.
+
+  The artwork sits on the 824x824 rounded square centred in a 1024 canvas,
+  which is the macOS icon grid — an icon drawn edge to edge stands taller
+  than every neighbour in the Dock.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3FA0FF"/>
+      <stop offset="0.55" stop-color="#0A72F0"/>
+      <stop offset="1" stop-color="#0B41C8"/>
+    </linearGradient>
+    <!-- The sheen every macOS icon has across its upper third. -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+
+  <g fill="#ffffff">
+    <!--
+      Four toes on an arc, the outer pair tilted outwards. The gaps between
+      them are the whole trick: at 16px the white shapes bleed into one
+      another, and a paw whose toes have merged is a blob with bumps on it.
+      Each toe is separated by more than its own width.
+    -->
+    <ellipse cx="344" cy="455" rx="48" ry="63" transform="rotate(-22 344 455)"/>
+    <ellipse cx="452" cy="396" rx="51" ry="68" transform="rotate(-8 452 396)"/>
+    <ellipse cx="572" cy="396" rx="51" ry="68" transform="rotate(8 572 396)"/>
+    <ellipse cx="680" cy="455" rx="48" ry="63" transform="rotate(22 680 455)"/>
+
+    <!--
+      The main pad, set clear of the toes. Broad at the shoulders and
+      narrower at the base, which is what makes the group read as a paw
+      rather than as five unrelated dots.
+    -->
+    <path d="M512 556
+             c 58 0 106 27 126 65
+             c 20 37 12 80 -20 106
+             c -29 24 -67 35 -106 35
+             c -39 0 -77 -11 -106 -35
+             c -32 -26 -40 -69 -20 -106
+             c 20 -38 68 -65 126 -65 Z"/>
+  </g>
+</svg>
