@@ -211,6 +211,17 @@ const persistentStorage = runtimeSupports('--persistent-storage') ? ['--persiste
  */
 const frameAutosave = runtimeSupports('--frame-autosave') ? ['--frame-autosave', 'buddyvpn-main'] : []
 
+/**
+ * What the application menu calls this app.
+ *
+ * The window is drawn by `craft-runtime`, which is a child process, and
+ * AppKit names About/Hide/Quit after the running executable rather than after
+ * the bundle around it. The menu's title came from `CFBundleName` and was
+ * right; everything under it read "Quit craft-runtime", which names an
+ * implementation detail the person using this has no reason to have heard of.
+ */
+const appName = runtimeSupports('--app-name') ? ['--app-name', APP_NAME] : []
+
 const craft = Bun.spawn([
   craftBinary,
   `http://127.0.0.1:${port}/`,
@@ -220,6 +231,7 @@ const craft = Bun.spawn([
   ...chromeControls,
   ...persistentStorage,
   ...frameAutosave,
+  ...appName,
   // A consumer VPN window: narrow enough to leave in a corner of the screen,
   // tall enough that the button sits in the middle rather than crowding the
   // location row under it.
