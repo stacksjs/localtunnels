@@ -1,0 +1,12 @@
+{
+  "name": "@localtunnels/vpn-app",
+  "type": "module",
+  "version": "0.2.13",
+  "private": true,
+  "description": "The localtunnels VPN desktop app for macOS.",
+  "license": "MIT",
+  "scripts": {
+    "build:app": "bun run scripts/build-app.ts",
+    "dev": "bun run src/launcher.ts agent"
+  }
+}

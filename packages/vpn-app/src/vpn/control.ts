@@ -1,0 +1,236 @@
+/**
+ * Bringing the tunnel up and down.
+ *
+ * Creating a `utun` and installing routes needs root, and there are two ways
+ * to get it: install a privileged helper that runs forever, or ask macOS for
+ * authorization per action. This app does the second, which is the posture
+ * SystemCleaner settled on for the same question — elevate for one legible,
+ * bounded command, never hold privilege between actions. There is no helper
+ * to install, nothing runs as root between connections, and the thing being
+ * authorized is a command the user could have typed.
+ *
+ * The cost is a password prompt per connect, which is the honest price.
+ *
+ * ## Why these values are rejected rather than escaped
+ *
+ * The command ends up inside a shell string inside an AppleScript literal:
+ *
+ *     osascript -e 'do shell script "<shell command>" with administrator privileges'
+ *
+ * Escaping has to be perfect twice. So nothing reaches the quoting that has
+ * not first matched an allowlist — a coordinator is a scheme, host and
+ * optional port with no path, query or userinfo; a key is base64. The CLI
+ * path is never caller-supplied; it is the bundled binary.
+ */
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
+import { appleScriptEscape, exec, shellEscape } from '../support/shell'
+import { regionById } from '../regions'
+import { findCli } from './core'
+
+/** `ws://host`, `wss://host:51821`. No path, no query, no credentials. */
+const COORDINATOR_URL = /^wss?:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?$/i
+/** A shared secret, as a coordinator token: word characters and dashes. */
+const AUTH_KEY = /^[\w-]{1,128}$/
+/** base64 X25519, which is 43 characters and a `=`. */
+const PUBLIC_KEY = /^[\w+/]{42}[\w+/=]=$/
+
+export interface ServerEntry {
+  /** `ws://` or `wss://` host, optionally with a port. */
+  coordinatorUrl: string
+  /** Shared secret, when the coordinator requires one. */
+  authKey?: string
+  /** A specific exit node's public key, or `auto`. Absent means no exit. */
+  useExit?: string
+}
+
+export type ServerMap = Record<string, ServerEntry>
+
+/** `~/Library/Application Support/LocalTunnels VPN`. */
+export function appSupportDir(): string {
+  return path.join(os.homedir(), 'Library/Application Support', 'LocalTunnels VPN')
+}
+
+/**
+ * Where each region's coordinator lives.
+ *
+ * A file rather than a text field on the window, because a coordinator URL is
+ * not something you retype per connection — it is a property of a server you
+ * deployed once. `bun run deploy:vpn --region us-west` is what produces one;
+ * until then a region simply has no server, and the window says so rather
+ * than offering a button that cannot work.
+ */
+export function serversPath(): string {
+  return path.join(appSupportDir(), 'servers.json')
+}
+
+export function pidFile(): string {
+  return path.join(appSupportDir(), 'tunnel.pid')
+}
+
+export function logFile(): string {
+  return path.join(appSupportDir(), 'tunnel.log')
+}
+
+/**
+ * Read the server map, dropping anything malformed.
+ *
+ * Entries are validated here rather than at use: a file someone hand-edited
+ * is exactly the input that must not reach the elevated command, and a bad
+ * entry should make its region unavailable, not make the app unusable.
+ */
+export function readServers(): ServerMap {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(fs.readFileSync(serversPath(), 'utf8'))
+  }
+  catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    return {}
+
+  const servers: ServerMap = {}
+  for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!regionById(id) || !value || typeof value !== 'object')
+      continue
+    const entry = value as Record<string, unknown>
+    const coordinatorUrl = entry.coordinatorUrl
+    if (typeof coordinatorUrl !== 'string' || !COORDINATOR_URL.test(coordinatorUrl))
+      continue
+
+    const authKey = typeof entry.authKey === 'string' && AUTH_KEY.test(entry.authKey) ? entry.authKey : undefined
+    const rawExit = entry.useExit
+    const useExit = rawExit === 'auto' || (typeof rawExit === 'string' && PUBLIC_KEY.test(rawExit))
+      ? rawExit as string
+      : undefined
+
+    servers[id] = { coordinatorUrl, ...(authKey ? { authKey } : {}), ...(useExit ? { useExit } : {}) }
+  }
+  return servers
+}
+
+/**
+ * The command that brings the tunnel up.
+ *
+ * `nohup ... &` because the tunnel has to outlive the `osascript` that
+ * authorized it, and the pid is recorded so the app can stop what it started
+ * — and only what it started.
+ */
+export function buildConnectCommand(cli: string, entry: ServerEntry): string {
+  const args = ['vpn:up', '--coordinator', entry.coordinatorUrl]
+  if (entry.authKey)
+    args.push('--auth-key', entry.authKey)
+  if (entry.useExit)
+    args.push('--use-exit', entry.useExit)
+
+  const quoted = [cli, ...args].map(shellEscape).join(' ')
+  return `nohup ${quoted} > ${shellEscape(logFile())} 2>&1 & echo $! > ${shellEscape(pidFile())}`
+}
+
+export function buildElevatedCommand(shellCommand: string): string {
+  return `osascript -e 'do shell script "${appleScriptEscape(shellCommand)}" with administrator privileges'`
+}
+
+/**
+ * Whether a running process is a tunnel this app started.
+ *
+ * A recorded pid is not trusted on its own: pids are reused, and killing a
+ * stale one means killing whatever inherited the number. The command line has
+ * to show the CLI running `vpn:up`, matched on the resolved path — the CLI
+ * also ships as `lt`, which is too common a word to match on.
+ */
+export function looksLikeTunnel(commandLine: string, cliPath?: string | null): boolean {
+  if (!/(?:^|\s)vpn:up(?:\s|$)/.test(commandLine))
+    return false
+  if (cliPath)
+    return commandLine.includes(cliPath)
+  return /(?:^|[\s/])(?:localtunnels|lt)(?:\s|$)/.test(commandLine)
+}
+
+/** The pid of the tunnel this app started, or null. */
+export function connectionPid(): number | null {
+  let recorded: number
+  try {
+    recorded = Number.parseInt(fs.readFileSync(pidFile(), 'utf8').trim(), 10)
+  }
+  catch {
+    return null
+  }
+  if (!Number.isInteger(recorded) || recorded <= 0)
+    return null
+
+  const ps = exec(`ps -o command= -p ${recorded}`, { timeout: 5000 })
+  if (!ps.ok || !ps.stdout.trim())
+    return null
+
+  return looksLikeTunnel(ps.stdout.trim(), findCli()) ? recorded : null
+}
+
+export interface ActionResult {
+  success: boolean
+  error?: string
+}
+
+function formatOsaError(message: string): ActionResult {
+  if (message.includes('User canceled') || message.includes('-128'))
+    return { success: false, error: 'Cancelled' }
+  if (message.includes('authorization'))
+    return { success: false, error: 'Authorization failed' }
+  return { success: false, error: message.slice(0, 160) || 'Operation failed' }
+}
+
+/** Bring the tunnel up for a region, through the macOS authorization dialog. */
+export function connect(regionId: string): ActionResult {
+  const region = regionById(regionId)
+  if (!region)
+    return { success: false, error: 'Unknown location' }
+
+  const entry = readServers()[regionId]
+  if (!entry)
+    return { success: false, error: `No server configured for ${region.country}` }
+
+  const cli = findCli()
+  if (!cli)
+    return { success: false, error: 'The localtunnels CLI is missing from this app' }
+
+  fs.mkdirSync(appSupportDir(), { recursive: true })
+  const result = exec(buildElevatedCommand(buildConnectCommand(cli, entry)), { timeout: 180_000 })
+  if (!result.ok)
+    return formatOsaError(result.stderr || result.stdout)
+
+  return { success: true }
+}
+
+/**
+ * Stop the tunnel this app started.
+ *
+ * Only this app's own tunnel: one brought up in a terminal is visible on the
+ * window but is not this app's to kill.
+ */
+export function disconnect(): ActionResult {
+  const pid = connectionPid()
+  if (pid === null) {
+    // Nothing of ours is running, which is the state the caller wanted.
+    try {
+      fs.rmSync(pidFile(), { force: true })
+    }
+    catch {
+      // The file is advisory; failing to clear it changes nothing.
+    }
+    return { success: true }
+  }
+
+  const result = exec(buildElevatedCommand(`kill ${pid}`), { timeout: 180_000 })
+  if (!result.ok)
+    return formatOsaError(result.stderr || result.stdout)
+
+  try {
+    fs.rmSync(pidFile(), { force: true })
+  }
+  catch {
+    // As above.
+  }
+  return { success: true }
+}
