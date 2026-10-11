@@ -3,6 +3,7 @@ import {
   buildConnectCommand,
   buildElevatedCommand,
   looksLikeTunnel,
+  parseElapsed,
   parseServers,
 } from '../src/vpn/control'
 
@@ -153,5 +154,25 @@ describe('looksLikeTunnel', () => {
   it('falls back to the CLI name when no path is known', () => {
     expect(looksLikeTunnel('/opt/homebrew/bin/localtunnels vpn:up')).toBe(true)
     expect(looksLikeTunnel('lt vpn:up')).toBe(true)
+  })
+})
+
+describe('parseElapsed', () => {
+  it('reads the three shapes ps prints', () => {
+    expect(parseElapsed('05:09')).toBe(309)
+    expect(parseElapsed('01:05:09')).toBe(3909)
+    expect(parseElapsed('2-01:05:09')).toBe(176_709)
+  })
+
+  it('tolerates the leading whitespace ps pads with', () => {
+    expect(parseElapsed('   00:07')).toBe(7)
+    expect(parseElapsed('\n  12:34:56  \n')).toBe(45_296)
+  })
+
+  it('returns null rather than a wrong number', () => {
+    // A misparse here would show a tunnel as days old, so anything
+    // unrecognised has to be nothing at all.
+    for (const value of ['', 'nonsense', '1', ':', '1:2:3:4', 'ps: no such process'])
+      expect(parseElapsed(value)).toBeNull()
   })
 })

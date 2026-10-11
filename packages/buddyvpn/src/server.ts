@@ -13,7 +13,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import process from 'node:process'
 import { DEFAULT_REGION, REGIONS } from './regions'
-import { connect, connectionPid, disconnect, readServers } from './vpn/control'
+import { connect, connectionPid, connectionUptime, disconnect, readServers } from './vpn/control'
 import { readCore, readIdentity, readTunnels } from './vpn/core'
 
 const MIME: Record<string, string> = {
@@ -51,6 +51,7 @@ function status(refresh: boolean): Response {
   const core = readCore(refresh)
   const servers = readServers()
   const tunnels = readTunnels()
+  const managedPid = connectionPid()
 
   return json({
     success: true,
@@ -59,7 +60,9 @@ function status(refresh: boolean): Response {
     identity: readIdentity(),
     tunnels,
     connected: tunnels.some(tunnel => tunnel.localtunnelsRange),
-    managedPid: connectionPid(),
+    managedPid,
+    /** How long the tunnel has been up. The window shows this as its clock. */
+    uptimeSeconds: managedPid === null ? null : connectionUptime(managedPid),
     defaultRegion: DEFAULT_REGION,
     regions: REGIONS.map(region => ({
       ...region,

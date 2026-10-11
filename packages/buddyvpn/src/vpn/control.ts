@@ -156,6 +156,40 @@ export function looksLikeTunnel(commandLine: string, cliPath?: string | null): b
   return /(?:^|[\s/])(?:localtunnels|lt)(?:\s|$)/.test(commandLine)
 }
 
+/**
+ * Seconds from `ps -o etime=`, whose formats are `MM:SS`, `HH:MM:SS` and
+ * `D-HH:MM:SS`.
+ *
+ * `etime` rather than `lstart` because it needs no date parsing and no
+ * timezone: `lstart` prints a localized string, and a clock that reads
+ * "Sun Oct 11" has to be interpreted against the machine's locale to be
+ * useful. macOS `ps` has no `etimes`, which is the Linux field that would
+ * have given seconds outright.
+ */
+export function parseElapsed(etime: string): number | null {
+  const match = etime.trim().match(/^(?:(\d+)-)?(?:(\d+):)?(\d{1,2}):(\d{2})$/)
+  if (!match)
+    return null
+
+  const [, days, hours, minutes, seconds] = match
+  return Number(days ?? 0) * 86_400
+    + Number(hours ?? 0) * 3600
+    + Number(minutes) * 60
+    + Number(seconds)
+}
+
+/**
+ * How long the tunnel has been up, in seconds.
+ *
+ * Asked of the kernel rather than remembered by the window. A window counting
+ * from when it first noticed restarts its clock whenever the app is reopened,
+ * so a tunnel up for two hours would read as thirty seconds old.
+ */
+export function connectionUptime(pid: number): number | null {
+  const ps = exec(`ps -o etime= -p ${pid}`, { timeout: 5000 })
+  return ps.ok ? parseElapsed(ps.stdout) : null
+}
+
 /** The pid of the tunnel this app started, or null. */
 export function connectionPid(): number | null {
   let recorded: number

@@ -202,6 +202,15 @@ const chromeControls = runtimeSupports('--no-web-chrome-controls') ? ['--no-web-
  */
 const persistentStorage = runtimeSupports('--persistent-storage') ? ['--persistent-storage'] : []
 
+/**
+ * Reopen where it was left.
+ *
+ * A small window you keep in a corner of the screen is one you put somewhere
+ * deliberately, and having it jump back to the centre on every launch undoes
+ * that each time. AppKit does the remembering, keyed by this name.
+ */
+const frameAutosave = runtimeSupports('--frame-autosave') ? ['--frame-autosave', 'buddyvpn-main'] : []
+
 const craft = Bun.spawn([
   craftBinary,
   `http://127.0.0.1:${port}/`,
@@ -210,6 +219,7 @@ const craft = Bun.spawn([
   ...(canHostChrome ? ['--titlebar-hidden', ...material] : []),
   ...chromeControls,
   ...persistentStorage,
+  ...frameAutosave,
   // A consumer VPN window: narrow enough to leave in a corner of the screen,
   // tall enough that the button sits in the middle rather than crowding the
   // location row under it.
