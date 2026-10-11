@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalTunnels VPN</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <!--
+    One window, one button. The markup is the whole screen; `app.js` paints
+    state into it and never builds structure, so what is on screen can be read
+    here rather than reconstructed from string concatenation.
+  -->
+  <div class="window">
+    <!--
+      The window has no titlebar, so AppKit's buttons sit over this strip and
+      it is also the only drag handle. WebKit discards
+      `-webkit-app-region: drag`, so the press is handed to Craft.
+    -->
+    <header class="chrome" data-window-drag>LocalTunnels VPN</header>
+
+    <main class="body">
+      <div class="status">
+        <div class="status-label" data-status-label>Checking…</div>
+        <div class="status-clock" data-clock></div>
+      </div>
+
+      <div class="power-wrap">
+        <button class="power" type="button" data-power data-state="unknown" disabled aria-label="Connect">
+          <span class="ring" aria-hidden="true"></span>
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true">
+            <path d="M12 3v9"></path>
+            <path d="M6.3 6.3a8.5 8.5 0 1 0 11.4 0"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="caption" data-caption></div>
+
+      <button class="location" type="button" data-location aria-expanded="false">
+        <span class="badge" data-badge>--</span>
+        <span class="location-text">
+          <span class="location-kicker">Location</span>
+          <span class="location-name" data-country>—</span>
+          <span class="location-city" data-city></span>
+        </span>
+        <svg class="chevron" data-chevron viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m6 9 6 6 6-6"></path>
+        </svg>
+      </button>
+
+      <div class="picker" data-picker hidden></div>
+
+      <p class="foot" data-foot></p>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

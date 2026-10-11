@@ -1,0 +1,208 @@
+/*
+ * The window's whole appearance.
+ *
+ * Light and dark are both here and chosen by the system, because Craft
+ * resolves the material behind the web view against the window's appearance
+ * and a page that only knew one mode would sit on the wrong one half the time.
+ */
+:root {
+  color-scheme: light;
+  --app-bg: #f5f5f7;
+  --surface: #fff;
+  --surface-soft: #eeeef1;
+  --surface-inset: #e9e9ed;
+  --line: rgba(60, 60, 67, .14);
+  --line-soft: rgba(60, 60, 67, .08);
+  --ink: #1d1d1f;
+  --secondary: #6e6e73;
+  --tertiary: #8e8e93;
+  --hover: rgba(0, 0, 0, .04);
+  --accent: #007aff;
+  --green: #248a3d;
+  --orange: #c45d00;
+  --red: #d70015;
+
+  --card: #fff;
+  --card-line: rgba(60, 60, 67, .1);
+  --wash: rgba(245, 245, 247, .55);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --app-bg: #1a1a1c;
+    --surface: #242426;
+    --surface-soft: #2c2c2e;
+    --surface-inset: #202022;
+    --line: rgba(255, 255, 255, .1);
+    --line-soft: rgba(255, 255, 255, .055);
+    --ink: #f5f5f7;
+    --secondary: #98989d;
+    --tertiary: #6c6c70;
+    --hover: rgba(255, 255, 255, .055);
+    --accent: #0a84ff;
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+
+    --card: #242426;
+    --card-line: rgba(255, 255, 255, .07);
+    --wash: rgba(26, 26, 28, .5);
+  }
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--app-bg);
+  color: var(--ink);
+  font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+/* Craft stamps this on the root when it has drawn a material behind the web
+   view. Only then does the page go translucent — in a browser, where this
+   page also renders, the opaque background above is the correct answer. */
+:root[data-craft-native-sidebar] body { background: var(--wash); }
+
+.window { display: flex; flex-direction: column; width: 100vw; height: 100vh; overflow: hidden; }
+
+/* At least as tall as the window buttons AppKit draws over it. The floor
+   covers a runtime that publishes nothing, and a browser. */
+.chrome {
+  --band: calc(
+    2 * var(--craft-window-buttons-y, var(--craft-window-controls-inset-y, 0px))
+    + var(--craft-window-buttons-height, var(--craft-window-controls-height, 0px))
+  );
+  display: flex; align-items: center; justify-content: center;
+  flex: none; height: max(44px, var(--band));
+  font-size: 13px; font-weight: 600; letter-spacing: -.01em;
+}
+
+.body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column;
+  padding: 0 var(--space-5) var(--space-5);
+}
+
+/* ---------- Status ---------- */
+.status { flex: none; text-align: center; padding-top: var(--space-2); }
+.status-label { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.status-label[data-tone='on'] { color: var(--green); }
+.status-label[data-tone='busy'] { color: var(--orange); }
+.status-label[data-tone='error'] { color: var(--red); }
+.status-clock {
+  margin-top: var(--space-1); height: 16px;
+  font-size: 13px; color: var(--secondary); font-variant-numeric: tabular-nums;
+}
+
+/* ---------- The button ---------- */
+/* One target, dead centre. There is exactly one thing to do in this window. */
+.power-wrap { flex: 1; display: grid; place-items: center; min-height: 180px; }
+.power {
+  position: relative; display: grid; place-items: center;
+  width: 148px; height: 148px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: var(--surface-inset); color: var(--secondary);
+  cursor: default;
+  transition: background .2s ease, color .2s ease, transform .12s ease;
+}
+.power:hover:not(:disabled) { background: var(--hover); }
+.power:active:not(:disabled) { transform: scale(.97); }
+.power:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.power:disabled { opacity: .55; }
+.power .glyph { width: 52px; height: 52px; }
+
+.power[data-state='connecting'], .power[data-state='disconnecting'] {
+  background: color-mix(in srgb, var(--orange) 16%, transparent);
+  color: var(--orange);
+}
+.power[data-state='on'] {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+/* The ring that turns while a connection is being made: a conic gradient
+   masked to a 3px band, so it needs no SVG and no library. */
+.ring {
+  position: absolute; inset: -12px; border-radius: 50%; pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(from 0deg, transparent 0deg, currentColor 300deg, transparent 330deg);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+}
+.power[data-state='connecting'] .ring, .power[data-state='disconnecting'] .ring {
+  opacity: 1; animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.caption { flex: none; text-align: center; min-height: 16px; font-size: 12px; color: var(--tertiary); }
+
+/* ---------- Location ---------- */
+.location {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  margin-top: var(--space-5); padding: var(--space-3);
+  border: .5px solid var(--card-line); border-radius: 12px;
+  background: var(--card); color: inherit;
+  font: inherit; text-align: left; cursor: default;
+}
+.location:hover { background: var(--surface-soft); }
+.location:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.badge {
+  display: grid; place-items: center; flex: none;
+  width: 34px; height: 34px; border-radius: 9px;
+  background: var(--surface-inset); color: var(--secondary);
+  font-size: 12px; font-weight: 700; letter-spacing: .02em;
+}
+.location-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.location-kicker { font-size: 11px; color: var(--tertiary); }
+.location-name {
+  font-size: 14px; font-weight: 600; letter-spacing: -.015em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.location-city {
+  font-size: 11px; color: var(--secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chevron { flex: none; width: 13px; height: 13px; color: var(--tertiary); transition: transform .15s ease; }
+.location[aria-expanded='true'] .chevron { transform: rotate(180deg); }
+
+/* ---------- The picker ---------- */
+.picker {
+  margin-top: var(--space-2); overflow: hidden;
+  border: .5px solid var(--card-line); border-radius: 12px; background: var(--card);
+}
+.pick {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-3); border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: default;
+}
+.pick + .pick { box-shadow: inset 0 .5px 0 var(--card-line); }
+.pick:hover { background: var(--hover); }
+.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pick-note { flex: none; font-size: 11px; color: var(--tertiary); }
+.pick-check { flex: none; width: 14px; height: 14px; color: var(--accent); }
+
+.foot {
+  flex: none; margin-top: var(--space-4);
+  font-size: 11px; line-height: 1.45; color: var(--tertiary); text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .power, .power:active { transition: none; transform: none; }
+  .ring { animation: none !important; }
+  .chevron { transition: none; }
+}
