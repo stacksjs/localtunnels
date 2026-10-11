@@ -821,6 +821,10 @@ interface VpnUpOptions {
   coordinator?: string
   authKey?: string
   useExit?: string
+  fullTunnel?: boolean
+  dns?: string
+  killSwitch?: boolean
+  allowLan?: boolean
 }
 
 async function detectWan(): Promise<string> {
@@ -854,9 +858,14 @@ cli
   .option('--coordinator <url>', 'Join through a coordinator: address and peers come from discovery')
   .option('--auth-key <key>', 'Shared secret for the coordinator, when it requires one')
   .option('--use-exit <key>', 'Route all non-tunnel traffic through an exit node: a public key, or "auto"')
+  .option('--full-tunnel', 'Send this machine\'s traffic and DNS through the exit node (needs --use-exit)')
+  .option('--dns <servers>', 'Comma-separated resolvers to use while connected', { default: '1.1.1.1,1.0.0.1' })
+  .option('--kill-switch', 'Block traffic that would leave outside the tunnel, including if it drops')
+  .option('--allow-lan', 'With --kill-switch, still allow the local network')
   .action(async (options: VpnUpOptions) => {
     try {
       const { TunError, VpnInterface, decodeKey, enableExitNode } = await import('../src/vpn')
+      const { captureTraffic, releaseTraffic } = await import('../src/vpn/capture')
       const { loadOrCreateIdentity } = await import('../src/vpn/store')
       const { encodeKey } = await import('../src/vpn/keys')
 
@@ -884,6 +893,10 @@ cli
         console.log('  Note: --peer is ignored when --coordinator is set; peers come from the directory.')
       if (!viaCoordinator && options.useExit)
         console.log('  Note: --use-exit needs --coordinator; in static mode set --allowed-ips 0.0.0.0/0 instead.')
+      // Without an exit there is nowhere for captured traffic to go, and
+      // capturing it anyway is how you take a machine off the network.
+      if (options.fullTunnel && !options.useExit)
+        throw new Error('--full-tunnel needs --use-exit: capturing the default route with no exit node to carry it would take this machine off the network')
 
       const vpn = new VpnInterface({
         keyPair: identity.keyPair,
@@ -906,6 +919,40 @@ cli
       vpn.on('exitChanged', e => console.log(e.publicKey
         ? `  \u2192 exit node: ${e.publicKey.slice(0, 16)}\u2026 (all non-tunnel traffic)`
         : '  \u2192 no exit node; non-tunnel traffic has no route and is dropped'))
+
+      /*
+       * Full-tunnel mode is applied when the exit becomes known rather than
+       * at bring-up, because in coordinator mode it is not known at bring-up:
+       * the directory supplies the exit and its endpoint afterwards, and the
+       * endpoint is exactly what has to be pinned before the default route is
+       * captured.
+       */
+      let captured = false
+      if (options.fullTunnel) {
+        vpn.on('exitChanged', (e) => {
+          void (async () => {
+            if (!e.publicKey || !e.endpoint || captured)
+              return
+            try {
+              await captureTraffic({
+                tun: vpn.name ?? '',
+                endpointIp: e.endpoint.host,
+                endpointPort: e.endpoint.port,
+                dnsServers: (options.dns ?? '1.1.1.1,1.0.0.1').split(',').map(d => d.trim()).filter(Boolean),
+                killSwitch: options.killSwitch,
+                allowLan: options.allowLan,
+              })
+              captured = true
+              console.log(`  \u2192 full tunnel: default route and DNS via ${e.endpoint.host}`)
+              if (options.killSwitch)
+                console.log('  \u2192 kill switch armed: traffic outside the tunnel is blocked')
+            }
+            catch (err: any) {
+              console.error(`  ! full tunnel failed, traffic is NOT being captured: ${err.message}`)
+            }
+          })()
+        })
+      }
       vpn.on('error', () => { /* transient handshake races and drops are expected */ })
 
       let info
@@ -944,9 +991,16 @@ cli
       console.log('')
 
       const shutdown = () => {
-        console.log('\n  Bringing tunnel down...')
-        vpn.down()
-        process.exit(0)
+        void (async () => {
+          console.log('\n  Bringing tunnel down...')
+          // Routes and DNS come back first: once the interface is gone the
+          // rules that point at it are the only thing standing between this
+          // machine and no network at all.
+          if (options.fullTunnel)
+            await releaseTraffic()
+          vpn.down()
+          process.exit(0)
+        })()
       }
       process.on('SIGINT', shutdown)
       process.on('SIGTERM', shutdown)
@@ -957,6 +1011,56 @@ cli
       console.error(`\n  vpn up failed: ${error.message}`)
       if (error.name === 'VpnUnavailableError')
         console.error('  The native libltvpn library is required. Build it with: cd native && zig build')
+      process.exit(1)
+    }
+  })
+
+cli
+  .command('vpn:down', 'Undo full-tunnel mode: restore routes, DNS and firewall rules (needs root)')
+  .action(async () => {
+    /*
+     * The counterpart to the restore file `captureTraffic` writes.
+     *
+     * A kill switch is meant to outlive the process that armed it, which
+     * means a crashed `vpn:up` leaves a machine whose traffic is blocked and
+     * whose routes point at an interface that no longer exists. Ctrl+C
+     * handles the ordinary case; this handles the one where nothing was
+     * around to handle it, and it is the only way back without knowing which
+     * commands to reverse by hand.
+     *
+     * Safe to run when there is nothing to undo: every step tolerates having
+     * already been undone.
+     */
+    try {
+      const { readRestore, releaseTraffic } = await import('../src/vpn/capture')
+
+      const pending = readRestore()
+      if (pending.length === 0) {
+        console.log('\n  Nothing to undo: no full-tunnel state is recorded.\n')
+        return
+      }
+
+      console.log(`\n  Restoring ${pending.length} change(s)...`)
+      const results = await releaseTraffic()
+      const failed = results.filter(result => !result.ok)
+
+      for (const result of failed)
+        console.error(`  ! \`${result.command.join(' ')}\`: ${result.stderr || 'failed'}`)
+
+      if (failed.length === 0) {
+        console.log('  Routes, DNS and firewall rules are back to how they were.\n')
+        return
+      }
+
+      // The record is cleared either way, so a command that can never succeed
+      // does not make this unrunnable forever. Say what is left.
+      console.error(`\n  ${failed.length} step(s) could not be undone. If this machine still has no network,`)
+      console.error('  the rules above are what to remove by hand.\n')
+      process.exit(1)
+    }
+    catch (error: any) {
+      console.error(`\n  vpn down failed: ${error.message}`)
+      console.error('  Restoring routes and firewall rules needs root. Try: sudo lt vpn:down\n')
       process.exit(1)
     }
   })

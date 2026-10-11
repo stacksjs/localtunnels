@@ -17,7 +17,7 @@
  *
  * Both modes need root, because both create a network interface.
  */
-import type { PeerRecord } from './protocol'
+import type { Endpoint, PeerRecord } from './protocol'
 import type { VpnKeyPair } from './types'
 import { TypedEventEmitter } from '../types'
 import { TunBridge } from './bridge'
@@ -106,7 +106,16 @@ export interface VpnInterfaceEvents {
    * there is no longer an exit — at which point non-tunnel traffic has no
    * route and is dropped rather than leaking out of the default interface.
    */
-  exitChanged: (info: { publicKey: string | null }) => void
+  exitChanged: (info: {
+    publicKey: string | null
+    /**
+     * Where that peer is reachable, which full-tunnel mode needs: capturing
+     * the default route without first pinning the exit's own address sends
+     * the encrypted packets into the tunnel that carries them. Null when
+     * there is no exit, or when the directory has no endpoint for it.
+     */
+    endpoint: Endpoint | null
+  }) => void
   /** An encrypted link to a peer completed its handshake. */
   link: (info: { peerPublicKey: string }) => void
   error: (error: Error) => void
@@ -301,7 +310,8 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
     // `routes` on this event sees the route it is being told about.
     if (exit !== this.exit) {
       this.exit = exit
-      this.emit('exitChanged', { publicKey: exit })
+      const record = exit === null ? undefined : records.find(rec => rec.publicKey === exit)
+      this.emit('exitChanged', { publicKey: exit, endpoint: record?.endpoint ?? null })
     }
   }
 
