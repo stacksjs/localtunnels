@@ -14,12 +14,34 @@
 (() => {
   const POLL_MS = 5000
 
+  /**
+   * Demo mode.
+   *
+   * With it on, a location that has no server still works the button: the
+   * window walks off -> connecting -> on, runs its clock, and comes back
+   * down, without a tunnel existing anywhere. That is the point — the app can
+   * be clicked through and judged before a single server has been paid for.
+   *
+   * It only ever applies to a location with no server behind it. The moment
+   * one is configured, that location takes the real path and this flag stops
+   * mattering for it, so there is no mode where a real connection is faked.
+   *
+   * Flip to `false` once every location has a server, and the button simply
+   * reports the truth instead.
+   */
+  const DEMO = true
+
+  /** How long the fake handshake takes, in milliseconds. */
+  const DEMO_CONNECT_MS = 1200
+  const DEMO_DISCONNECT_MS = 600
+
   const el = {
     statusLabel: document.querySelector('[data-status-label]'),
     clock: document.querySelector('[data-clock]'),
     power: document.querySelector('[data-power]'),
     caption: document.querySelector('[data-caption]'),
     location: document.querySelector('[data-location]'),
+    kicker: document.querySelector('[data-kicker]'),
     badge: document.querySelector('[data-badge]'),
     country: document.querySelector('[data-country]'),
     city: document.querySelector('[data-city]'),
@@ -36,9 +58,14 @@
   let error = ''
   /** When this window first saw the connection. */
   let connectedSince = null
+  /** Demo mode's own connection, which exists only in this window. */
+  let demoConnected = false
 
   const regions = () => (status && status.regions) || []
-  const connected = () => Boolean(status && status.managedPid)
+  const realConnected = () => Boolean(status && status.managedPid)
+  const connected = () => realConnected() || demoConnected
+  /** True when the chosen location has no server and the demo stands in. */
+  const demoing = () => DEMO && Boolean(status) && Boolean(current()) && !current().configured
   const coreReady = () => Boolean(status && status.core && status.core.available && status.core.healthy)
   const current = () => regions().find(entry => entry.id === region) || regions()[0] || null
 
@@ -75,7 +102,7 @@
 
     const here = current()
     if (!here) return { short: 'No locations', detail: 'No locations are configured.' }
-    if (!here.configured) {
+    if (!here.configured && !DEMO) {
       return {
         short: `No server in ${here.country} yet`,
         detail: `Deploy one: bun run deploy:vpn --region ${here.id}`,
@@ -86,6 +113,8 @@
 
   const clockText = () => {
     if (!connected() || connectedSince === null) return ''
+    // Same arithmetic either way; only the origin differs — the demo sets it
+    // when the button was pressed, the real one from the tunnel's own age.
     const total = Math.max(0, Math.floor((Date.now() - connectedSince) / 1000))
     const pad = n => String(n).padStart(2, '0')
     return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`
@@ -97,6 +126,12 @@
     region = id
     picking = false
     remember('buddyvpn.region', id)
+    // A real switch is a disconnect and a fresh handshake, so the demo drops
+    // its connection too rather than appearing to teleport.
+    if (demoConnected) {
+      demoConnected = false
+      connectedSince = null
+    }
     paint()
   }
 
@@ -171,7 +206,8 @@
     el.power.setAttribute('aria-label', connected() ? 'Disconnect' : 'Connect')
 
     if (error) el.caption.textContent = error
-    else if (phase) el.caption.textContent = 'Waiting for authorization…'
+    else if (phase) el.caption.textContent = demoing() ? 'Pretending to ask for authorization…' : 'Waiting for authorization…'
+    else if (demoConnected) el.caption.textContent = 'Demo — no tunnel was created'
     else if (connected()) el.caption.textContent = here ? `Your traffic leaves from ${here.city}` : ''
     else if (blocked) el.caption.textContent = why.short
     else el.caption.textContent = here ? `Tap to connect to ${here.country}` : ''
@@ -179,7 +215,23 @@
     el.badge.textContent = here ? here.badge : '--'
     el.country.textContent = here ? here.country : '—'
     el.city.textContent = here ? here.city : ''
-    el.foot.textContent = blocked ? why.detail : ''
+
+    /*
+     * The location is fixed while the tunnel is up. Changing it is a
+     * disconnect and a fresh handshake — two authorization prompts and a
+     * window that lies about where it is in between — so the control says so
+     * instead of offering a choice it would have to take back.
+     */
+    const locked = connected() || Boolean(phase)
+    el.location.disabled = locked
+    el.kicker.textContent = locked ? 'Location · disconnect to change' : 'Location'
+    if (locked && picking) picking = false
+
+    // The demo never stops saying it is one. A window that looks connected
+    // and is not is the one thing this app must not do.
+    if (blocked) el.foot.textContent = why.detail
+    else if (demoing() && here) el.foot.textContent = `Demo. Nothing is routed. Deploy a server: bun run deploy:vpn --region ${here.id}`
+    else el.foot.textContent = ''
 
     paintPicker()
   }
@@ -207,19 +259,59 @@
     if (region === null)
       region = remember('buddyvpn.region', null) || data.defaultRegion || (data.regions[0] && data.regions[0].id) || null
 
-    // The agent does not record when a tunnel started, so the clock counts
-    // from when this window first saw it. A window opened onto a tunnel that
-    // was already up therefore times from the open — the honest answer to a
-    // question nothing on this Mac can answer exactly.
-    if (connected() && !wasConnected) connectedSince = Date.now()
-    if (!connected()) connectedSince = null
+    // The real clock is anchored to the tunnel's own age, which the agent
+    // reads from the kernel — a window counting from when it first noticed
+    // would restart the clock every time the app was reopened and show a
+    // two-hour tunnel as thirty seconds old.
+    //
+    // The demo's clock is its own, and a poll must not reset it: the agent
+    // correctly reports no tunnel while the demo says it is connected, and
+    // those two are not in conflict.
+    if (demoConnected) {
+      // Left alone.
+    }
+    else if (realConnected()) {
+      const age = typeof data.uptimeSeconds === 'number' ? data.uptimeSeconds : 0
+      if (!wasConnected || connectedSince === null) connectedSince = Date.now() - age * 1000
+    }
+    else {
+      connectedSince = null
+    }
 
     paint()
   })
 
+  /**
+   * The demo's transitions, on a timer instead of a round trip.
+   *
+   * Deliberately the same shape as the real path — a pending phase, then a
+   * settled one — because the real connect is an API call that waits on a
+   * password dialog, and a demo that resolved instantly would be a different
+   * screen from the one being judged.
+   */
+  const demoToggle = (goingUp) => {
+    phase = goingUp ? 'connecting' : 'disconnecting'
+    error = ''
+    paint()
+
+    setTimeout(() => {
+      phase = ''
+      demoConnected = goingUp
+      connectedSince = goingUp ? Date.now() : null
+      paint()
+    }, goingUp ? DEMO_CONNECT_MS : DEMO_DISCONNECT_MS)
+  }
+
   const toggle = () => {
     if (phase) return
     const goingUp = !connected()
+
+    // A location with no server has nothing to ask, so it never posts.
+    if (demoing()) {
+      demoToggle(goingUp)
+      return
+    }
+
     phase = goingUp ? 'connecting' : 'disconnecting'
     error = ''
     paint()
@@ -234,7 +326,11 @@
   }
 
   el.power.addEventListener('click', toggle)
-  el.location.addEventListener('click', () => { picking = !picking; paint() })
+  el.location.addEventListener('click', () => {
+    if (el.location.disabled) return
+    picking = !picking
+    paint()
+  })
 
   /*
    * Moving a window with no titlebar. WebKit never implemented

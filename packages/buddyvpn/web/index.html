@@ -35,10 +35,20 @@
       <div class="power-wrap">
         <button class="power" type="button" data-power data-state="unknown" disabled aria-label="Connect">
           <span class="ring" aria-hidden="true"></span>
-          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" aria-hidden="true">
+          <!--
+            Two glyphs, one shown at a time. The button's job is to say what
+            pressing it does, not to repeat the state — the label above
+            already says "Connected", in green, so a power symbol on a live
+            connection leaves the one question the button should answer
+            unanswered.
+          -->
+          <svg class="glyph glyph-power" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" aria-hidden="true">
             <path d="M12 3v9"></path>
             <path d="M6.3 6.3a8.5 8.5 0 1 0 11.4 0"></path>
+          </svg>
+          <svg class="glyph glyph-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6.5" y="6.5" width="11" height="11" rx="2.5"></rect>
           </svg>
         </button>
         <div class="caption" data-caption></div>
@@ -47,7 +57,7 @@
       <button class="location" type="button" data-location aria-expanded="false">
         <span class="badge" data-badge>--</span>
         <span class="location-text">
-          <span class="location-kicker">Location</span>
+          <span class="location-kicker" data-kicker>Location</span>
           <span class="location-name" data-country>—</span>
           <span class="location-city" data-city></span>
         </span>
