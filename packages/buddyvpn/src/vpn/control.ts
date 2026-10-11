@@ -74,20 +74,15 @@ export function logFile(): string {
 }
 
 /**
- * Read the server map, dropping anything malformed.
+ * Validate a parsed server map, dropping anything malformed.
  *
- * Entries are validated here rather than at use: a file someone hand-edited
- * is exactly the input that must not reach the elevated command, and a bad
- * entry should make its region unavailable, not make the app unusable.
+ * Split from the file read so it can be tested without one — the same split
+ * `parseIfconfig` has, and for a better reason: this is the boundary between
+ * a file someone hand-edited and a command that runs as root. A bad entry
+ * makes its region unavailable; it does not make the app unusable, and it
+ * never reaches the shell.
  */
-export function readServers(): ServerMap {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fs.readFileSync(serversPath(), 'utf8'))
-  }
-  catch {
-    return {}
-  }
+export function parseServers(parsed: unknown): ServerMap {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
     return {}
 
@@ -109,6 +104,18 @@ export function readServers(): ServerMap {
     servers[id] = { coordinatorUrl, ...(authKey ? { authKey } : {}), ...(useExit ? { useExit } : {}) }
   }
   return servers
+}
+
+/** The server map on disk, or an empty one when there is no readable file. */
+export function readServers(): ServerMap {
+  try {
+    return parseServers(JSON.parse(fs.readFileSync(serversPath(), 'utf8')))
+  }
+  catch {
+    // No file yet, or not JSON. Both mean no servers are configured, which
+    // the window reports as a location you cannot connect to.
+    return {}
+  }
 }
 
 /**
