@@ -98,10 +98,34 @@ describe('buildConnectCommand', () => {
     expect(command).toContain('echo $! >')
   })
 
-  it('omits the flags for values that are absent', () => {
-    const command = buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })
-    expect(command).not.toContain('--auth-key')
-    expect(command).not.toContain('--use-exit')
+  it('omits the auth key when the coordinator is open', () => {
+    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })).not.toContain('--auth-key')
+  })
+
+  // These are what make it a VPN rather than a private link to one machine.
+  // Without --full-tunnel the browser ignores the tunnel entirely; without
+  // the kill switch a dropped tunnel is a silent downgrade. Neither is a
+  // setting, so neither may be dropped by accident.
+  it('always asks for the full tunnel and the kill switch', () => {
+    for (const entry of [
+      { coordinatorUrl: 'ws://host' },
+      { coordinatorUrl: 'ws://host', authKey: 'secret' },
+      { coordinatorUrl: 'ws://host', useExit: 'auto' },
+    ]) {
+      const command = buildConnectCommand('/bin/lt', entry)
+      expect(command).toContain('--full-tunnel')
+      expect(command).toContain('--kill-switch')
+    }
+  })
+
+  it('falls back to an automatic exit, since --full-tunnel refuses without one', () => {
+    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })).toContain(`'--use-exit' 'auto'`)
+  })
+
+  it('uses a pinned exit when the server entry names one', () => {
+    const key = 'SqaUeBaVgl3FMs4LCSTujr8X2h5vYY4uFlqxuUvUr2A='
+    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host', useExit: key }))
+      .toContain(`'--use-exit' '${key}'`)
   })
 
   it('quotes a CLI path containing a space', () => {

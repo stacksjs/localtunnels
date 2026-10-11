@@ -124,13 +124,27 @@ export function readServers(): ServerMap {
  * `nohup ... &` because the tunnel has to outlive the `osascript` that
  * authorized it, and the pid is recorded so the app can stop what it started
  * — and only what it started.
+ *
+ * `--full-tunnel` and `--kill-switch` are what make this a VPN rather than a
+ * private link to one machine. Without the first, the tunnel comes up and the
+ * browser ignores it: the default route still points at Wi-Fi and the only
+ * thing that changes is that a `utun` device exists. Without the second, a
+ * tunnel that dies is a silent downgrade rather than an outage.
+ *
+ * Both are therefore the default here rather than options on a screen. An
+ * app whose whole purpose is "put my traffic somewhere else" has no honest
+ * setting for "but not really", and a kill switch that is off by default
+ * protects the people who already knew to turn it on.
  */
 export function buildConnectCommand(cli: string, entry: ServerEntry): string {
   const args = ['vpn:up', '--coordinator', entry.coordinatorUrl]
   if (entry.authKey)
     args.push('--auth-key', entry.authKey)
-  if (entry.useExit)
-    args.push('--use-exit', entry.useExit)
+  // `--full-tunnel` refuses to run without an exit, so an entry that names
+  // none falls back to `auto` rather than producing a tunnel that carries
+  // nothing.
+  args.push('--use-exit', entry.useExit ?? 'auto')
+  args.push('--full-tunnel', '--kill-switch')
 
   const quoted = [cli, ...args].map(shellEscape).join(' ')
   return `nohup ${quoted} > ${shellEscape(logFile())} 2>&1 & echo $! > ${shellEscape(pidFile())}`
@@ -263,7 +277,13 @@ export function disconnect(): ActionResult {
     return { success: true }
   }
 
-  const result = exec(buildElevatedCommand(`kill ${pid}`), { timeout: 180_000 })
+  // `vpn:down` first, so the kill switch and the captured routes come off
+  // even if the process is already gone or refuses to die. It is safe when
+  // there is nothing recorded, and it is the only thing that can restore a
+  // machine whose tunnel process crashed holding the network shut.
+  const cli = findCli()
+  const teardown = cli ? `${shellEscape(cli)} vpn:down; ` : ''
+  const result = exec(buildElevatedCommand(`${teardown}kill ${pid}`), { timeout: 180_000 })
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 
