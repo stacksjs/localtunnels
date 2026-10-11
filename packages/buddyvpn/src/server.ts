@@ -29,7 +29,7 @@ const MIME: Record<string, string> = {
 function webRoot(): string {
   // In the bundle this is `Contents/Resources/web`, passed by the launcher. In
   // a source run it is the package's own `web/`.
-  return process.env.LTVPN_WEB_ROOT || path.join(import.meta.dir, '../web')
+  return process.env.BUDDYVPN_WEB_ROOT || path.join(import.meta.dir, '../web')
 }
 
 function json(body: unknown, status = 200): Response {
@@ -96,7 +96,7 @@ function asset(pathname: string): Response {
 }
 
 export async function runAgent(): Promise<void> {
-  const requested = Number.parseInt(process.env.LTVPN_PORT ?? '0', 10)
+  const requested = Number.parseInt(process.env.BUDDYVPN_PORT ?? '0', 10)
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -127,5 +127,5 @@ export async function runAgent(): Promise<void> {
   })
 
   // The launcher reads the port off this line, so its shape is a contract.
-  console.log(`localtunnels-vpn-agent listening on http://127.0.0.1:${server.port}`)
+  console.log(`buddyvpn-agent listening on http://127.0.0.1:${server.port}`)
 }

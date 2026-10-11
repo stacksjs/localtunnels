@@ -13,7 +13,7 @@
  * "not installed" when it found nothing; this one *is* the VPN, so the CLI and
  * the native core ship inside it:
  *
- *   Contents/MacOS/LocalTunnels VPN   the launcher, with the agent as a subcommand
+ *   Contents/MacOS/BuddyVPN   the launcher, with the agent as a subcommand
  *   Contents/MacOS/craft-runtime      the webview
  *   Contents/MacOS/localtunnels       the CLI, elevated to bring the tunnel up
  *   Contents/MacOS/libltvpn.dylib     the native core the CLI dlopens
@@ -39,14 +39,14 @@ import process from 'node:process'
 
 const PACKAGE_DIR = path.resolve(import.meta.dir, '..')
 const ROOT = path.resolve(PACKAGE_DIR, '../..')
-const APP_NAME = 'LocalTunnels VPN'
+const APP_NAME = 'BuddyVPN'
 const OUT_DIR = path.join(PACKAGE_DIR, 'dist')
 const APP_DIR = path.join(OUT_DIR, `${APP_NAME}.app`)
 
 const APP_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version as string
 
 if (process.platform !== 'darwin') {
-  console.error('[vpn-app] the VPN app only builds on macOS')
+  console.error('[buddyvpn] the VPN app only builds on macOS')
   process.exit(1)
 }
 
@@ -104,7 +104,7 @@ function resolveCraft(): string {
 }
 
 // ── 1. The binaries ─────────────────────────────────────────────
-console.log('[vpn-app] compiling')
+console.log('[buddyvpn] compiling')
 fs.rmSync(OUT_DIR, { recursive: true, force: true })
 const macosDir = path.join(APP_DIR, 'Contents/MacOS')
 const resourcesDir = path.join(APP_DIR, 'Contents/Resources')
@@ -141,7 +141,7 @@ fs.copyFileSync(library, path.join(macosDir, 'libltvpn.dylib'))
 
 // ── 3. The runtime and the payload ──────────────────────────────
 const craft = resolveCraft()
-console.log(`[vpn-app] craft runtime: ${path.relative(ROOT, craft)} (SDK ${linkedSdk(craft)})`)
+console.log(`[buddyvpn] craft runtime: ${path.relative(ROOT, craft)} (SDK ${linkedSdk(craft)})`)
 fs.copyFileSync(craft, path.join(macosDir, 'craft-runtime'))
 fs.chmodSync(path.join(macosDir, 'craft-runtime'), 0o755)
 
@@ -167,7 +167,7 @@ const plist = {
  * prose and one unescaped `&` in a hand-built plist is a bundle macOS refuses
  * to load with a message about an unparseable Info.plist.
  */
-const plistJson = path.join(os.tmpdir(), `ltvpn-plist-${process.pid}.json`)
+const plistJson = path.join(os.tmpdir(), `buddyvpn-plist-${process.pid}.json`)
 fs.writeFileSync(plistJson, JSON.stringify(plist))
 run('plutil', ['-convert', 'xml1', plistJson, '-o', path.join(APP_DIR, 'Contents/Info.plist')])
 fs.rmSync(plistJson, { force: true })
@@ -186,7 +186,7 @@ const signArgs = adhoc
   ? ['--force', '--sign', '-']
   : ['--force', '--options', 'runtime', '--entitlements', entitlements, '--timestamp', '--sign', identity as string]
 
-console.log(`[vpn-app] sealing (${adhoc ? 'ad hoc' : 'Developer ID'})`)
+console.log(`[buddyvpn] sealing (${adhoc ? 'ad hoc' : 'Developer ID'})`)
 for (const name of ['craft-runtime', 'localtunnels', 'libltvpn.dylib', APP_NAME])
   run('codesign', [...signArgs, path.join(macosDir, name)])
 run('codesign', [...signArgs, APP_DIR])
@@ -196,15 +196,15 @@ run('codesign', ['--verify', '--deep', '--strict', APP_DIR])
 // The volume carries the version, which is the macOS convention and also
 // sidesteps a collision: with the app installed, TCC refuses to let anything
 // create a second `/Volumes/<App>/<App>.app` over the copy it manages.
-const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'ltvpn-dmg-'))
+const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'buddyvpn-dmg-'))
 fs.cpSync(APP_DIR, path.join(stage, `${APP_NAME}.app`), { recursive: true, verbatimSymlinks: true })
 fs.symlinkSync('/Applications', path.join(stage, 'Applications'))
 
-const dmg = path.join(OUT_DIR, `LocalTunnelsVPN-${APP_VERSION}.dmg`)
+const dmg = path.join(OUT_DIR, `BuddyVPN-${APP_VERSION}.dmg`)
 run('hdiutil', ['create', '-volname', `${APP_NAME} ${APP_VERSION}`, '-srcfolder', stage, '-ov', '-format', 'UDZO', dmg])
 fs.rmSync(stage, { recursive: true, force: true })
 
-console.log(`[vpn-app] ${path.relative(ROOT, APP_DIR)}`)
-console.log(`[vpn-app] ${path.relative(ROOT, dmg)}`)
+console.log(`[buddyvpn] ${path.relative(ROOT, APP_DIR)}`)
+console.log(`[buddyvpn] ${path.relative(ROOT, dmg)}`)
 if (adhoc)
-  console.warn('[vpn-app] DESKTOP_SIGNING_IDENTITY is unset — sealed ad hoc, so it runs on this Mac and is refused on every other')
+  console.warn('[buddyvpn] DESKTOP_SIGNING_IDENTITY is unset — sealed ad hoc, so it runs on this Mac and is refused on every other')

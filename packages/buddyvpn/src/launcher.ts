@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 /**
- * `Contents/MacOS/LocalTunnelsVPN` — the executable macOS launches.
+ * `Contents/MacOS/BuddyVPN` — the executable macOS launches.
  *
  * The shape is SystemCleaner's, because the problem is the same one: the
  * window has to be backed by a server running on *this* Mac, not a remote URL.
@@ -38,7 +38,7 @@ if (process.argv[2] === 'agent') {
   await new Promise(() => {})
 }
 
-const APP_NAME = 'LocalTunnels VPN'
+const APP_NAME = 'BuddyVPN'
 
 /** How long the agent gets to bind and answer before the launcher gives up. */
 const STARTUP_TIMEOUT_MS = 20_000
@@ -78,7 +78,7 @@ const agent = Bun.spawn([process.execPath, 'agent'], {
   stderr: 'inherit',
   env: {
     ...process.env,
-    LTVPN_WEB_ROOT: webRoot,
+    BUDDYVPN_WEB_ROOT: webRoot,
     // The CLI and the native core ship beside this binary. `findCli()` looks
     // there first, and the CLI's own library resolver looks next to its
     // execPath — which is the same directory.
@@ -183,12 +183,33 @@ function runtimeSupports(flag: string): boolean {
 const canHostChrome = runtimeSupports('--titlebar-hidden')
 const material = runtimeSupports('--web-window-material') ? ['--web-window-material'] : []
 
+/**
+ * Craft draws a sidebar toggle and two history arrows beside the window
+ * buttons. Neither belongs here: this window has no sidebar and never
+ * navigates, so they sat in the title strip offering to go back to a page
+ * that does not exist.
+ */
+const chromeControls = runtimeSupports('--no-web-chrome-controls') ? ['--no-web-chrome-controls'] : []
+
+/**
+ * Let the page keep what it stores.
+ *
+ * Craft gives a window a non-persistent data store by default — no disk I/O
+ * at startup, and right for a window that only renders. It is wrong for this
+ * one: the chosen location lives in `localStorage`, and in an ephemeral store
+ * it is forgotten on quit, so the app would reopen on the default location
+ * every time no matter what you picked.
+ */
+const persistentStorage = runtimeSupports('--persistent-storage') ? ['--persistent-storage'] : []
+
 const craft = Bun.spawn([
   craftBinary,
   `http://127.0.0.1:${port}/`,
   '--title',
   APP_NAME,
   ...(canHostChrome ? ['--titlebar-hidden', ...material] : []),
+  ...chromeControls,
+  ...persistentStorage,
   // A consumer VPN window: narrow enough to leave in a corner of the screen,
   // tall enough that the button sits in the middle rather than crowding the
   // location row under it.
@@ -196,7 +217,7 @@ const craft = Bun.spawn([
   '380',
   '--height',
   '620',
-  ...(process.env.LTVPN_DEVTOOLS === '1' ? [] : ['--no-devtools']),
+  ...(process.env.BUDDYVPN_DEVTOOLS === '1' ? [] : ['--no-devtools']),
 ], {
   stdin: 'inherit',
   stdout: 'inherit',

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LocalTunnels VPN</title>
+  <title>BuddyVPN</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -18,7 +18,7 @@
       it is also the only drag handle. WebKit discards
       `-webkit-app-region: drag`, so the press is handed to Craft.
     -->
-    <header class="chrome" data-window-drag>LocalTunnels VPN</header>
+    <header class="chrome" data-window-drag>BuddyVPN</header>
 
     <main class="body">
       <div class="status">
@@ -26,6 +26,12 @@
         <div class="status-clock" data-clock></div>
       </div>
 
+      <!--
+        The caption lives inside this group rather than after it. Outside, the
+        flexible gap that centres the button fell between the two, and the
+        sentence drifted down to sit on the location card as though it
+        belonged to that instead.
+      -->
       <div class="power-wrap">
         <button class="power" type="button" data-power data-state="unknown" disabled aria-label="Connect">
           <span class="ring" aria-hidden="true"></span>
@@ -35,9 +41,8 @@
             <path d="M6.3 6.3a8.5 8.5 0 1 0 11.4 0"></path>
           </svg>
         </button>
+        <div class="caption" data-caption></div>
       </div>
-
-      <div class="caption" data-caption></div>
 
       <button class="location" type="button" data-location aria-expanded="false">
         <span class="badge" data-badge>--</span>

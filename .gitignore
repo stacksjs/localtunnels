@@ -28,4 +28,4 @@ pantry
 /pantry/
 
 # The VPN app bundle and its disk image.
-/packages/vpn-app/dist/
+/packages/buddyvpn/dist/

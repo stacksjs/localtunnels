@@ -47,9 +47,9 @@ export interface ServerEntry {
 
 export type ServerMap = Record<string, ServerEntry>
 
-/** `~/Library/Application Support/LocalTunnels VPN`. */
+/** `~/Library/Application Support/BuddyVPN`. */
 export function appSupportDir(): string {
-  return path.join(os.homedir(), 'Library/Application Support', 'LocalTunnels VPN')
+  return path.join(os.homedir(), 'Library/Application Support', 'BuddyVPN')
 }
 
 /**

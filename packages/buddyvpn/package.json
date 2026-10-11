@@ -1,9 +1,9 @@
 {
-  "name": "@localtunnels/vpn-app",
+  "name": "@localtunnels/buddyvpn",
   "type": "module",
   "version": "0.2.13",
   "private": true,
-  "description": "The localtunnels VPN desktop app for macOS.",
+  "description": "BuddyVPN — the localtunnels VPN, as a macOS app.",
   "license": "MIT",
   "scripts": {
     "build:app": "bun run scripts/build-app.ts",

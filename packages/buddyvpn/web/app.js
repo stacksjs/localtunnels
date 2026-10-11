@@ -54,16 +54,34 @@
     return null
   }
 
-  /** Why the button cannot be pressed, or '' when it can. */
+  /**
+   * Why the button cannot be pressed.
+   *
+   * Two forms, because they go in two places: `short` sits under the button
+   * where a sentence would wrap into the location card, and `detail` is the
+   * actionable version at the foot. Returning only the long one left the
+   * caption empty, which read as a window that had failed to finish loading.
+   */
   const blocker = () => {
-    if (!status) return 'Checking this Mac…'
-    if (!status.supported) return 'This build only brings up tunnels on macOS.'
-    if (!coreReady()) return (status.core && status.core.detail) || 'The native VPN core is not healthy.'
+    if (!status) return { short: 'Checking…', detail: 'Reading this Mac’s VPN state…' }
+    if (!status.supported)
+      return { short: 'Not supported here', detail: 'This build only brings up tunnels on macOS.' }
+    if (!coreReady()) {
+      return {
+        short: 'The VPN core needs attention',
+        detail: (status.core && status.core.detail) || 'The native VPN core is not healthy.',
+      }
+    }
 
     const here = current()
-    if (!here) return 'No locations are configured.'
-    if (!here.configured) return `No server for ${here.country} yet. Deploy one: bun run deploy:vpn --region ${here.id}`
-    return ''
+    if (!here) return { short: 'No locations', detail: 'No locations are configured.' }
+    if (!here.configured) {
+      return {
+        short: `No server in ${here.country} yet`,
+        detail: `Deploy one: bun run deploy:vpn --region ${here.id}`,
+      }
+    }
+    return null
   }
 
   const clockText = () => {
@@ -78,7 +96,7 @@
   const choose = (id) => {
     region = id
     picking = false
-    remember('ltvpn.region', id)
+    remember('buddyvpn.region', id)
     paint()
   }
 
@@ -132,6 +150,7 @@
   const paint = () => {
     const here = current()
     const why = blocker()
+    const blocked = Boolean(why) && !connected()
 
     let label = 'Not connected'
     let tone = ''
@@ -148,19 +167,19 @@
     el.clock.textContent = clockText()
 
     el.power.setAttribute('data-state', phase || (connected() ? 'on' : (status ? 'off' : 'unknown')))
-    el.power.disabled = Boolean(phase) || (!connected() && Boolean(why))
+    el.power.disabled = Boolean(phase) || blocked
     el.power.setAttribute('aria-label', connected() ? 'Disconnect' : 'Connect')
 
     if (error) el.caption.textContent = error
     else if (phase) el.caption.textContent = 'Waiting for authorization…'
     else if (connected()) el.caption.textContent = here ? `Your traffic leaves from ${here.city}` : ''
-    else if (why) el.caption.textContent = ''
+    else if (blocked) el.caption.textContent = why.short
     else el.caption.textContent = here ? `Tap to connect to ${here.country}` : ''
 
     el.badge.textContent = here ? here.badge : '--'
     el.country.textContent = here ? here.country : '—'
     el.city.textContent = here ? here.city : ''
-    el.foot.textContent = why && !connected() ? why : ''
+    el.foot.textContent = blocked ? why.detail : ''
 
     paintPicker()
   }
@@ -186,7 +205,7 @@
     status = data
 
     if (region === null)
-      region = remember('ltvpn.region', null) || data.defaultRegion || (data.regions[0] && data.regions[0].id) || null
+      region = remember('buddyvpn.region', null) || data.defaultRegion || (data.regions[0] && data.regions[0].id) || null
 
     // The agent does not record when a tunnel started, so the clock counts
     // from when this window first saw it. A window opened onto a tunnel that

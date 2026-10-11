@@ -109,27 +109,40 @@ html, body {
 
 /* ---------- The button ---------- */
 /* One target, dead centre. There is exactly one thing to do in this window. */
-.power-wrap { flex: 1; display: grid; place-items: center; min-height: 180px; }
+/* Button and caption centre together as one group; the slack in a tall
+   window falls above this group and below it, never between its two parts. */
+.power-wrap {
+  flex: 1; min-height: 170px; padding: var(--space-3) 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-4);
+}
 .power {
   position: relative; display: grid; place-items: center;
   width: 148px; height: 148px; padding: 0;
-  border: 0; border-radius: 50%;
-  background: var(--surface-inset); color: var(--secondary);
+  /* The rim is what makes this read as a control. Without it the resting
+     state is a slightly lighter disc on a dark page, which at a glance is
+     indistinguishable from a shadow. */
+  border: 1.5px solid var(--line); border-radius: 50%;
+  background: var(--surface-inset); color: var(--ink);
   cursor: default;
-  transition: background .2s ease, color .2s ease, transform .12s ease;
+  transition: background .2s ease, color .2s ease, border-color .2s ease, transform .12s ease;
 }
-.power:hover:not(:disabled) { background: var(--hover); }
+.power:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--secondary); }
 .power:active:not(:disabled) { transform: scale(.97); }
 .power:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
-.power:disabled { opacity: .55; }
+/* Dimmed, not erased: a disabled button still has to show where the control
+   is, or the window looks like it failed to load. */
+.power:disabled { opacity: .45; color: var(--secondary); }
 .power .glyph { width: 52px; height: 52px; }
 
 .power[data-state='connecting'], .power[data-state='disconnecting'] {
   background: color-mix(in srgb, var(--orange) 16%, transparent);
+  border-color: color-mix(in srgb, var(--orange) 55%, transparent);
   color: var(--orange);
 }
 .power[data-state='on'] {
   background: color-mix(in srgb, var(--green) 18%, transparent);
+  border-color: color-mix(in srgb, var(--green) 60%, transparent);
   color: var(--green);
   box-shadow: 0 0 0 10px color-mix(in srgb, var(--green) 8%, transparent);
 }
@@ -153,7 +166,10 @@ html, body {
 /* ---------- Location ---------- */
 .location {
   display: flex; align-items: center; gap: var(--space-3); width: 100%;
-  margin-top: var(--space-5); padding: var(--space-3);
+  /* `auto` rather than a fixed gap: the slack in a tall window collects here,
+     between the button and the location, instead of being split into two
+     voids that make the window look half-empty. */
+  margin-top: auto; padding: var(--space-3);
   border: .5px solid var(--card-line); border-radius: 12px;
   background: var(--card); color: inherit;
   font: inherit; text-align: left; cursor: default;

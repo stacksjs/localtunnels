@@ -20,7 +20,7 @@
   "scripts": {
     "build": "bun run --filter localtunnels build",
     "build:native": "cd packages/vpn-core && zig build",
-    "build:app": "bun run packages/vpn-app/scripts/build-app.ts",
+    "build:app": "bun run packages/buddyvpn/scripts/build-app.ts",
     "test:native": "cd packages/vpn-core && zig build test",
     "compile": "bun build --production ./packages/localtunnels/bin/cli.ts --compile --external '@stacksjs/ts-analytics' --outfile bin/localtunnels",
     "compile:all": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:windows-x64 && bun run compile:darwin-x64 && bun run compile:darwin-arm64",
