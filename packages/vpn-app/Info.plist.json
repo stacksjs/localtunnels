@@ -1,0 +1,15 @@
+{
+  "CFBundleIdentifier": "org.stacksjs.localtunnels-vpn",
+  "LSApplicationCategoryType": "public.app-category.utilities",
+  "LSMinimumSystemVersion": "13.0",
+  "NSHighResolutionCapable": true,
+  "NSAppleEventsUsageDescription": "LocalTunnels VPN asks for administrator rights to create the tunnel interface and install its routes.",
+  "NSAppTransportSecurity": {
+    "NSAllowsLocalNetworking": true,
+    "NSExceptionDomains": {
+      "127.0.0.1": {
+        "NSExceptionAllowsInsecureHTTPLoads": true
+      }
+    }
+  }
+}
