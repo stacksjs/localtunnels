@@ -7,28 +7,36 @@ pub const X25519 = std.crypto.dh.X25519;
 pub const KeyError = error{ WeakKey, EntropyUnavailable };
 
 pub fn generate(out_priv: *[32]u8, out_pub: *[32]u8) KeyError!void {
-    // A weak seed (public key derivation lands on the identity) is a ~2^-250
-    // accident of the draw, not a persistent condition — retry with fresh
-    // entropy like other WireGuard implementations instead of failing the
-    // caller. The bound only guards against a broken RNG looping forever.
-    var attempts: u8 = 0;
-    while (true) : (attempts += 1) {
-        var seed: [32]u8 = undefined;
-        defer std.crypto.secureZero(u8, &seed);
-        rand.bytes(&seed) catch return error.EntropyUnavailable;
-        var kp = X25519.KeyPair.generateDeterministic(seed) catch {
-            if (attempts >= 7) return error.WeakKey;
-            continue;
-        };
-        out_priv.* = kp.secret_key;
-        out_pub.* = kp.public_key;
-        std.crypto.secureZero(u8, &kp.secret_key);
-        return;
-    }
+    // This used to retry. `generateDeterministic` returned
+    // `IdentityElementError!KeyPair`, so a weak seed — public key derivation
+    // landing on the identity element, a ~2^-250 accident of the draw — was
+    // redrawn rather than failed, with a bound so a broken RNG could not loop
+    // forever.
+    //
+    // Zig made it infallible (0.18.0-dev): clamping guarantees a usable
+    // scalar, so the condition the loop existed for cannot arise and a retry
+    // would only ever repeat identical work. Entropy is still fallible, which
+    // is the one way this can fail now.
+    var seed: [32]u8 = undefined;
+    defer std.crypto.secureZero(u8, &seed);
+    rand.bytes(&seed) catch return error.EntropyUnavailable;
+
+    var kp = X25519.KeyPair.generateDeterministic(seed);
+    defer std.crypto.secureZero(u8, &kp.secret_key);
+    out_priv.* = kp.secret_key;
+    out_pub.* = kp.public_key;
 }
 
 pub fn publicFromPrivate(priv: *const [32]u8, out_pub: *[32]u8) KeyError!void {
-    out_pub.* = X25519.recoverPublicKey(priv.*) catch return error.WeakKey;
+    // Also infallible since 0.18.0-dev, for the same reason: a clamped scalar
+    // cannot derive the identity element.
+    //
+    // The error union stays. Eight call sites and the FFI boundary in
+    // `lib.zig` are written against it, and `KeyError` has to keep `WeakKey`
+    // regardless — `dh` below is still fallible, because there the public key
+    // comes from the peer and an attacker may choose one that does land on
+    // the identity element. That is the case the error exists for.
+    out_pub.* = X25519.recoverPublicKey(priv.*);
 }
 
 /// DH(priv, pub) — X25519 scalar multiplication (clamped internally).

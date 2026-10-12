@@ -3,3 +3,8 @@ dependencies:
   # The webview the VPN app's window is drawn in. Bundled into the .app by
   # packages/buddyvpn/scripts/build-app.ts, which resolves it from pantry/.
   craft-native.org: ^0.0.90
+  # The native VPN core (packages/vpn-core) is Zig. `bun run build:native`
+  # needs it, and so does `deploy:vpn`, which cross-compiles libltvpn.so for
+  # the server mid-deploy — without it the box is provisioned and the build
+  # then fails, leaving a half-configured server you are already paying for.
+  ziglang.org: ^0.18

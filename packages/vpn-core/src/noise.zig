@@ -430,7 +430,8 @@ const testing = std.testing;
 
 fn testKeypair(seed_byte: u8) !struct { priv: [32]u8, pub_key: [32]u8 } {
     const seed: [32]u8 = @splat(seed_byte);
-    const kp = try keys.X25519.KeyPair.generateDeterministic(seed);
+    // Infallible since zig 0.18.0-dev; see the note in `keys.generate`.
+    const kp = keys.X25519.KeyPair.generateDeterministic(seed);
     return .{ .priv = kp.secret_key, .pub_key = kp.public_key };
 }
 
