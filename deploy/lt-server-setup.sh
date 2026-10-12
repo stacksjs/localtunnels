@@ -55,6 +55,15 @@ if [ ! -s "$AUTH_KEY_FILE" ]; then
 fi
 AUTH_KEY=$(cat "$AUTH_KEY_FILE")
 
+# The key goes to the services through the environment, not the command line.
+# A systemd unit file is world-readable at 0644 and `ps aux` shows every
+# process's full argv to every user, so `--auth-key` on ExecStart publishes the
+# one credential that admits a client to the network. EnvironmentFile reads
+# this as root, and nothing else on the box can.
+ENV_FILE=$COORD_HOME/env
+printf 'LOCALTUNNELS_AUTH_KEY=%s\n' "$AUTH_KEY" > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
 cat > /etc/systemd/system/localtunnels-coordinator.service <<EOF
 [Unit]
 Description=localtunnels VPN coordinator (peer discovery + IP assignment)
@@ -64,7 +73,8 @@ Wants=network-online.target
 [Service]
 Environment=LTVPN_LIB=$LIB
 Environment=LOCALTUNNELS_HOME=$COORD_HOME
-ExecStart=$BIN vpn:coordinator --port $COORD_PORT --host 0.0.0.0 --network $TUN_NETWORK --auth-key $AUTH_KEY
+EnvironmentFile=$ENV_FILE
+ExecStart=$BIN vpn:coordinator --port $COORD_PORT --host 0.0.0.0 --network $TUN_NETWORK
 Restart=always
 RestartSec=2
 
@@ -85,7 +95,8 @@ Requires=localtunnels-coordinator.service
 [Service]
 Environment=LTVPN_LIB=$LIB
 Environment=LOCALTUNNELS_HOME=$SERVER_HOME
-ExecStart=$BIN vpn:up --listen 51820 --coordinator ws://127.0.0.1:$COORD_PORT --auth-key $AUTH_KEY --exit-node
+EnvironmentFile=$ENV_FILE
+ExecStart=$BIN vpn:up --listen 51820 --coordinator ws://127.0.0.1:$COORD_PORT --exit-node
 Restart=always
 RestartSec=2
 

@@ -827,6 +827,21 @@ interface VpnUpOptions {
   allowLan?: boolean
 }
 
+/**
+ * The coordinator secret, from the flag or the environment.
+ *
+ * A flag is visible to every user on the box: `ps aux` shows the full command
+ * line of every process, and a systemd unit file is world-readable at 0644.
+ * For a long-lived service that is the wrong place for a credential, so the
+ * environment is accepted too and `EnvironmentFile=` can point at a file only
+ * root can read.
+ *
+ * The flag still wins when both are set, because someone typing it meant it.
+ */
+function resolveAuthKey(flag?: string): string | undefined {
+  return flag || process.env.LOCALTUNNELS_AUTH_KEY || undefined
+}
+
 async function detectWan(): Promise<string> {
   const proc = Bun.spawn(['ip', 'route', 'show', 'default'], { stdout: 'pipe', stderr: 'ignore' })
   const out = await new Response(proc.stdout).text()
@@ -856,7 +871,7 @@ cli
   .option('--wan <iface>', 'WAN interface for exit-node NAT (auto-detected if omitted)')
   .option('--mtu <mtu>', 'Tunnel MTU', { default: '1420' })
   .option('--coordinator <url>', 'Join through a coordinator: address and peers come from discovery')
-  .option('--auth-key <key>', 'Shared secret for the coordinator, when it requires one')
+  .option('--auth-key <key>', 'Shared secret for the coordinator (or LOCALTUNNELS_AUTH_KEY)')
   .option('--use-exit <key>', 'Route all non-tunnel traffic through an exit node: a public key, or "auto"')
   .option('--full-tunnel', 'Send this machine\'s traffic and DNS through the exit node (needs --use-exit)')
   .option('--dns <servers>', 'Comma-separated resolvers to use while connected', { default: '1.1.1.1,1.0.0.1' })
@@ -904,7 +919,7 @@ cli
         mtu,
         presharedKey: options.psk ? decodeKey(options.psk) : undefined,
         coordinatorUrl: options.coordinator,
-        authKey: options.authKey,
+        authKey: resolveAuthKey(options.authKey),
         // With a coordinator, --exit-node also tells the network this node is
         // one. The NAT setup below is what makes the claim true.
         advertiseExitNode: viaCoordinator && options.exitNode,
@@ -1075,7 +1090,7 @@ cli
   .option('-p, --port <port>', 'Port to listen on', { default: '51821' })
   .option('--host <host>', 'Host to bind to', { default: '0.0.0.0' })
   .option('--network <cidr>', 'Tunnel network to assign IPs from', { default: '100.100.0.0/16' })
-  .option('--auth-key <key>', 'Shared secret nodes must present to join (generated if omitted)')
+  .option('--auth-key <key>', 'Secret nodes present to join, or LOCALTUNNELS_AUTH_KEY (generated if neither)')
   .option('--insecure-no-auth', 'Accept any node that can reach the port — localhost/testing only')
   .action(async (options: { port: string, host: string, network: string, authKey?: string, insecureNoAuth?: boolean }) => {
     try {
@@ -1085,10 +1100,11 @@ cli
       // Secure by default: without a key the coordinator hands a tunnel IP and
       // the whole peer directory to anyone who can reach the port, so one is
       // minted here unless the operator explicitly opts out.
-      const generated = !options.authKey && !options.insecureNoAuth
+      const supplied = resolveAuthKey(options.authKey)
+      const generated = !supplied && !options.insecureNoAuth
       const authKey = options.insecureNoAuth
         ? undefined
-        : options.authKey || randomBytes(32).toString('base64url')
+        : supplied || randomBytes(32).toString('base64url')
 
       const coordinator = new VpnCoordinator({ port, host: options.host, network: options.network, authKey })
       coordinator.start()
