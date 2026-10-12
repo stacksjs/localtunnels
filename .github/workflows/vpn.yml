@@ -52,8 +52,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - x86_64-linux-musl
-          - aarch64-linux-musl
+          - x86_64-linux-gnu.2.31
+          - aarch64-linux-gnu.2.31
           - x86_64-windows
           - x86_64-macos
           - aarch64-macos

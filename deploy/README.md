@@ -49,7 +49,7 @@ The Hetzner token is read from `HCLOUD_TOKEN` / `HETZNER_API_TOKEN` (falling bac
 ## How it works
 
 - **Provisioning** (`vpn.ts`, via ts-cloud's box provisioner): ensure an Ubuntu 24.04 box in the selected region (see the table above) with `udp/51820` + `icmp` open and the SSH key authorized.
-- **Build + ship**: compile the localtunnels CLI for `bun-linux-x64` and cross-compile `libltvpn.so` for `x86_64-linux-musl` (self-contained, no libc dependency), then `scp` both to the server.
+- **Build + ship**: compile the localtunnels CLI for `bun-linux-x64` and cross-compile `libltvpn.so` for `x86_64-linux-gnu.2.31` (glibc, old enough to load on anything newer), then `scp` both to the server.
 - **Service** (`lt-server-setup.sh`): generate server + client identities with `lt vpn keygen`, then run `lt vpn up` in server mode as the systemd unit `localtunnels-vpn` — a TUN interface at `10.8.0.1/24`, listening `udp/51820`, with IP forwarding + `iptables` MASQUERADE so client traffic egresses via the server IP (exit node).
 
 Everything on the datapath — the WireGuard handshake, ChaCha20-Poly1305 transport, the TUN device, and cryptokey routing — is the localtunnels implementation. Because the protocol is WireGuard v1, the emitted `client-lt.conf` also works with `lt vpn up` client mode or a stock WireGuard client.

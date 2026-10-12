@@ -44,8 +44,8 @@ interface Target {
 }
 
 const TARGETS: Target[] = [
-  { name: 'linux-x64', bunTarget: 'bun-linux-x64', zigTarget: 'x86_64-linux-musl', zigOutput: 'libltvpn.so', libName: 'libltvpn.so', exeSuffix: '' },
-  { name: 'linux-arm64', bunTarget: 'bun-linux-arm64', zigTarget: 'aarch64-linux-musl', zigOutput: 'libltvpn.so', libName: 'libltvpn.so', exeSuffix: '' },
+  { name: 'linux-x64', bunTarget: 'bun-linux-x64', zigTarget: 'x86_64-linux-gnu.2.31', zigOutput: 'libltvpn.so', libName: 'libltvpn.so', exeSuffix: '' },
+  { name: 'linux-arm64', bunTarget: 'bun-linux-arm64', zigTarget: 'aarch64-linux-gnu.2.31', zigOutput: 'libltvpn.so', libName: 'libltvpn.so', exeSuffix: '' },
   { name: 'windows-x64', bunTarget: 'bun-windows-x64', zigTarget: 'x86_64-windows', zigOutput: 'ltvpn.dll', libName: 'libltvpn.dll', exeSuffix: '.exe' },
   { name: 'darwin-x64', bunTarget: 'bun-darwin-x64', zigTarget: 'x86_64-macos', zigOutput: 'libltvpn.dylib', libName: 'libltvpn.dylib', exeSuffix: '' },
   { name: 'darwin-arm64', bunTarget: 'bun-darwin-arm64', zigTarget: 'aarch64-macos', zigOutput: 'libltvpn.dylib', libName: 'libltvpn.dylib', exeSuffix: '' },

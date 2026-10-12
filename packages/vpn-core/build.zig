@@ -17,11 +17,26 @@ pub fn build(b: *std.Build) void {
     // upstream keeps the alias until after 0.18.0.
     const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default: ReleaseFast)") orelse std.builtin.OptimizeMode.ReleaseFast;
 
-    // Link libc on macOS (getentropy + utun via libSystem) and Windows
-    // (BCryptGenRandom). On Linux everything goes through raw syscalls
-    // (`std.os.linux`), so the shared library is self-contained and loads on
-    // any glibc/musl host without a `libc.so` dependency.
-    const link_libc = target.result.os.tag != .linux;
+    // Link libc everywhere, Linux included.
+    //
+    // macOS and Windows need it outright (getentropy and utun via libSystem,
+    // BCryptGenRandom). Linux does not — everything there goes through raw
+    // syscalls via `std.os.linux` — and this used to say so, building the
+    // Linux library libc-free on the reasoning that a self-contained object
+    // loads on any glibc or musl host without a `libc.so` dependency.
+    //
+    // It does not load at all. A dynamic library built libc-free comes out
+    // static-PIE, and a static-PIE object is built to relocate *itself* the
+    // way an executable does at startup. Nothing does that for it when the
+    // dynamic loader maps it into an existing process, so the first call into
+    // it touches unrelocated addresses and the host process takes a SIGSEGV —
+    // which is what every Linux deploy did, on the first FFI call, with the
+    // crash reported against Bun rather than against this library.
+    //
+    // Portability across host libc versions is a cross-compile concern, not a
+    // linkage one: build against an old glibc (`-Dtarget=x86_64-linux-gnu.2.31`)
+    // and the result runs on anything newer.
+    const link_libc = true;
     const mod = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
