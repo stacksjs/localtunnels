@@ -98,10 +98,10 @@ describe('pfRules', () => {
   const rules = pfRules({ tun: 'utun7', endpointIp: '203.0.113.9', endpointPort: 51820 })
 
   it('blocks outbound traffic by default', () => {
-    expect(rules).toContain('block drop out all')
+    expect(rules).toContain('block drop out on ! lo0 all')
     // The block has to come first: `quick` passes below it are the
     // exceptions, and a block written last would override all of them.
-    expect(rules.indexOf('block drop out all')).toBeLessThan(rules.indexOf('pass out quick'))
+    expect(rules.indexOf('block drop out on ! lo0 all')).toBeLessThan(rules.indexOf('pass out quick'))
   })
 
   it('lets the tunnel, loopback and the server through', () => {
@@ -243,8 +243,8 @@ describe('the kill switch covers IPv6', () => {
     // `block drop out all` with no `inet`/`inet6` qualifier covers both. A
     // rule written `block drop out inet all` would leave v6 wide open.
     const rules = pfRules(config)
-    expect(rules).toContain('block drop out all')
-    expect(rules).not.toContain('block drop out inet ')
+    expect(rules).toContain('block drop out on ! lo0 all')
+    expect(rules).not.toContain('block drop out on ! lo0 inet ')
   })
 
   it('builds an ip6tables chain too, since iptables is v4 only', () => {
@@ -284,7 +284,7 @@ describe('the pf files reach disk as files', () => {
 
   it('writes the anchor with real newlines, not the characters backslash and n', () => {
     expect(anchorWrite).not.toContain('\\n')
-    expect(anchorWrite).toContain('\nblock drop out all\n')
+    expect(anchorWrite).toContain('\nblock drop out on ! lo0 all\n')
   })
 
   it('appends to pf.conf with real newlines', () => {
@@ -294,5 +294,29 @@ describe('the pf files reach disk as files', () => {
 
   it('quotes for the shell, so a path with a quote cannot end the string', () => {
     expect(shellQuote(`it's`)).toBe(`'it'\\''s'`)
+  })
+})
+
+describe('the kill switch never blocks loopback', () => {
+  const rules = pfRules({ tun: 'utun9', endpointIp: '5.78.208.190', endpointPort: 51820 })
+
+  /*
+   * The outage this exists to prevent. `block drop out all` plus a quick pass
+   * for lo0 reads as equivalent and is not worth relying on: blocking a
+   * machine's own loopback takes out every local service at once, and in this
+   * app that includes the window's connection to the agent that lifts the
+   * kill switch. The result was no network and no way back.
+   */
+  it('excludes loopback from the block itself, not just after it', () => {
+    expect(rules).toContain('block drop out on ! lo0 all')
+    expect(rules).not.toMatch(/^block drop out all$/m)
+  })
+
+  it('still blocks everything else, v4 and v6 alike', () => {
+    // No `inet` qualifier, so the block covers IPv6 too — a v4-only block
+    // beside an open v6 stack is a locked door next to an open one.
+    expect(rules).not.toContain('inet')
+    expect(rules).toContain(`pass out quick on utun9 all`)
+    expect(rules).toContain('pass out quick proto udp to 5.78.208.190 port 51820')
   })
 })

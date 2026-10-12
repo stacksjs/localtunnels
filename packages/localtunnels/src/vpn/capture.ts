@@ -13,6 +13,7 @@
  * was the process that wrote it.
  */
 import * as fs from 'node:fs'
+import * as net from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import process from 'node:process'
@@ -271,6 +272,74 @@ export async function captureTraffic(options: CaptureOptions): Promise<void> {
     }
     applied.push(part.down)
   }
+
+  /*
+   * Armed, and now checked.
+   *
+   * Every command above reported success, which only means the rules loaded —
+   * not that the machine they describe is still usable. The kill switch is
+   * the one that can take the network away, and the shape of that failure is
+   * a user locked out of the very interface that lifts it. So the result is
+   * verified rather than assumed, and a machine that cannot reach itself is
+   * put back the way it was.
+   */
+  if (!await loopbackWorks()) {
+    await rollback(applied.flat().reverse())
+    throw new Error('the firewall rules cut this machine off from itself, so they were removed')
+  }
+}
+
+/**
+ * Whether this machine can still talk to itself.
+ *
+ * Asked after the rules are armed, because a kill switch that blocks
+ * loopback takes out every local service at once — including, on the desktop
+ * app, the window's own connection to the agent that would turn the kill
+ * switch off. That leaves someone with no network and no way back, which is
+ * not a bug to find in the field twice.
+ *
+ * A listener of our own rather than a probe of something that happens to be
+ * running: the answer has to be about loopback, not about whether some other
+ * service was up.
+ */
+export async function loopbackWorks(timeoutMs = 3000): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const done = (ok: boolean): void => {
+      if (settled)
+        return
+      settled = true
+      try {
+        server.close()
+      }
+      catch {
+        // Closing a server that never listened is not an error worth having.
+      }
+      resolve(ok)
+    }
+
+    const server = net.createServer(socket => socket.end())
+    server.on('error', () => done(false))
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (address === null || typeof address === 'string')
+        return done(false)
+
+      const client = net.connect({ host: '127.0.0.1', port: address.port })
+      client.setTimeout(timeoutMs)
+      client.on('connect', () => {
+        client.destroy()
+        done(true)
+      })
+      client.on('timeout', () => {
+        client.destroy()
+        done(false)
+      })
+      client.on('error', () => done(false))
+    })
+
+    setTimeout(() => done(false), timeoutMs).unref?.()
+  })
 }
 
 async function rollback(commands: string[][]): Promise<void> {
