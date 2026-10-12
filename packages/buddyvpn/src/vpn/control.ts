@@ -29,7 +29,7 @@ import process from 'node:process'
 import type { ExecResult } from '../support/shell'
 import { buildElevatedScript, runElevated } from '../support/elevate'
 import { exec, shellEscape } from '../support/shell'
-import { helperDown, helperReady, helperUp, installHelper } from './helper'
+import { helperDown, helperLogPath, helperReady, helperUp, installHelper } from './helper'
 import { regionById } from '../regions'
 
 export { buildElevatedScript, runElevated }
@@ -385,12 +385,23 @@ export function connect(regionId: string): ActionResult {
 
 /** The most useful line the dead tunnel left behind, for the window to show. */
 function tunnelFailure(): string {
+  /*
+   * Both logs, newest content wins. The helper runs as root and writes to
+   * /var/log, while the fallback path writes into the user's own directory —
+   * reading only the second meant a helper-started tunnel could fail with a
+   * perfectly clear message on disk and the window would say nothing at all,
+   * which is what "waiting for authorization, then nothing happens" was.
+   */
   let log = ''
-  try {
-    log = fs.readFileSync(logFile(), 'utf8')
-  }
-  catch {
-    // No log at all: the shell never got far enough to redirect into it.
+  for (const candidate of [helperLogPath(), logFile()]) {
+    try {
+      const contents = fs.readFileSync(candidate, 'utf8')
+      if (contents.trim())
+        log = contents
+    }
+    catch {
+      // Missing or unreadable; the other one may still have the answer.
+    }
   }
 
   const lines = log.split('\n').map(line => line.trim()).filter(Boolean)

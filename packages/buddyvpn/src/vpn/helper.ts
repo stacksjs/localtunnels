@@ -37,11 +37,20 @@ import { serversPath } from './control'
 export const HELPER_DIR: string = '/usr/local/libexec/buddyvpn'
 export const HELPER_PATH: string = `${HELPER_DIR}/buddyvpn-helper`
 export const HELPER_CLI: string = `${HELPER_DIR}/localtunnels`
+/**
+ * The native library, beside the CLI because that is where the CLI looks.
+ *
+ * It resolves `libltvpn.dylib` relative to its own executable, so a copy of
+ * the binary on its own is a binary that cannot open a TUN device — it got
+ * as far as asking for authorization and then failed with "native libltvpn
+ * not found", which from the window looked like nothing happening at all.
+ */
+export const HELPER_LIB: string = `${HELPER_DIR}/libltvpn.dylib`
 export const HELPER_SERVERS: string = `${HELPER_DIR}/servers.json`
 export const SUDOERS_PATH: string = '/etc/sudoers.d/buddyvpn'
 
 /** Bumped when the wrapper's contents change, so an old one is replaced. */
-export const HELPER_VERSION = '1'
+export const HELPER_VERSION = '2'
 
 /**
  * The wrapper, as text.
@@ -177,6 +186,11 @@ export function helperDown(): { success: boolean, error?: string } {
  * the whole machine, which is a far worse outcome than a VPN that still asks
  * for a password.
  */
+/** The native library that ships beside a given CLI. */
+export function nativeLibPath(cli: string): string {
+  return path.join(path.dirname(cli), 'libltvpn.dylib')
+}
+
 export function buildInstallCommand(user: string, appCli: string): string {
   const script = `${HELPER_DIR}/.helper.tmp`
   const rule = `${HELPER_DIR}/.sudoers.tmp`
@@ -191,6 +205,9 @@ export function buildInstallCommand(user: string, appCli: string): string {
     `cp -f ${shellEscape(appCli)} ${HELPER_CLI}`,
     `chown root:wheel ${HELPER_CLI}`,
     `chmod 755 ${HELPER_CLI}`,
+    `cp -f ${shellEscape(nativeLibPath(appCli))} ${HELPER_LIB}`,
+    `chown root:wheel ${HELPER_LIB}`,
+    `chmod 755 ${HELPER_LIB}`,
     `cp -f ${shellEscape(serversPath())} ${HELPER_SERVERS}`,
     `chown root:wheel ${HELPER_SERVERS}`,
     `chmod 600 ${HELPER_SERVERS}`,
@@ -212,6 +229,10 @@ export function installHelper(): { success: boolean, error?: string } {
     return { success: false, error: 'The localtunnels CLI is missing from this app' }
   if (!fs.existsSync(serversPath()))
     return { success: false, error: 'No servers are configured yet' }
+  // Checked here rather than discovered by the helper: a copy without it
+  // installs fine and then fails on every connect.
+  if (!fs.existsSync(nativeLibPath(cli)))
+    return { success: false, error: 'The native VPN library is missing from this app' }
 
   const result = runElevated(buildInstallCommand(os.userInfo().username, cli))
   if (!result.ok)

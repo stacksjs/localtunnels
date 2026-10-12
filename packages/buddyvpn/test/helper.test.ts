@@ -3,9 +3,11 @@ import { REGIONS } from '../src/regions'
 import {
   buildInstallCommand,
   HELPER_CLI,
+  HELPER_LIB,
   HELPER_PATH,
   HELPER_SERVERS,
   helperScript,
+  nativeLibPath,
   sudoersRule,
   SUDOERS_PATH,
 } from '../src/vpn/helper'
@@ -89,5 +91,27 @@ describe('the install', () => {
   it('keeps the copied servers.json readable only by root', () => {
     expect(command).toContain(`chmod 600 ${HELPER_SERVERS}`)
     expect(command).toContain(`chown root:wheel ${HELPER_SERVERS}`)
+  })
+})
+
+describe('what the install actually copies', () => {
+  const cli = '/Users/glenn/BuddyVPN.app/Contents/MacOS/localtunnels'
+  const command = buildInstallCommand('glenn', cli)
+
+  /*
+   * The CLI resolves its native library relative to its own executable, so a
+   * root-owned copy of the binary alone is a binary that cannot open a TUN
+   * device. It installed fine and then failed on every connect with "native
+   * libltvpn not found" — which, from the window, looked like the authorization
+   * prompt leading nowhere.
+   */
+  it('takes the native library along with the binary', () => {
+    expect(nativeLibPath(cli)).toBe('/Users/glenn/BuddyVPN.app/Contents/MacOS/libltvpn.dylib')
+    expect(command).toContain(`cp -f '${nativeLibPath(cli)}' ${HELPER_LIB}`)
+    expect(command).toContain(`chown root:wheel ${HELPER_LIB}`)
+  })
+
+  it('puts the library where the copied CLI will look for it', () => {
+    expect(HELPER_LIB).toBe(`${HELPER_CLI.replace(/\/[^/]+$/, '')}/libltvpn.dylib`)
   })
 })
