@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  authKeyFile,
   buildConnectCommand,
   buildElevatedCommand,
   looksLikeTunnel,
@@ -99,7 +100,34 @@ describe('buildConnectCommand', () => {
   })
 
   it('omits the auth key when the coordinator is open', () => {
-    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })).not.toContain('--auth-key')
+    const command = buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })
+    expect(command).not.toContain('--auth-key')
+    expect(command).not.toContain('LOCALTUNNELS_AUTH_KEY')
+  })
+
+  /*
+   * `ps` shows every process's full argv to every user on the Mac, so a
+   * secret passed as an argument is a secret handed to anything that can run
+   * `ps aux`. The shell reads it out of a 0600 file instead.
+   */
+  it('never puts the secret in the command line', () => {
+    const command = buildConnectCommand('/bin/lt', {
+      coordinatorUrl: 'ws://host',
+      authKey: 'THE-SHARED-SECRET',
+    })
+    expect(command).not.toContain('THE-SHARED-SECRET')
+    expect(command).not.toContain('--auth-key')
+  })
+
+  it('reads the secret from the staged file instead', () => {
+    const command = buildConnectCommand('/bin/lt', {
+      coordinatorUrl: 'ws://host',
+      authKey: 'THE-SHARED-SECRET',
+    })
+    expect(command).toContain(`LOCALTUNNELS_AUTH_KEY=$(cat '${authKeyFile()}')`)
+    // The assignment has to precede the command it applies to, or it is just
+    // a variable nothing reads.
+    expect(command.indexOf('LOCALTUNNELS_AUTH_KEY')).toBeLessThan(command.indexOf('nohup'))
   })
 
   // These are what make it a VPN rather than a private link to one machine.

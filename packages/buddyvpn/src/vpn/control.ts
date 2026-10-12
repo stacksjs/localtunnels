@@ -74,6 +74,21 @@ export function logFile(): string {
 }
 
 /**
+ * Where the coordinator secret is staged for the tunnel process.
+ *
+ * It exists so the key never appears in a command line. `ps` shows every
+ * process's full argv to every user on the Mac, so `--auth-key <secret>` hands
+ * the credential that admits a client to the network to anything that can run
+ * `ps aux` — including software that has no business on the network at all.
+ *
+ * This is not a new exposure: `servers.json` beside it already holds the same
+ * key at the same 0600. It is the argv copy that is removed.
+ */
+export function authKeyFile(): string {
+  return path.join(appSupportDir(), 'authkey')
+}
+
+/**
  * Validate a parsed server map, dropping anything malformed.
  *
  * Split from the file read so it can be tested without one — the same split
@@ -138,16 +153,18 @@ export function readServers(): ServerMap {
  */
 export function buildConnectCommand(cli: string, entry: ServerEntry): string {
   const args = ['vpn:up', '--coordinator', entry.coordinatorUrl]
-  if (entry.authKey)
-    args.push('--auth-key', entry.authKey)
   // `--full-tunnel` refuses to run without an exit, so an entry that names
   // none falls back to `auto` rather than producing a tunnel that carries
   // nothing.
   args.push('--use-exit', entry.useExit ?? 'auto')
   args.push('--full-tunnel', '--kill-switch')
 
+  // The secret is read out of a 0600 file by the shell rather than passed as
+  // an argument, so it never reaches argv. The CLI takes it from the
+  // environment; `connect` writes the file just before this runs.
+  const secret = entry.authKey ? `LOCALTUNNELS_AUTH_KEY=$(cat ${shellEscape(authKeyFile())}) ` : ''
   const quoted = [cli, ...args].map(shellEscape).join(' ')
-  return `nohup ${quoted} > ${shellEscape(logFile())} 2>&1 & echo $! > ${shellEscape(pidFile())}`
+  return `${secret}nohup ${quoted} > ${shellEscape(logFile())} 2>&1 & echo $! > ${shellEscape(pidFile())}`
 }
 
 export function buildElevatedCommand(shellCommand: string): string {
@@ -251,6 +268,10 @@ export function connect(regionId: string): ActionResult {
     return { success: false, error: 'The localtunnels CLI is missing from this app' }
 
   fs.mkdirSync(appSupportDir(), { recursive: true })
+  // Staged before the command runs, and only when there is one to stage.
+  if (entry.authKey)
+    fs.writeFileSync(authKeyFile(), entry.authKey, { mode: 0o600 })
+
   const result = exec(buildElevatedCommand(buildConnectCommand(cli, entry)), { timeout: 180_000 })
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
