@@ -413,8 +413,22 @@ export function disconnect(): ActionResult {
   // Every tunnel of ours, not only the recorded one: a pid file lost while
   // the process it named kept running is exactly how one got orphaned, and
   // stopping all of them is what the button claims to do.
-  const pids = [...new Set([pid, ...findTunnelPids()])]
-  const result = runElevated(`${teardown}kill ${pids.join(' ')}`)
+  const pids = [...new Set([pid, ...findTunnelPids()])].join(' ')
+
+  /*
+   * SIGTERM, then SIGKILL for whatever is left.
+   *
+   * The tunnel asks for SIGTERM so it can put the routes, DNS and firewall
+   * back on the way out, and that is the path worth taking. But a process
+   * that does not take it is the one case this button absolutely has to
+   * handle: it is running as root, holding the default route, and the only
+   * other way to stop it is a terminal. `vpn:down` has already run by then,
+   * so the machine is restored either way — what SIGKILL loses is the
+   * tunnel's own tidy exit, not the network.
+   */
+  const result = runElevated(
+    `${teardown}kill ${pids} 2>/dev/null; sleep 2; kill -0 ${pids} 2>/dev/null && kill -9 ${pids} 2>/dev/null; exit 0`,
+  )
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 
