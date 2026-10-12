@@ -50,7 +50,7 @@ export const HELPER_SERVERS: string = `${HELPER_DIR}/servers.json`
 export const SUDOERS_PATH: string = '/etc/sudoers.d/buddyvpn'
 
 /** Bumped when the wrapper's contents change, so an old one is replaced. */
-export const HELPER_VERSION = '2'
+export const HELPER_VERSION = '3'
 
 /**
  * The wrapper, as text.
@@ -77,11 +77,14 @@ LOG=/var/log/buddyvpn.log
 
 case "\${1:-}" in
   version)
-    # Version plus a digest of the config this helper actually holds. The app
-    # compares both: a redeploy rewrites the user's servers.json, and a helper
-    # still pointing at the old coordinator would connect somewhere the window
-    # is no longer offering.
-    echo "${HELPER_VERSION} $(shasum -a 256 "$SERVERS" 2>/dev/null | cut -d' ' -f1)"
+    # Version, plus a digest of each thing this helper actually holds.
+    #
+    # The binary is in that list because it is a *copy*. Rebuilding the app
+    # changes the CLI in the bundle and leaves this one untouched, so a fix
+    # shipped in the app was simply not in the code the helper ran — the
+    # window reported success, the old behaviour continued, and nothing
+    # anywhere said the two had diverged.
+    echo "${HELPER_VERSION} $(shasum -a 256 "$SERVERS" 2>/dev/null | cut -d' ' -f1) $(shasum -a 256 "$CLI" 2>/dev/null | cut -d' ' -f1)"
     ;;
   up)
     region="\${2:-}"
@@ -132,19 +135,24 @@ export function sudoersRule(user: string): string {
     + `${user} ALL=(root) NOPASSWD: ${HELPER_PATH}\n`
 }
 
-/** The digest the helper reports for its own copy of servers.json. */
-function serversDigest(): string | null {
-  const probe = exec(`shasum -a 256 ${shellEscape(serversPath())} | cut -d' ' -f1`, { timeout: 5000 })
-  return probe.ok ? probe.stdout.trim() : null
+/** The digest of a file, as the helper reports its own copies. */
+function digestOf(file: string): string | null {
+  const probe = exec(`shasum -a 256 ${shellEscape(file)} | cut -d' ' -f1`, { timeout: 30_000 })
+  const value = probe.stdout.trim()
+  return probe.ok && value ? value : null
 }
 
 /**
- * Whether the helper is installed, current, and holding the same servers.
+ * Whether the helper is installed, current, and running the same code and
+ * config as the app that is asking.
  *
- * All three matter. An old wrapper may not speak the vocabulary this build
- * expects, and a wrapper carrying a stale servers.json would quietly connect
- * to a coordinator the window has stopped offering — a redeploy changes that
- * file, and the helper's copy is root-owned so nothing else can refresh it.
+ * All three matter, and the binary most of all. The helper runs a root-owned
+ * *copy* of the CLI, so rebuilding the app updates the bundle and leaves that
+ * copy alone: a fix shipped in the app was then simply not in the code that
+ * ran, the window reported success, the old behaviour continued, and nothing
+ * said the two had diverged. A stale servers.json is the same failure in a
+ * quieter form — a redeploy rewrites it, and the copy would keep connecting
+ * to a coordinator the window has stopped offering.
  */
 export function helperReady(): boolean {
   if (!fs.existsSync(HELPER_PATH) || !fs.existsSync(SUDOERS_PATH))
@@ -155,12 +163,17 @@ export function helperReady(): boolean {
   if (!probe.ok)
     return false
 
-  const [version, digest] = probe.stdout.trim().split(/\s+/)
+  const [version, serversDigest, cliDigest] = probe.stdout.trim().split(/\s+/)
   if (version !== HELPER_VERSION)
     return false
 
-  const ours = serversDigest()
-  return ours !== null && digest === ours
+  const cli = findCli()
+  const ourServers = digestOf(serversPath())
+  const ourCli = cli ? digestOf(cli) : null
+  if (ourServers === null || ourCli === null)
+    return false
+
+  return serversDigest === ourServers && cliDigest === ourCli
 }
 
 /** Start the tunnel through the helper. Returns the tunnel's pid. */

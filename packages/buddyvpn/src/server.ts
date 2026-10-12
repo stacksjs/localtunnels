@@ -15,6 +15,7 @@ import process from 'node:process'
 import { DEFAULT_REGION, REGIONS } from './regions'
 import { connect, connectionPid, connectionUptime, disconnect, readServers } from './vpn/control'
 import { readCore, readIdentity, readTunnels } from './vpn/core'
+import { helperReady } from './vpn/helper'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -63,6 +64,14 @@ function status(refresh: boolean): Response {
     managedPid,
     /** How long the tunnel has been up. The window shows this as its clock. */
     uptimeSeconds: managedPid === null ? null : connectionUptime(managedPid),
+    /**
+     * Whether connecting will ask for a password.
+     *
+     * Only so the window can say the right thing. "Waiting for
+     * authorization" under a dialog that is never going to appear is how a
+     * helper working perfectly looks identical to one that has hung.
+     */
+    needsPassword: !helperReady(),
     defaultRegion: DEFAULT_REGION,
     regions: REGIONS.map(region => ({
       ...region,

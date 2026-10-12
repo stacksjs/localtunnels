@@ -5,6 +5,7 @@ import {
   HELPER_CLI,
   HELPER_LIB,
   HELPER_PATH,
+  HELPER_VERSION,
   HELPER_SERVERS,
   helperScript,
   nativeLibPath,
@@ -113,5 +114,27 @@ describe('what the install actually copies', () => {
 
   it('puts the library where the copied CLI will look for it', () => {
     expect(HELPER_LIB).toBe(`${HELPER_CLI.replace(/\/[^/]+$/, '')}/libltvpn.dylib`)
+  })
+})
+
+describe('the helper reports what it is actually running', () => {
+  const script = helperScript()
+
+  /*
+   * The bug this closes. The helper runs a root-owned *copy* of the CLI, so
+   * rebuilding the app updated the bundle and left that copy untouched — a
+   * fix shipped in the app was simply not in the code that ran. The window
+   * said connected, the old behaviour continued, and nothing anywhere said
+   * the two had diverged.
+   */
+  it('digests the binary it will run, not just its config', () => {
+    expect(script).toContain('shasum -a 256 "$CLI"')
+    expect(script).toContain('shasum -a 256 "$SERVERS"')
+  })
+
+  it('prints the version first, so a mismatch is always detectable', () => {
+    // Interpolated at generation time, so the literal in the script is the
+    // number itself.
+    expect(script).toContain(`echo "${HELPER_VERSION} $(shasum`)
   })
 })

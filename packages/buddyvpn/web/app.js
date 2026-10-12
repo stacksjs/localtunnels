@@ -72,6 +72,18 @@
   const connected = () => realConnected() || demoConnected
   /** True when the chosen location has no server and the demo stands in. */
   const demoing = () => DEMO && Boolean(status) && Boolean(current()) && !current().configured
+  /**
+   * What to say while connecting.
+   *
+   * "Waiting for authorization" under a dialog that is never going to appear
+   * is how a privileged helper working perfectly looks exactly like one that
+   * has hung — which is what it looked like.
+   */
+  const captionForPhase = () => {
+    if (demoing()) return 'Pretending to ask for authorization…'
+    if (status && status.needsPassword === false) return 'Starting the tunnel…'
+    return 'Waiting for authorization…'
+  }
   const coreReady = () => Boolean(status && status.core && status.core.available && status.core.healthy)
   const current = () => regions().find(entry => entry.id === region) || regions()[0] || null
 
@@ -212,7 +224,7 @@
     el.power.setAttribute('aria-label', connected() ? 'Disconnect' : 'Connect')
 
     if (error) el.caption.textContent = error
-    else if (phase) el.caption.textContent = demoing() ? 'Pretending to ask for authorization…' : 'Waiting for authorization…'
+    else if (phase) el.caption.textContent = captionForPhase()
     else if (demoConnected) el.caption.textContent = 'Demo — no tunnel was created'
     else if (connected()) el.caption.textContent = here ? `Your traffic leaves from ${here.city}` : ''
     else if (blocked) el.caption.textContent = why.short
