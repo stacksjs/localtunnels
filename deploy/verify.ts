@@ -36,7 +36,7 @@ function record(name: string, ok: boolean, detail = ''): void {
  * known in advance, since the coordinator allocates them from 100.100.0.0/16,
  * so the server address is read off its interface instead of assumed.
  */
-function netnsClientScript(): string {
+function netnsClientScript(publicIp: string): string {
   return `set -uo pipefail
 BIN=${REMOTE_BIN}
 export LTVPN_LIB=${REMOTE_LIB}
@@ -44,6 +44,7 @@ NS=ltverify
 HOST_IP=192.168.241.1
 NS_IP=192.168.241.2
 COORD_PORT=${COORD_PORT}
+PUBLIC_IP=${publicIp}
 CLIENT_HOME=/root/.lt-client
 SERVER_PUB=$(cat /root/.lt-server/vpn/publickey)
 AUTH_KEY=$(cat /root/.lt-coordinator/authkey)
@@ -68,6 +69,10 @@ ip link set vethh up
 ip netns exec \$NS ip addr add \$NS_IP/24 dev vethc
 ip netns exec \$NS ip link set vethc up
 ip netns exec \$NS ip link set lo up
+# The namespace needs a way off itself: the directory advertises the exit node
+# at the box's public address, so a namespace with only its veth cannot reach
+# the endpoint it is told to dial, and the client fails with ENETUNREACH.
+ip netns exec \$NS ip route add default via \$HOST_IP
 
 # Start the localtunnels client inside the netns. It enrols with the
 # coordinator exactly as a real client does, and pins the exit to the
@@ -81,7 +86,13 @@ CLIENT_PID=\$!
 sleep 5
 
 CLIENT_TUN=\$(ip netns exec \$NS sh -c "ls /sys/class/net | grep -E '^tun'" | head -1)
-[ -n "\$CLIENT_TUN" ] && ip netns exec \$NS ip route add default dev "\$CLIENT_TUN" 2>/dev/null
+if [ -n "\$CLIENT_TUN" ]; then
+  # Pin the endpoint before capturing the default, or the tunnel's own
+  # packets route into the tunnel that carries them — the same hole
+  # full-tunnel mode punches, for the same reason.
+  ip netns exec \$NS ip route add \${PUBLIC_IP}/32 via \$HOST_IP 2>/dev/null
+  ip netns exec \$NS ip route replace default dev "\$CLIENT_TUN" 2>/dev/null
+fi
 
 sleep 2
 ip netns exec \$NS ping -c1 -W3 \$SERVER_TUN_IP >/dev/null 2>&1
@@ -90,6 +101,7 @@ PING=\$(ip netns exec \$NS ping -c3 -W3 \$SERVER_TUN_IP 2>/dev/null | grep -oE '
 EXIT_IP=\$(ip netns exec \$NS curl -s --max-time 15 https://api.ipify.org || echo "")
 SERVER_IP=\$(curl -s --max-time 15 https://api.ipify.org || echo "")
 
+echo "SERVER_TUN_IP=\$SERVER_TUN_IP"
 echo "CLIENT_TUN=\${CLIENT_TUN:-none}"
 echo "PING=\$PING"
 echo "EXIT_IP=\$EXIT_IP"
@@ -137,7 +149,7 @@ async function main(): Promise<void> {
   // ── The real e2e: a localtunnels client through the tunnel ───────────────
   // eslint-disable-next-line no-console
   console.log('\n  Running netns localtunnels client e2e (our stack on both ends)...\n')
-  const out = await sshExecOrThrow(ip, netnsClientScript(), EXEC_OPTS)
+  const out = await sshExecOrThrow(ip, netnsClientScript(ip), EXEC_OPTS)
   const kv: Record<string, string> = {}
   for (const line of out.split('\n')) {
     const eq = line.indexOf('=')
@@ -146,7 +158,7 @@ async function main(): Promise<void> {
   }
 
   const pingRecv = Number.parseInt((kv.PING || '0 received').split(' ')[0])
-  record('Client link + ping over the tunnel (10.8.0.1)', pingRecv > 0, kv.PING)
+  record(`Client link + ping over the tunnel (${kv.SERVER_TUN_IP || 'server'})`, pingRecv > 0, kv.PING)
 
   const exitOk = !!kv.EXIT_IP && kv.EXIT_IP === kv.SERVER_IP && kv.EXIT_IP === ip
   record('Traffic egresses via the VPN (exit node)', exitOk, `client-sees=${kv.EXIT_IP || '?'} server=${kv.SERVER_IP || '?'} expected=${ip}`)
