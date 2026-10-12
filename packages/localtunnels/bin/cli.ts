@@ -1073,6 +1073,51 @@ cli
   })
 
 cli
+  .command('vpn:config', 'Print one field of one region from a servers.json (for the privileged helper)')
+  .option('--servers <path>', 'Path to servers.json')
+  .option('--region <id>', 'Region id to read')
+  .option('--field <name>', 'One of coordinatorUrl, authKey, useExit')
+  .action(async (options: { servers?: string, region?: string, field?: string }) => {
+    /*
+     * Exists so the root helper never takes a coordinator, a key or an exit
+     * from its caller: it is handed a region name and reads the rest out of
+     * its own root-owned file through this.
+     *
+     * Only three fields are readable, and nothing else in the file is, so a
+     * new secret added to servers.json later is not retroactively exposed by
+     * a command that was written before it existed.
+     */
+    const allowed = ['coordinatorUrl', 'authKey', 'useExit']
+    const { servers, region, field } = options
+    if (!servers || !region || !field || !allowed.includes(field)) {
+      console.error(`usage: lt vpn:config --servers <path> --region <id> --field <${allowed.join('|')}>`)
+      process.exit(64)
+    }
+
+    let parsed: Record<string, Record<string, string>>
+    try {
+      parsed = JSON.parse(await Bun.file(servers).text())
+    }
+    catch {
+      console.error(`could not read ${servers}`)
+      process.exit(1)
+      return
+    }
+
+    const entry = parsed?.[region]
+    if (!entry || typeof entry !== 'object') {
+      console.error(`no server configured for ${region}`)
+      process.exit(1)
+      return
+    }
+
+    // `useExit` absent means auto; the others print empty rather than
+    // "undefined", which the shell would happily pass along as a value.
+    const value = entry[field] ?? (field === 'useExit' ? 'auto' : '')
+    process.stdout.write(`${value}\n`)
+  })
+
+cli
   .command('vpn:down', 'Undo full-tunnel mode: restore routes, DNS and firewall rules (needs root)')
   .action(async () => {
     /*

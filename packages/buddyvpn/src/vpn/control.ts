@@ -27,8 +27,12 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import process from 'node:process'
 import type { ExecResult } from '../support/shell'
-import { appleScriptEscape, exec, execFile, shellEscape } from '../support/shell'
+import { buildElevatedScript, runElevated } from '../support/elevate'
+import { exec, shellEscape } from '../support/shell'
+import { helperDown, helperReady, helperUp, installHelper } from './helper'
 import { regionById } from '../regions'
+
+export { buildElevatedScript, runElevated }
 import { findCli } from './core'
 
 /** `ws://host`, `wss://host:51821`. No path, no query, no credentials. */
@@ -180,30 +184,6 @@ export function buildConnectCommand(cli: string, entry: ServerEntry): string {
 }
 
 /**
- * The AppleScript that runs a shell command as root, as script text.
- *
- * Only the AppleScript layer is escaped here, and that is the whole point.
- * This used to return a complete `osascript -e '...'` shell command, which
- * added a second layer: the script was wrapped in single quotes and then
- * handed to `/bin/sh`, while the command inside it was full of the single
- * quotes `shellEscape` puts around every path. The first of those closed the
- * wrapper, so `osascript` received a sentence ending mid-string and failed to
- * parse before it could ever ask for a password.
- *
- * Run it with {@link runElevated}, which passes this to `osascript` as an
- * argument rather than as shell source. The escaping that is left is for the
- * shell AppleScript itself invokes, which is what `shellEscape` is for.
- */
-export function buildElevatedScript(shellCommand: string): string {
-  return `do shell script "${appleScriptEscape(shellCommand)}" with administrator privileges`
-}
-
-/** Run a shell command as root, prompting through the system dialog. */
-export function runElevated(shellCommand: string): ExecResult {
-  return execFile('osascript', ['-e', buildElevatedScript(shellCommand)], { timeout: 180_000 })
-}
-
-/**
  * Whether a running process is a tunnel this app started.
  *
  * A recorded pid is not trusted on its own: pids are reused, and killing a
@@ -326,6 +306,29 @@ function formatOsaError(message: string): ActionResult {
 }
 
 /** Bring the tunnel up for a region, through the macOS authorization dialog. */
+/**
+ * Start through the helper, recording the pid it reports.
+ *
+ * The helper runs as root and the pid file lives in the user's directory, so
+ * the helper cannot write it — it prints the pid instead and this records it.
+ * `connectionPid` would find the process anyway by scanning, but the file is
+ * what makes the common case a single `ps` rather than a full table read.
+ */
+function helperStart(regionId: string): ExecResult {
+  const started = helperUp(regionId)
+  if (!started.success)
+    return { ok: false, stdout: '', stderr: started.error ?? '', code: 1 }
+  if (started.pid !== undefined) {
+    try {
+      fs.writeFileSync(pidFile(), `${started.pid}\n`, { mode: 0o600 })
+    }
+    catch {
+      // Advisory: the process-table scan is the authority.
+    }
+  }
+  return { ok: true, stdout: '', stderr: '', code: 0 }
+}
+
 export function connect(regionId: string): ActionResult {
   const region = regionById(regionId)
   if (!region)
@@ -344,7 +347,21 @@ export function connect(regionId: string): ActionResult {
   if (entry.authKey)
     fs.writeFileSync(authKeyFile(), entry.authKey, { mode: 0o600 })
 
-  const result = runElevated(buildConnectCommand(cli, entry))
+  /*
+   * The helper is what makes this ask for a password once rather than every
+   * time. Installing it needs one prompt; after that `sudo -n` runs without
+   * one, and a redeploy that changes servers.json costs one more.
+   *
+   * Failure to install is not failure to connect. A machine whose admin has
+   * locked down /etc/sudoers.d, or a user who dismisses the dialog, should
+   * still get a VPN — just with the prompt they were already getting.
+   */
+  if (!helperReady())
+    installHelper()
+
+  const result = helperReady()
+    ? helperStart(regionId)
+    : runElevated(buildConnectCommand(cli, entry))
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 
@@ -426,11 +443,16 @@ export function disconnect(): ActionResult {
    * so the machine is restored either way — what SIGKILL loses is the
    * tunnel's own tidy exit, not the network.
    */
-  const result = runElevated(
-    `${teardown}kill ${pids} 2>/dev/null; sleep 2; kill -0 ${pids} 2>/dev/null && kill -9 ${pids} 2>/dev/null; exit 0`,
-  )
-  if (!result.ok)
-    return formatOsaError(result.stderr || result.stdout)
+  // Through the helper when it is installed, so stopping costs no prompt
+  // either — a kill switch you need a password to lift is a kill switch
+  // people learn to leave off.
+  const result = helperReady()
+    ? helperDown()
+    : runElevated(
+        `${teardown}kill ${pids} 2>/dev/null; sleep 2; kill -0 ${pids} 2>/dev/null && kill -9 ${pids} 2>/dev/null; exit 0`,
+      )
+  if ('ok' in result ? !result.ok : !result.success)
+    return formatOsaError(('stderr' in result ? result.stderr : result.error) || '')
 
   try {
     fs.rmSync(pidFile(), { force: true })
