@@ -94,8 +94,13 @@ describe('buildConnectCommand', () => {
     expect(command).toContain(`'/Applications/BuddyVPN.app/Contents/MacOS/localtunnels'`)
     expect(command).toContain(`'vpn:up'`)
     expect(command).toContain(`'wss://vpn.example.com:51821'`)
-    // The tunnel has to outlive the osascript that authorized it.
-    expect(command).toStartWith('nohup ')
+    // The tunnel has to outlive the osascript that authorized it, by being
+    // orphaned from a subshell rather than by nohup — which fails outright
+    // under `do shell script`, where there is no console to detach from.
+    expect(command).toStartWith('(')
+    expect(command).toEndWith(')')
+    expect(command).not.toContain('nohup')
+    expect(command).toContain('< /dev/null')
     expect(command).toContain('echo $! >')
   })
 
@@ -127,7 +132,7 @@ describe('buildConnectCommand', () => {
     expect(command).toContain(`LOCALTUNNELS_AUTH_KEY=$(cat '${authKeyFile()}')`)
     // The assignment has to precede the command it applies to, or it is just
     // a variable nothing reads.
-    expect(command.indexOf('LOCALTUNNELS_AUTH_KEY')).toBeLessThan(command.indexOf('nohup'))
+    expect(command.indexOf('LOCALTUNNELS_AUTH_KEY')).toBeLessThan(command.indexOf('vpn:up'))
   })
 
   // These are what make it a VPN rather than a private link to one machine.

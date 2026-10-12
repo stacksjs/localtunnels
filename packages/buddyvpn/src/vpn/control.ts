@@ -137,9 +137,18 @@ export function readServers(): ServerMap {
 /**
  * The command that brings the tunnel up.
  *
- * `nohup ... &` because the tunnel has to outlive the `osascript` that
- * authorized it, and the pid is recorded so the app can stop what it started
- * — and only what it started.
+ * The tunnel has to outlive the `osascript` that authorized it, and the pid is
+ * recorded so the app can stop what it started — and only what it started.
+ *
+ * It survives by being orphaned, not by `nohup`. `do shell script` runs with
+ * no controlling terminal, and macOS `nohup` fails outright when it tries to
+ * detach from a console that was never there: `can't detach from console:
+ * Inappropriate ioctl for device`, and the tunnel is dead before it has
+ * opened anything. Backgrounding inside a subshell that then exits achieves
+ * what nohup was for — the process is reparented to launchd, and with no
+ * terminal in the picture there is no SIGHUP for nohup to have shielded it
+ * from. stdin comes from /dev/null so nothing can block on a read that will
+ * never be answered.
  *
  * `--full-tunnel` and `--kill-switch` are what make this a VPN rather than a
  * private link to one machine. Without the first, the tunnel comes up and the
@@ -165,7 +174,8 @@ export function buildConnectCommand(cli: string, entry: ServerEntry): string {
   // environment; `connect` writes the file just before this runs.
   const secret = entry.authKey ? `LOCALTUNNELS_AUTH_KEY=$(cat ${shellEscape(authKeyFile())}) ` : ''
   const quoted = [cli, ...args].map(shellEscape).join(' ')
-  return `${secret}nohup ${quoted} > ${shellEscape(logFile())} 2>&1 & echo $! > ${shellEscape(pidFile())}`
+  const log = shellEscape(logFile())
+  return `(${secret}${quoted} < /dev/null > ${log} 2>&1 & echo $! > ${shellEscape(pidFile())})`
 }
 
 /**
@@ -297,7 +307,41 @@ export function connect(regionId: string): ActionResult {
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 
+  /*
+   * Elevation succeeding only means the command was launched. The command
+   * backgrounds the tunnel and returns immediately, so a tunnel that dies on
+   * its first line — a bad key, a coordinator that refuses, a shell that
+   * could not detach — looked identical to one that came up, and the window
+   * reported success while nothing had happened.
+   *
+   * So the pid is checked after a moment, and the log is what the user is
+   * told. Short enough not to be felt, long enough for an immediate failure
+   * to have already happened.
+   */
+  Bun.sleepSync(1500)
+  if (connectionPid() === null)
+    return { success: false, error: tunnelFailure() }
+
   return { success: true }
+}
+
+/** The most useful line the dead tunnel left behind, for the window to show. */
+function tunnelFailure(): string {
+  let log = ''
+  try {
+    log = fs.readFileSync(logFile(), 'utf8')
+  }
+  catch {
+    // No log at all: the shell never got far enough to redirect into it.
+  }
+
+  const lines = log.split('\n').map(line => line.trim()).filter(Boolean)
+  // Last first: a stack trace ends with the thing that actually went wrong.
+  const blamed = [...lines].reverse().find(line => /error|fail|refus|denied|unable|cannot|can't/i.test(line))
+  const detail = blamed ?? lines[lines.length - 1]
+  return detail
+    ? `The tunnel stopped right after starting: ${detail}`
+    : 'The tunnel stopped right after starting, without saying why'
 }
 
 /**
