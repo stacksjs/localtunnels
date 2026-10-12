@@ -936,41 +936,71 @@ cli
         : '  \u2192 no exit node; non-tunnel traffic has no route and is dropped'))
 
       /*
-       * Full-tunnel mode is applied when the exit becomes known rather than
-       * at bring-up, because in coordinator mode it is not known at bring-up:
-       * the directory supplies the exit and its endpoint afterwards, and the
-       * endpoint is exactly what has to be pinned before the default route is
-       * captured.
+       * Full-tunnel mode needs two things that arrive independently: the
+       * interface, from `vpn.up()`, and the exit's endpoint, from the
+       * coordinator's directory. Neither order is guaranteed — the directory
+       * can land before the TUN device is even open — so this waits for both
+       * rather than hanging off whichever one was assumed to be second.
+       *
+       * It used to run straight from `exitChanged` and read `vpn.name ?? ''`.
+       * When the directory won the race that empty string went all the way to
+       * `route -n add -net 0.0.0.0/1 -interface `, which fails with `bad
+       * address` — so the tunnel came up, linked to its exit, and carried
+       * nothing, while the window said connected.
        */
       let captured = false
+      let interfaceReady = false
+      let exitEndpoint: { host: string, port: number } | null = null
+
+      const captureWhenReady = async (): Promise<void> => {
+        const tun = vpn.name
+        if (captured || !interfaceReady || !exitEndpoint || !tun)
+          return
+        // Claimed before the first await: both triggers can fire in the same
+        // tick, and capturing twice would record the second run's undo over
+        // the first's.
+        captured = true
+        const endpoint = exitEndpoint
+        try {
+          await captureTraffic({
+            tun,
+            endpointIp: endpoint.host,
+            endpointPort: endpoint.port,
+            dnsServers: (options.dns ?? '1.1.1.1,1.0.0.1').split(',').map(d => d.trim()).filter(Boolean),
+            killSwitch: options.killSwitch,
+            allowLan: options.allowLan,
+          })
+          console.log(`  \u2192 full tunnel: default route and DNS via ${endpoint.host}`)
+          // Said out loud, because it is a change to the machine that
+          // outlives nothing else on this list being visible: v6-only
+          // sites stop resolving, and that should not be a mystery.
+          if (!endpoint.host.includes(':'))
+            console.log('  \u2192 IPv6 turned off while connected (the tunnel carries IPv4 only)')
+          if (options.killSwitch)
+            console.log('  \u2192 kill switch armed: traffic outside the tunnel is blocked')
+        }
+        catch (err: any) {
+          /*
+           * A full tunnel that cannot capture traffic is a failed connection,
+           * not a degraded one. Staying up is the worst available outcome:
+           * every byte still leaves over the normal route while everything
+           * watching this process — the window above all — reports a VPN. So
+           * it undoes whatever it managed and exits non-zero.
+           */
+          console.error(`  ! full tunnel failed, traffic is NOT being captured: ${err.message}`)
+          console.error('  ! bringing the tunnel down rather than leaving it looking connected')
+          await releaseTraffic()
+          vpn.down()
+          process.exit(1)
+        }
+      }
+
       if (options.fullTunnel) {
         vpn.on('exitChanged', (e) => {
-          void (async () => {
-            if (!e.publicKey || !e.endpoint || captured)
-              return
-            try {
-              await captureTraffic({
-                tun: vpn.name ?? '',
-                endpointIp: e.endpoint.host,
-                endpointPort: e.endpoint.port,
-                dnsServers: (options.dns ?? '1.1.1.1,1.0.0.1').split(',').map(d => d.trim()).filter(Boolean),
-                killSwitch: options.killSwitch,
-                allowLan: options.allowLan,
-              })
-              captured = true
-              console.log(`  \u2192 full tunnel: default route and DNS via ${e.endpoint.host}`)
-              // Said out loud, because it is a change to the machine that
-              // outlives nothing else on this list being visible: v6-only
-              // sites stop resolving, and that should not be a mystery.
-              if (!e.endpoint.host.includes(':'))
-                console.log('  \u2192 IPv6 turned off while connected (the tunnel carries IPv4 only)')
-              if (options.killSwitch)
-                console.log('  \u2192 kill switch armed: traffic outside the tunnel is blocked')
-            }
-            catch (err: any) {
-              console.error(`  ! full tunnel failed, traffic is NOT being captured: ${err.message}`)
-            }
-          })()
+          if (!e.publicKey || !e.endpoint)
+            return
+          exitEndpoint = { host: e.endpoint.host, port: e.endpoint.port }
+          void captureWhenReady()
         })
       }
       vpn.on('error', () => { /* transient handshake races and drops are expected */ })
@@ -1009,6 +1039,13 @@ cli
       console.log('')
       console.log('  Press Ctrl+C to bring the tunnel down')
       console.log('')
+
+      // The other half of the race: if the exit was already known before the
+      // interface existed, this is the trigger that captures.
+      if (options.fullTunnel) {
+        interfaceReady = true
+        void captureWhenReady()
+      }
 
       const shutdown = () => {
         void (async () => {
