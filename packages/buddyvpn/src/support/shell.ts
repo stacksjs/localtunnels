@@ -45,6 +45,38 @@ export function exec(command: string, options: { cwd?: string, timeout?: number 
 }
 
 /**
+ * Run a program directly, with its arguments as argv and no shell in between.
+ *
+ * `exec` hands a string to `/bin/sh -c`, which means every value inside it
+ * has to survive the shell's own parsing. That is the right tool for a
+ * pipeline we wrote ourselves and the wrong one for a program taking an
+ * argument we built: there is no quoting to get wrong here, because there is
+ * nothing doing any quoting.
+ */
+export function execFile(
+  file: string,
+  args: string[],
+  options: { cwd?: string, timeout?: number } = {},
+): ExecResult {
+  try {
+    const result = spawnSync(file, args, {
+      encoding: 'utf8',
+      timeout: options.timeout ?? 10_000,
+      cwd: options.cwd,
+    })
+    return {
+      ok: result.status === 0,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+      code: result.status,
+    }
+  }
+  catch {
+    return { ok: false, stdout: '', stderr: '', code: null }
+  }
+}
+
+/**
  * Single-quote a value for `/bin/sh`.
  *
  * Everything inside `'...'` is literal to the shell except `'` itself, which

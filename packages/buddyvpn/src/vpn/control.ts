@@ -25,7 +25,8 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { appleScriptEscape, exec, shellEscape } from '../support/shell'
+import type { ExecResult } from '../support/shell'
+import { appleScriptEscape, exec, execFile, shellEscape } from '../support/shell'
 import { regionById } from '../regions'
 import { findCli } from './core'
 
@@ -167,8 +168,28 @@ export function buildConnectCommand(cli: string, entry: ServerEntry): string {
   return `${secret}nohup ${quoted} > ${shellEscape(logFile())} 2>&1 & echo $! > ${shellEscape(pidFile())}`
 }
 
-export function buildElevatedCommand(shellCommand: string): string {
-  return `osascript -e 'do shell script "${appleScriptEscape(shellCommand)}" with administrator privileges'`
+/**
+ * The AppleScript that runs a shell command as root, as script text.
+ *
+ * Only the AppleScript layer is escaped here, and that is the whole point.
+ * This used to return a complete `osascript -e '...'` shell command, which
+ * added a second layer: the script was wrapped in single quotes and then
+ * handed to `/bin/sh`, while the command inside it was full of the single
+ * quotes `shellEscape` puts around every path. The first of those closed the
+ * wrapper, so `osascript` received a sentence ending mid-string and failed to
+ * parse before it could ever ask for a password.
+ *
+ * Run it with {@link runElevated}, which passes this to `osascript` as an
+ * argument rather than as shell source. The escaping that is left is for the
+ * shell AppleScript itself invokes, which is what `shellEscape` is for.
+ */
+export function buildElevatedScript(shellCommand: string): string {
+  return `do shell script "${appleScriptEscape(shellCommand)}" with administrator privileges`
+}
+
+/** Run a shell command as root, prompting through the system dialog. */
+export function runElevated(shellCommand: string): ExecResult {
+  return execFile('osascript', ['-e', buildElevatedScript(shellCommand)], { timeout: 180_000 })
 }
 
 /**
@@ -272,7 +293,7 @@ export function connect(regionId: string): ActionResult {
   if (entry.authKey)
     fs.writeFileSync(authKeyFile(), entry.authKey, { mode: 0o600 })
 
-  const result = exec(buildElevatedCommand(buildConnectCommand(cli, entry)), { timeout: 180_000 })
+  const result = runElevated(buildConnectCommand(cli, entry))
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 
@@ -304,7 +325,7 @@ export function disconnect(): ActionResult {
   // machine whose tunnel process crashed holding the network shut.
   const cli = findCli()
   const teardown = cli ? `${shellEscape(cli)} vpn:down; ` : ''
-  const result = exec(buildElevatedCommand(`${teardown}kill ${pid}`), { timeout: 180_000 })
+  const result = runElevated(`${teardown}kill ${pid}`)
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 

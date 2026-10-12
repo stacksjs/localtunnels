@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   authKeyFile,
   buildConnectCommand,
-  buildElevatedCommand,
+  buildElevatedScript,
   looksLikeTunnel,
   parseElapsed,
   parseServers,
@@ -166,15 +166,35 @@ describe('buildConnectCommand', () => {
   })
 })
 
-describe('buildElevatedCommand', () => {
+describe('buildElevatedScript', () => {
   it('escapes the quotes that would end the AppleScript literal', () => {
-    expect(buildElevatedCommand('echo "hi"')).toBe(
-      `osascript -e 'do shell script "echo \\"hi\\"" with administrator privileges'`,
+    expect(buildElevatedScript('echo "hi"')).toBe(
+      `do shell script "echo \\"hi\\"" with administrator privileges`,
     )
   })
 
   it('escapes backslashes before quotes, so an escape cannot be escaped away', () => {
-    expect(buildElevatedCommand('a\\b')).toContain('a\\\\b')
+    expect(buildElevatedScript('a\\b')).toContain('a\\\\b')
+  })
+
+  /*
+   * The regression that shipped. This returned a whole `osascript -e '...'`
+   * command for `/bin/sh`, so the single quotes `shellEscape` puts around
+   * every path closed the wrapper early and AppleScript got a truncated
+   * script. It is script text now, passed to osascript as an argument, so a
+   * single quote is an ordinary character — and the test says so, because the
+   * old one asserted the broken shape and passed.
+   */
+  it('leaves single quotes alone, because nothing wraps this in a shell string', () => {
+    const script = buildElevatedScript(buildConnectCommand('/Applications/B.app/x/localtunnels', {
+      coordinatorUrl: 'ws://host',
+      authKey: 'secret',
+    }))
+    expect(script.startsWith('do shell script "')).toBe(true)
+    expect(script.endsWith('" with administrator privileges')).toBe(true)
+    expect(script).toContain(`'/Applications/B.app/x/localtunnels'`)
+    // Exactly two unescaped double quotes: the ones delimiting the literal.
+    expect(script.replace(/\\"/g, '').match(/"/g)).toHaveLength(2)
   })
 })
 
