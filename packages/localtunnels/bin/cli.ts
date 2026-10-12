@@ -2,6 +2,7 @@
 /* eslint-disable node/prefer-global/process */
 import type { TunDevice as TunDeviceT } from '../src/vpn'
 import { randomBytes } from 'node:crypto'
+import * as net from 'node:net'
 import { CLI } from '@stacksjs/clapp'
 import { version } from '../package.json'
 import { TunnelClient, TunnelServer } from '../src/tunnel'
@@ -1045,6 +1046,94 @@ cli
       if (options.fullTunnel) {
         interfaceReady = true
         void captureWhenReady()
+      }
+
+      /*
+       * Watch that the tunnel is still carrying traffic, not merely up.
+       *
+       * A full tunnel plus a kill switch means a tunnel that stops passing
+       * packets takes the whole machine off the internet, and it does it
+       * silently: the interface is there, the routes are there, the
+       * handshakes keep succeeding, and the window says connected while
+       * nothing moves. That is the worst outcome this program can produce —
+       * worse than failing to connect — and it is what happens after some
+       * minutes idle.
+       *
+       * So liveness is measured rather than assumed. A probe out through the
+       * tunnel every 20s; three consecutive failures and the tunnel is
+       * declared dead, the machine is put back, and the reason is written
+       * down. One minute of broken network instead of twenty, and a log that
+       * says what happened.
+       */
+      let probeFailures = 0
+      let lastLinkAt = Date.now()
+      vpn.on('link', () => { lastLinkAt = Date.now() })
+
+      const HEALTH_INTERVAL_MS = 20_000
+      const HEALTH_STRIKES = 3
+
+      /** Can a packet still make the round trip through the tunnel? */
+      const tunnelCarriesTraffic = async (): Promise<boolean> => {
+        // A TCP handshake to a public resolver: it needs the tunnel to pass
+        // packets both ways, which is exactly the property in question, and
+        // it needs no DNS of its own to resolve first.
+        return new Promise<boolean>((resolve) => {
+          const socket = net.connect({ host: '1.1.1.1', port: 443 })
+          const done = (ok: boolean): void => {
+            socket.destroy()
+            resolve(ok)
+          }
+          socket.setTimeout(6000)
+          socket.on('connect', () => done(true))
+          socket.on('timeout', () => done(false))
+          socket.on('error', () => done(false))
+        })
+      }
+
+      if (options.fullTunnel) {
+        const health = setInterval(() => {
+          void (async () => {
+            if (!captured)
+              return
+            if (await tunnelCarriesTraffic()) {
+              if (probeFailures > 0)
+                console.log(`  \u2713 tunnel carrying traffic again (after ${probeFailures} failed probe(s))`)
+              probeFailures = 0
+              return
+            }
+
+            probeFailures += 1
+            const idleSeconds = Math.round((Date.now() - lastLinkAt) / 1000)
+            /*
+             * The counters are the diagnosis, so they are printed on every
+             * failed probe rather than only at the end.
+             *
+             * `toPeers` climbing while `toKernel` stays put means packets are
+             * leaving and nothing is coming back — the return path, not the
+             * capture. Neither moving means traffic is not reaching the
+             * tunnel at all. A `dropped` bucket filling names the reason
+             * outright. Without these a silent stall is indistinguishable
+             * from an idle machine.
+             */
+            const stats = vpn.stats
+            const counters = stats
+              ? `out=${stats.toPeers} in=${stats.toKernel} dropped=${Object.entries(stats.dropped)
+                .filter(([, count]) => count > 0)
+                .map(([reason, count]) => `${reason}:${count}`)
+                .join(',') || 'none'}`
+              : 'counters unavailable'
+            console.error(`  ! tunnel is not carrying traffic (${probeFailures}/${HEALTH_STRIKES}), ${idleSeconds}s since the last handshake, ${counters}`)
+            if (probeFailures < HEALTH_STRIKES)
+              return
+
+            clearInterval(health)
+            console.error('  ! the tunnel stopped carrying traffic; restoring the network rather than holding it shut')
+            await releaseTraffic()
+            vpn.down()
+            process.exit(1)
+          })()
+        }, HEALTH_INTERVAL_MS)
+        health.unref?.()
       }
 
       const shutdown = () => {
