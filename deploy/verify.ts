@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { sshExec, sshExecOrThrow } from '@stacksjs/ts-cloud/drivers'
-import { EXEC_OPTS, REMOTE_BIN, REMOTE_LIB, STATE_PATH, WG_PORT } from './config'
+import { COORD_PORT, EXEC_OPTS, REMOTE_BIN, REMOTE_LIB, STATE_PATH, WG_PORT } from './config'
 
 interface Check { name: string, ok: boolean, detail: string }
 const checks: Check[] = []
@@ -22,8 +22,19 @@ function record(name: string, ok: boolean, detail = ''): void {
 }
 
 /**
- * A netns localtunnels client that dials the running server service over a
- * host-local veth (the server listens on 0.0.0.0:51820). Cleans up on exit.
+ * A netns localtunnels client that enrols with the coordinator over a
+ * host-local veth. Cleans up on exit.
+ *
+ * It used to peer statically against the server key, which worked while the
+ * server authorized exactly one hard-coded client. The server now runs a
+ * coordinator and joins it as the exit node, so this enrols the way a real
+ * client does — which is the arrangement actually worth verifying.
+ *
+ * Two consequences. The coordinator is reached on the veth host address, not
+ * loopback: a network namespace has its own `lo`, so `127.0.0.1` inside it is
+ * the namespace rather than the box. And the tunnel addresses are no longer
+ * known in advance, since the coordinator allocates them from 100.100.0.0/16,
+ * so the server address is read off its interface instead of assumed.
  */
 function netnsClientScript(): string {
   return `set -uo pipefail
@@ -32,10 +43,11 @@ export LTVPN_LIB=${REMOTE_LIB}
 NS=ltverify
 HOST_IP=192.168.241.1
 NS_IP=192.168.241.2
-SERVER_TUN_IP=10.8.0.1
-CLIENT_TUN_IP=10.8.0.2
+COORD_PORT=${COORD_PORT}
 CLIENT_HOME=/root/.lt-client
 SERVER_PUB=$(cat /root/.lt-server/vpn/publickey)
+AUTH_KEY=$(cat /root/.lt-coordinator/authkey)
+SERVER_TUN_IP=\$(ip -4 -o addr show | awk '/tun[0-9]+/{print \$4}' | cut -d/ -f1 | head -1)
 
 cleanup() {
   [ -n "\${CLIENT_PID:-}" ] && kill "\$CLIENT_PID" 2>/dev/null
@@ -57,10 +69,13 @@ ip netns exec \$NS ip addr add \$NS_IP/24 dev vethc
 ip netns exec \$NS ip link set vethc up
 ip netns exec \$NS ip link set lo up
 
-# Start the localtunnels client inside the netns, dialing the server service.
+# Start the localtunnels client inside the netns. It enrols with the
+# coordinator exactly as a real client does, and pins the exit to the
+# server's own key rather than taking whatever 'auto' would offer.
 LOCALTUNNELS_HOME=\$CLIENT_HOME ip netns exec \$NS env LTVPN_LIB=\$LTVPN_LIB \$BIN vpn:up \
-  --listen 51821 --address \${CLIENT_TUN_IP}/24 \
-  --peer "\$SERVER_PUB" --endpoint \${HOST_IP}:${WG_PORT} --allowed-ips 0.0.0.0/0 \
+  --listen 51822 \
+  --coordinator ws://\${HOST_IP}:\${COORD_PORT} --auth-key "\$AUTH_KEY" \
+  --use-exit "\$SERVER_PUB" \
   > /tmp/lt-verify-client.log 2>&1 &
 CLIENT_PID=\$!
 sleep 5
@@ -96,6 +111,14 @@ async function main(): Promise<void> {
   console.log(`\n  Verifying localtunnels VPN at ${ip}\n`)
 
   // ── Server-side posture ──────────────────────────────────────────────────
+  const coord = await sshExec(ip, 'systemctl is-active localtunnels-coordinator.service', EXEC_OPTS)
+  record('localtunnels-coordinator service active', coord.stdout.trim() === 'active', coord.stdout.trim())
+
+  // A coordinator that is "active" but not bound accepts nobody, and the
+  // client-side symptom is a hang rather than a refusal.
+  const coordPort = await sshExec(ip, `ss -ltn | grep -q ':${COORD_PORT} ' && echo yes || echo no`, EXEC_OPTS)
+  record(`Coordinator listening on tcp/${COORD_PORT}`, coordPort.stdout.includes('yes'))
+
   const svc = await sshExec(ip, 'systemctl is-active localtunnels-vpn.service', EXEC_OPTS)
   record('localtunnels-vpn service active', svc.stdout.trim() === 'active', svc.stdout.trim())
 

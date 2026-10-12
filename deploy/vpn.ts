@@ -22,9 +22,11 @@ import {
   waitForSsh,
 } from '@stacksjs/ts-cloud/drivers'
 import { buildClientConfig, VPN_BOOTSTRAP_SCRIPT } from './cloud-init'
+import { coordinatorUrlFor, writeServerEntry } from './servers-json'
 import {
   CLI_ENTRY,
   CLIENT_CONF_PATH,
+  COORD_PORT,
   CLIENT_WG_IP,
   createProvisioner,
   EXEC_OPTS,
@@ -83,6 +85,7 @@ async function main(): Promise<void> {
     location: spec.location,
     ports: [
       { protocol: 'udp', port: WG_PORT },
+      { protocol: 'tcp', port: COORD_PORT },
       { protocol: 'icmp' },
     ],
     sshPublicKey: readFileSync(SSH_PUB_KEY_PATH, 'utf8'),
@@ -112,13 +115,18 @@ async function main(): Promise<void> {
     if (eq > 0)
       kv[line.slice(0, eq)] = line.slice(eq + 1).trim()
   }
+  if (kv.COORDINATOR !== 'active')
+    throw new Error(`localtunnels coordinator not active (status: ${kv.COORDINATOR || 'unknown'})`)
   if (kv.SERVICE !== 'active')
     throw new Error(`localtunnels VPN service not active (status: ${kv.SERVICE || 'unknown'})`)
-  log(`Service: localtunnels-vpn ${kv.SERVICE}`)
+  log(`Service: localtunnels-coordinator ${kv.COORDINATOR}, localtunnels-vpn ${kv.SERVICE}`)
 
   const serverPublicKey = kv.SERVER_PUB
   const clientPublicKey = kv.CLIENT_PUB
   const clientPrivateKey = kv.CLIENT_PRIV
+  const authKey = kv.AUTH_KEY
+  if (!authKey)
+    throw new Error('the setup script did not report an AUTH_KEY, so clients would have no way to enrol')
 
   // A WireGuard-compatible client config (our protocol is WireGuard v1), so the
   // client works with `lt vpn up` OR a stock WireGuard client.
@@ -136,6 +144,18 @@ async function main(): Promise<void> {
     createdAt: new Date().toISOString(),
   }, null, 2)}\n`)
 
+  /*
+   * Hand the server to the desktop app.
+   *
+   * The exit is pinned to this box's own key rather than left as `auto`.
+   * `auto` takes the lowest-sorted peer advertising itself as an exit, and the
+   * coordinator relays that claim without being able to check it — so on a
+   * network where anyone holds the auth key, `auto` is a vote. We know which
+   * node is the exit here, because we just built it.
+   */
+  const coordinatorUrl = coordinatorUrlFor(box.publicIp, COORD_PORT)
+  const serversPath = writeServerEntry(region, { coordinatorUrl, authKey, useExit: serverPublicKey })
+
   log('')
   log('╔══════════════════════════════════════════════════════════╗')
   log('║        localtunnels VPN is UP                             ║')
@@ -147,6 +167,9 @@ async function main(): Promise<void> {
   log(`  Datapath:    localtunnels lt vpn (systemd: localtunnels-vpn)`)
   log(`  Listening:   udp/${WG_PORT}, server key ${serverPublicKey}`)
   log(`  Client:      ${CLIENT_WG_IP}, config at ${CLIENT_CONF_PATH}`)
+  log('')
+  log(`  Coordinator: ${coordinatorUrl} (auth key in ${serversPath})`)
+  log(`  BuddyVPN:    ${region} is configured — open the app and press Connect`)
   log('')
   log(`  Verify e2e:  bun run verify:vpn`)
   log(`  Tear down:   bun run destroy:vpn`)
