@@ -29,6 +29,15 @@ AUTH_KEY_FILE=$COORD_HOME/authkey
 COORD_PORT=51821
 TUN_NETWORK=100.100.0.0/16
 
+# The address other nodes must reach this box on. Passed in by the deploy,
+# which knows it authoritatively; detected from the primary route only as a
+# fallback for a hand-run.
+PUBLIC_IP=${1:-$(ip -4 -o route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)}
+if [ -z "$PUBLIC_IP" ]; then
+  echo "could not determine this host's public IP" >&2
+  exit 1
+fi
+
 chmod +x "$BIN"
 
 # Retire stock WireGuard if present so it doesn't hold udp/51820.
@@ -82,9 +91,16 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
-# The datapath joins the coordinator it sits beside, over loopback — the
-# directory is the same whichever interface you reach it on, and a public hop
-# to your own box is a hop that can fail.
+# The datapath joins the coordinator over the PUBLIC address, not loopback.
+#
+# It is the same directory either way, and loopback looks like the sturdier
+# choice — no hop off the box. But the coordinator reflects each node's
+# endpoint from the address its WebSocket arrives on, and that reflected
+# endpoint is what every other node sends datapath packets to. Joined over
+# loopback the exit node is published at 127.0.0.1:51820, so every client
+# addresses the exit on its own loopback, where nothing is listening. The
+# symptom is an ICMP port-unreachable surfacing as ECONNREFUSED on recv, which
+# names neither the coordinator nor the endpoint that caused it.
 cat > /etc/systemd/system/localtunnels-vpn.service <<EOF
 [Unit]
 Description=localtunnels VPN exit node
@@ -96,7 +112,7 @@ Requires=localtunnels-coordinator.service
 Environment=LTVPN_LIB=$LIB
 Environment=LOCALTUNNELS_HOME=$SERVER_HOME
 EnvironmentFile=$ENV_FILE
-ExecStart=$BIN vpn:up --listen 51820 --coordinator ws://127.0.0.1:$COORD_PORT --exit-node
+ExecStart=$BIN vpn:up --listen 51820 --coordinator ws://$PUBLIC_IP:$COORD_PORT --exit-node
 Restart=always
 RestartSec=2
 

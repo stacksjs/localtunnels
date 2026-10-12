@@ -60,8 +60,10 @@ async function buildArtifacts(): Promise<void> {
     '--target=bun-linux-x64',
     `--outfile=${LOCAL_BIN}`,
   ])
-  // Self-contained musl build (no libc.so dependency → loads on any glibc host).
-  await run(['zig', 'build', '-Dtarget=x86_64-linux-musl'], VPN_CORE_DIR)
+  // glibc, built against an old version so it loads on anything newer. A musl
+  // build of a *shared* library comes out static-PIE and segfaults the host
+  // process on its first call — see the note in packages/vpn-core/build.zig.
+  await run(['zig', 'build', '-Dtarget=x86_64-linux-gnu.2.31'], VPN_CORE_DIR)
   await run(['cp', `${VPN_CORE_DIR}/zig-out/lib/libltvpn.so`, LOCAL_LIB])
   // Restore the local (host) native lib so local tests keep working.
   await run(['zig', 'build'], VPN_CORE_DIR)
@@ -102,13 +104,20 @@ async function main(): Promise<void> {
   await artifactsBuilt
 
   log('Shipping localtunnels binary + native lib + setup script...')
-  // Stop the service first so the running binary/lib aren't busy (ETXTBSY).
-  await sshExec(box.publicIp, 'systemctl stop localtunnels-vpn.service 2>/dev/null || true', EXEC_OPTS)
+  // Stop BOTH services first so the running binary and library are not busy.
+  // They share one executable, so stopping only the datapath leaves the
+  // coordinator holding it open and the upload fails with ETXTBSY — which scp
+  // reports as the uninformative `dest open ... Failure`.
+  await sshExec(
+    box.publicIp,
+    'systemctl stop localtunnels-vpn.service localtunnels-coordinator.service 2>/dev/null || true',
+    EXEC_OPTS,
+  )
   await scpUpload(box.publicIp, [LOCAL_BIN, LOCAL_LIB, SETUP_SCRIPT], '/root/', EXEC_OPTS)
   await sshExecOrThrow(box.publicIp, `chmod +x ${REMOTE_BIN} ${REMOTE_SETUP}`, EXEC_OPTS)
 
   log('Configuring the localtunnels VPN service...')
-  const setupOut = await sshExecOrThrow(box.publicIp, `bash ${REMOTE_SETUP}`, EXEC_OPTS)
+  const setupOut = await sshExecOrThrow(box.publicIp, `bash ${REMOTE_SETUP} ${box.publicIp}`, EXEC_OPTS)
   const kv: Record<string, string> = {}
   for (const line of setupOut.split('\n')) {
     const eq = line.indexOf('=')
