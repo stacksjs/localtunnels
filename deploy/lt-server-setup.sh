@@ -23,7 +23,6 @@ BIN=/root/lt-linux-x64
 LIB=/root/libltvpn-linux-x64.so
 export LTVPN_LIB=$LIB
 SERVER_HOME=/root/.lt-server
-CLIENT_HOME=/root/.lt-client
 COORD_HOME=/root/.lt-coordinator
 AUTH_KEY_FILE=$COORD_HOME/authkey
 COORD_PORT=51821
@@ -48,10 +47,14 @@ ip link del wg0 2>/dev/null || true
 # Ensure the tun module + IP forwarding are available.
 modprobe tun 2>/dev/null || true
 
-# Identities (idempotent: keep existing keys on re-run).
+# Identity (idempotent: keep existing keys on re-run).
+#
+# Only the server has one. A client identity used to be minted here too, to be
+# named as the single static `--peer`, and its PRIVATE key was printed to
+# stdout — into the deploy output, the terminal scrollback and any CI log that
+# captured them. Clients mint their own and enrol with the auth key now, so
+# there is nothing here to hand out.
 SERVER_PUB=$(LOCALTUNNELS_HOME=$SERVER_HOME "$BIN" vpn:keygen 2>/dev/null | awk '/Public key/{print $3}')
-CLIENT_PUB=$(LOCALTUNNELS_HOME=$CLIENT_HOME "$BIN" vpn:keygen 2>/dev/null | awk '/Public key/{print $3}')
-CLIENT_PRIV=$(cat "$CLIENT_HOME/vpn/privatekey")
 
 # The shared secret clients present to enrol. Generated once and kept, because
 # rotating it on every deploy would silently lock out every client already
@@ -135,8 +138,6 @@ COORD_STATUS=$(systemctl is-active localtunnels-coordinator.service || true)
 STATUS=$(systemctl is-active localtunnels-vpn.service || true)
 
 echo "SERVER_PUB=$SERVER_PUB"
-echo "CLIENT_PUB=$CLIENT_PUB"
-echo "CLIENT_PRIV=$CLIENT_PRIV"
 echo "AUTH_KEY=$AUTH_KEY"
 echo "COORD_PORT=$COORD_PORT"
 echo "COORDINATOR=$COORD_STATUS"

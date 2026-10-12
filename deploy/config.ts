@@ -30,7 +30,6 @@ export const WG_PORT: number = 51820
 export const COORD_PORT: number = 51821
 export const WG_SUBNET: string = '10.8.0.0/24'
 export const SERVER_WG_IP: string = '10.8.0.1'
-export const CLIENT_WG_IP: string = '10.8.0.2'
 
 /**
  * A deployable region: a provider-agnostic alias (`us-west`) resolved to the
@@ -101,6 +100,12 @@ export const SETUP_SCRIPT: string = join(import.meta.dir, 'lt-server-setup.sh')
 
 /** Local state file recording what was provisioned (for verify + destroy). */
 export const STATE_PATH: string = join(import.meta.dir, '.state.json')
+/**
+ * Legacy: the WireGuard-style client config the deploy used to write for its
+ * one static peer. Nothing writes it now, but `destroy:vpn` still removes it,
+ * because it exists on every machine that deployed before coordinator mode
+ * and it holds a private key.
+ */
 export const CLIENT_CONF_PATH: string = join(import.meta.dir, 'client-lt.conf')
 
 export interface DeployState {

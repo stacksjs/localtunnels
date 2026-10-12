@@ -21,13 +21,11 @@ import {
   waitForCloudInit,
   waitForSsh,
 } from '@stacksjs/ts-cloud/drivers'
-import { buildClientConfig, VPN_BOOTSTRAP_SCRIPT } from './cloud-init'
+import { VPN_BOOTSTRAP_SCRIPT } from './cloud-init'
 import { coordinatorUrlFor, writeServerEntry } from './servers-json'
 import {
   CLI_ENTRY,
-  CLIENT_CONF_PATH,
   COORD_PORT,
-  CLIENT_WG_IP,
   createProvisioner,
   EXEC_OPTS,
   LOCAL_BIN,
@@ -131,16 +129,9 @@ async function main(): Promise<void> {
   log(`Service: localtunnels-coordinator ${kv.COORDINATOR}, localtunnels-vpn ${kv.SERVICE}`)
 
   const serverPublicKey = kv.SERVER_PUB
-  const clientPublicKey = kv.CLIENT_PUB
-  const clientPrivateKey = kv.CLIENT_PRIV
   const authKey = kv.AUTH_KEY
   if (!authKey)
     throw new Error('the setup script did not report an AUTH_KEY, so clients would have no way to enrol')
-
-  // A WireGuard-compatible client config (our protocol is WireGuard v1), so the
-  // client works with `lt vpn up` OR a stock WireGuard client.
-  const clientConf = buildClientConfig({ clientPrivateKey, serverPublicKey, endpoint: box.publicIp })
-  writeFileSync(CLIENT_CONF_PATH, clientConf, { mode: 0o600 })
 
   writeFileSync(STATE_PATH, `${JSON.stringify({
     provider,
@@ -149,7 +140,6 @@ async function main(): Promise<void> {
     serverName: box.name,
     publicIp: box.publicIp,
     serverPublicKey,
-    clientPublicKey,
     createdAt: new Date().toISOString(),
   }, null, 2)}\n`)
 
@@ -175,7 +165,6 @@ async function main(): Promise<void> {
   log(`  Server:      ${serverName} (#${box.id}) @ ${box.publicIp}`)
   log(`  Datapath:    localtunnels lt vpn (systemd: localtunnels-vpn)`)
   log(`  Listening:   udp/${WG_PORT}, server key ${serverPublicKey}`)
-  log(`  Client:      ${CLIENT_WG_IP}, config at ${CLIENT_CONF_PATH}`)
   log('')
   log(`  Coordinator: ${coordinatorUrl} (auth key in ${serversPath})`)
   log(`  BuddyVPN:    ${region} is configured — open the app and press Connect`)
