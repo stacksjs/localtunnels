@@ -47,6 +47,8 @@ export interface VpnPeerOptions {
    * Default 120.
    */
   rekeyAfter?: number
+  /** Seconds before retrying a rekey that failed. Default 5. */
+  rekeyRetry?: number
 }
 
 export interface VpnPeerEvents {
@@ -104,6 +106,22 @@ const PUNCH_PACKET = new Uint8Array([MSG_PUNCH, 0, 0, 0])
 
 const HANDSHAKE_RETRIES = 5
 const HANDSHAKE_RETRY_MS = 1000
+/**
+ * How long to wait before trying a rekey again after one fails.
+ *
+ * A rekey that fails used to end the chain for good: the next timer is only
+ * armed by a successful `establish`, so a single handshake lost to packet
+ * loss meant no further attempt would ever be made. The live session kept
+ * working until it expired and then traffic simply stopped — and under a kill
+ * switch that is the whole machine off the internet, with the interface up
+ * and the window still saying connected.
+ *
+ * Five retries a second apart is five seconds of tolerance, which is not much
+ * on a link with a 180ms round trip. Rekeying starts at 120s against a
+ * session that is good for 180s, so retrying every 5s gives roughly a dozen
+ * more chances inside the margin that remains.
+ */
+const REKEY_RETRY_MS = 5000
 /** 2-byte length prefix framing keeps message boundaries and strips padding. */
 const LENGTH_PREFIX = 2
 const MAX_MESSAGE = 4094
@@ -124,6 +142,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
   private readonly bindHost?: string
   private readonly keepaliveInterval: number
   private readonly rekeyAfter: number
+  private readonly rekeyRetry: number
   private readonly raw: boolean
 
   private socket: UdpSocket | null = null
@@ -146,6 +165,7 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
     this.bindHost = options.host
     this.keepaliveInterval = options.keepaliveInterval ?? 15
     this.rekeyAfter = options.rekeyAfter ?? 120
+    this.rekeyRetry = options.rekeyRetry ?? REKEY_RETRY_MS / 1000
     this.raw = options.raw ?? false
   }
 
@@ -529,6 +549,22 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
       return
     this.connect(cfg.publicKey, link.host, link.port, link.relayed).catch((err) => {
       this.emit('error', err instanceof Error ? err : new Error(String(err)))
+      /*
+       * Try again rather than stopping here.
+       *
+       * This used to be the end of the line: the next rekey is armed by a
+       * successful `establish`, so a failure left nothing scheduled and the
+       * session ran out with no replacement. Only while this is still the
+       * live session for the peer — a rekey that succeeded in the meantime
+       * has armed its own timer, and a retired one is not ours to renew.
+       */
+      if (current === undefined || this.sessions.get(current) !== link)
+        return
+      if (this.sendIndex.get(peerPublicKey) !== current)
+        return
+      if (link.rekeyTimer)
+        clearTimeout(link.rekeyTimer)
+      link.rekeyTimer = setTimeout(() => this.rekey(peerPublicKey), this.rekeyRetry * 1000)
     })
   }
 
