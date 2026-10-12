@@ -26,10 +26,16 @@
    * one is configured, that location takes the real path and this flag stops
    * mattering for it, so there is no mode where a real connection is faked.
    *
-   * Flip to `false` once every location has a server, and the button simply
-   * reports the truth instead.
+   * Off now that a real server exists and this is used in earnest. A location
+   * without one is disabled and says so, rather than offering a button that
+   * walks through a connection it is not making. The labelling was honest —
+   * caption and foot both said demo — but "appears to connect" is the wrong
+   * risk to carry on a tool someone relies on, and a mis-tapped location is an
+   * easy mistake.
+   *
+   * Set back to `true` to click through the UI without a server.
    */
-  const DEMO = true
+  const DEMO = false
 
   /** How long the fake handshake takes, in milliseconds. */
   const DEMO_CONNECT_MS = 1200
