@@ -19,6 +19,9 @@ import process from 'node:process'
 import {
   defaultRouteCommands,
   dnsCommands,
+  type Ipv6Mode,
+  type Ipv6Service,
+  ipv6Commands,
   killSwitchCommands,
   type Reversible,
 } from './fulltunnel'
@@ -127,6 +130,30 @@ export function parseDnsServers(output: string): string[] | null {
   return lines.filter(line => /^[0-9a-f.:]+$/i.test(line))
 }
 
+/**
+ * The IPv6 mode a service is in, from `networksetup -getinfo`.
+ *
+ * Returns null for anything that cannot be restored faithfully. A manually
+ * configured service needs its address, prefix and router to put back, and a
+ * VPN that forgets a hand-configured address is worse than one that leaves
+ * that service alone.
+ */
+export function parseIpv6Setting(output: string): Ipv6Mode | null {
+  const match = output.match(/^IPv6:\s*(.+)$/m)
+  if (!match)
+    return null
+
+  const mode = match[1].trim().toLowerCase()
+  if (mode === 'automatic')
+    return 'automatic'
+  if (mode.startsWith('link'))
+    return 'linklocal'
+  if (mode === 'off')
+    return 'off'
+  // Manual, or a word this version of macOS uses that we have not seen.
+  return null
+}
+
 async function readCommand(command: string[]): Promise<string> {
   try {
     const proc = Bun.spawn(command, { stdout: 'pipe', stderr: 'pipe' })
@@ -148,6 +175,26 @@ export async function discoverDnsServices(): Promise<Array<{ name: string, previ
   const services = []
   for (const name of names)
     services.push({ name, previous: parseDnsServers(await readCommand(['networksetup', '-getdnsservers', name])) })
+  return services
+}
+
+/**
+ * Services whose IPv6 can be turned off and put back.
+ *
+ * A service already set to `off` is skipped: turning off what is off changes
+ * nothing, and recording a restore for it risks switching IPv6 *on* for
+ * somebody who had deliberately disabled it.
+ */
+export async function discoverIpv6Services(): Promise<Ipv6Service[]> {
+  if (process.platform !== 'darwin')
+    return []
+
+  const services: Ipv6Service[] = []
+  for (const name of parseNetworkServices(await readCommand(['networksetup', '-listallnetworkservices']))) {
+    const previous = parseIpv6Setting(await readCommand(['networksetup', '-getinfo', name]))
+    if (previous && previous !== 'off')
+      services.push({ name, previous })
+  }
   return services
 }
 
@@ -176,6 +223,16 @@ export async function captureTraffic(options: CaptureOptions): Promise<void> {
     }),
     dnsCommands({ servers: options.dnsServers, services: await discoverDnsServices() }),
   ]
+
+  /*
+   * The tunnel is IPv4-only, so IPv6 is taken out of the picture rather than
+   * carried — see `ipv6Commands`. The exception is an endpoint that is itself
+   * an IPv6 address: disabling v6 would then cut the path the tunnel needs to the
+   * server, so it is left alone and the kill switch is what stops the leak.
+   */
+  const endpointIsV6 = options.endpointIp.includes(':')
+  if (!endpointIsV6)
+    parts.push(ipv6Commands({ services: await discoverIpv6Services() }))
 
   if (options.killSwitch) {
     parts.push(killSwitchCommands({

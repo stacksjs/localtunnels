@@ -3,6 +3,7 @@ import process from 'node:process'
 import {
   defaultRouteCommands,
   dnsCommands,
+  ipv6Commands,
   killSwitchCommands,
   PF_ANCHOR_NAME,
   pfRules,
@@ -188,6 +189,82 @@ describe('killSwitchCommands', () => {
     for (const command of down) {
       if (command[0] !== 'sh') continue
       expect(command[2]).toMatch(/\|\| true|2>\/dev\/null|\brm -f\b|\bmv -f\b/)
+    }
+  })
+})
+
+describe('ipv6Commands', () => {
+  /*
+   * The tunnel is IPv4-only: the coordinator assigns a v4 address and the exit
+   * peer claims 0.0.0.0/0, never ::/0. So on a dual-stack network every site
+   * with an AAAA record would be reached over IPv6, outside the tunnel, with
+   * the real address, while the window says Connected.
+   */
+  it('turns IPv6 off per service and puts each one back as it was', () => {
+    if (!darwin) return
+    const { up, down } = ipv6Commands({
+      services: [
+        { name: 'Wi-Fi', previous: 'automatic' },
+        { name: 'Thunderbolt Bridge', previous: 'linklocal' },
+      ],
+    })
+
+    expect(flat(up)).toEqual([
+      'networksetup -setv6off Wi-Fi',
+      'networksetup -setv6off Thunderbolt Bridge',
+    ])
+    // Restored to the mode each service was in, not to a single default: a
+    // service on link-local put back to automatic is a changed machine.
+    expect(flat(down)).toEqual([
+      'networksetup -setv6automatic Wi-Fi',
+      'networksetup -setv6linklocal Thunderbolt Bridge',
+    ])
+  })
+
+  it('does nothing when there is no service to act on', () => {
+    if (!darwin) return
+    expect(ipv6Commands({})).toEqual({ up: [], down: [] })
+  })
+
+  it('uses the sysctl lever on Linux and restores it', () => {
+    if (darwin) return
+    const { up, down } = ipv6Commands({})
+    expect(flat(up).join('\n')).toContain('disable_ipv6=1')
+    expect(flat(down).join('\n')).toContain('disable_ipv6=0')
+  })
+})
+
+describe('the kill switch covers IPv6', () => {
+  const config = { tun: 'utun7', endpointIp: '203.0.113.9', endpointPort: 51820 }
+
+  it('does not restrict the pf block to one address family', () => {
+    if (!darwin) return
+    // `block drop out all` with no `inet`/`inet6` qualifier covers both. A
+    // rule written `block drop out inet all` would leave v6 wide open.
+    const rules = pfRules(config)
+    expect(rules).toContain('block drop out all')
+    expect(rules).not.toContain('block drop out inet ')
+  })
+
+  it('builds an ip6tables chain too, since iptables is v4 only', () => {
+    if (darwin) return
+    // ip6tables is a separate table, not a flag. A switch built only in
+    // iptables is an open door beside a locked one.
+    const { up, down } = killSwitchCommands(config)
+    const text = flat(up).join('\n')
+    expect(text).toContain('ip6tables -N LT_KILLSWITCH')
+    expect(text).toContain('ip6tables -A LT_KILLSWITCH -j DROP')
+    expect(text).toContain('ip6tables -I OUTPUT 1 -j LT_KILLSWITCH')
+    expect(flat(down).join('\n')).toContain('ip6tables -X LT_KILLSWITCH')
+  })
+
+  it('never fails the v4 switch over a kernel without IPv6', () => {
+    if (darwin) return
+    // A kernel built without IPv6 has no ip6tables, and refusing to arm the
+    // v4 guard because of that trades a working one for none.
+    for (const command of killSwitchCommands(config).up) {
+      if (command[0] === 'sh' && command[2].includes('ip6tables'))
+        expect(command[2]).toMatch(/\|\| true|2>\/dev\/null/)
     }
   })
 })

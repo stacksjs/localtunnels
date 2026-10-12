@@ -266,6 +266,25 @@ export function killSwitchCommands(config: KillSwitchConfig): Reversible {
 
   const chain: string = 'LT_KILLSWITCH'
   const lan = allowLan ? LAN_RANGES.map(range => ['iptables', '-A', chain, '-d', range, '-j', 'RETURN']) : []
+
+  /*
+   * `ip6tables` is a separate table, not a flag on `iptables`. A kill switch
+   * built only in `iptables` governs IPv4 and lets every IPv6 packet past
+   * untouched — on a dual-stack machine that is not a weakened kill switch,
+   * it is an open door beside a locked one.
+   *
+   * The v6 chain has no exception for the endpoint: the tunnel is IPv4-only,
+   * so a v6 endpoint is not a case that exists here, and loopback is the only
+   * v6 traffic with anywhere legitimate to go.
+   */
+  const v6 = [
+    ['sh', '-c', `ip6tables -D OUTPUT -j ${chain} 2>/dev/null; ip6tables -F ${chain} 2>/dev/null; ip6tables -X ${chain} 2>/dev/null; true`],
+    ['sh', '-c', `ip6tables -N ${chain} 2>/dev/null || true`],
+    ['sh', '-c', `ip6tables -A ${chain} -o lo -j RETURN 2>/dev/null || true`],
+    ['sh', '-c', `ip6tables -A ${chain} -j DROP 2>/dev/null || true`],
+    ['sh', '-c', `ip6tables -I OUTPUT 1 -j ${chain} 2>/dev/null || true`],
+  ]
+
   return {
     up: [
       // Idempotent: a stale chain from a crashed run is removed before the
@@ -279,11 +298,86 @@ export function killSwitchCommands(config: KillSwitchConfig): Reversible {
       ...lan,
       ['iptables', '-A', chain, '-j', 'DROP'],
       ['iptables', '-I', 'OUTPUT', '1', '-j', chain],
+      // Tolerated rather than required: a kernel built without IPv6 has no
+      // ip6tables, and refusing to arm the v4 switch because of that would
+      // trade a working guard for a missing one.
+      ...v6,
     ],
     down: [
       ['sh', '-c', `iptables -D OUTPUT -j ${chain} 2>/dev/null || true`],
       ['sh', '-c', `iptables -F ${chain} 2>/dev/null || true`],
       ['sh', '-c', `iptables -X ${chain} 2>/dev/null || true`],
+      ['sh', '-c', `ip6tables -D OUTPUT -j ${chain} 2>/dev/null || true`],
+      ['sh', '-c', `ip6tables -F ${chain} 2>/dev/null || true`],
+      ['sh', '-c', `ip6tables -X ${chain} 2>/dev/null || true`],
+    ],
+  }
+}
+
+/**
+ * A macOS network service's IPv6 setting, and how to put it back.
+ *
+ * `previous` is `networksetup`'s own word for the mode — `automatic`,
+ * `linklocal` or `off`. A service configured manually is not represented,
+ * because restoring one needs its address, prefix and router, and a VPN that
+ * forgets a hand-configured address is worse than one that leaves it alone.
+ */
+export type Ipv6Mode = 'automatic' | 'linklocal' | 'off'
+
+export interface Ipv6Service {
+  name: string
+  previous: Ipv6Mode
+}
+
+export interface Ipv6Config {
+  services?: Ipv6Service[]
+}
+
+/**
+ * Take IPv6 out of the picture for the duration of the tunnel.
+ *
+ * The tunnel is IPv4-only: the coordinator assigns a v4 address and the exit
+ * peer claims `0.0.0.0/0`, never `::/0`. So on a dual-stack network — which is
+ * most home networks now — capturing v4 and leaving v6 alone means every site
+ * with an AAAA record is reached over IPv6, outside the tunnel, with your real
+ * address, while the window says Connected. That is the worst failure this app
+ * has, because nothing about it looks wrong.
+ *
+ * Two ways to stop it, and the difference matters more than it looks.
+ *
+ * Blocking v6 at the firewall is the obvious one, and it leaves the machine
+ * holding a v6 address and a v6 route. Applications still *try* IPv6 first —
+ * that is what Happy Eyeballs does — and wait for a timeout before falling
+ * back to v4. Every connection pays that stall, which is precisely the
+ * "the VPN makes everything slow" complaint.
+ *
+ * Turning v6 off per service takes the address away, so name resolution and
+ * connection setup go straight to v4 with nothing to fall back from. That is
+ * what this does, and the kill switch still blocks v6 underneath it as a
+ * backstop for anything that brings an interface up later.
+ */
+export function ipv6Commands(config: Ipv6Config): Reversible {
+  const { services = [] } = config
+
+  if (process.platform === 'darwin') {
+    return {
+      up: services.map(service => ['networksetup', '-setv6off', service.name]),
+      down: services.map(service => [`networksetup`, `-setv6${service.previous}`, service.name]),
+    }
+  }
+
+  // Linux: the sysctl is the equivalent lever. Restored to 0 rather than to a
+  // captured value because a machine that had v6 disabled already is one this
+  // never touches — `discoverIpv6Services` returns nothing for it, so these
+  // commands are never built.
+  return {
+    up: [
+      ['sysctl', '-w', 'net.ipv6.conf.all.disable_ipv6=1'],
+      ['sysctl', '-w', 'net.ipv6.conf.default.disable_ipv6=1'],
+    ],
+    down: [
+      ['sysctl', '-w', 'net.ipv6.conf.all.disable_ipv6=0'],
+      ['sysctl', '-w', 'net.ipv6.conf.default.disable_ipv6=0'],
     ],
   }
 }

@@ -944,6 +944,11 @@ cli
               })
               captured = true
               console.log(`  \u2192 full tunnel: default route and DNS via ${e.endpoint.host}`)
+              // Said out loud, because it is a change to the machine that
+              // outlives nothing else on this list being visible: v6-only
+              // sites stop resolving, and that should not be a mystery.
+              if (!e.endpoint.host.includes(':'))
+                console.log('  \u2192 IPv6 turned off while connected (the tunnel carries IPv4 only)')
               if (options.killSwitch)
                 console.log('  \u2192 kill switch armed: traffic outside the tunnel is blocked')
             }
