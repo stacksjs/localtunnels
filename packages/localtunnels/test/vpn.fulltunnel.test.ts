@@ -7,6 +7,7 @@ import {
   killSwitchCommands,
   PF_ANCHOR_NAME,
   pfRules,
+  shellQuote,
 } from '../src/vpn/fulltunnel'
 
 const darwin = process.platform === 'darwin'
@@ -266,5 +267,32 @@ describe('the kill switch covers IPv6', () => {
       if (command[0] === 'sh' && command[2].includes('ip6tables'))
         expect(command[2]).toMatch(/\|\| true|2>\/dev\/null/)
     }
+  })
+})
+
+describe('the pf files reach disk as files', () => {
+  /*
+   * `JSON.stringify` was used to quote these for the shell. It yields a
+   * JavaScript literal, so a newline came out as the two characters `\` and
+   * `n` — which neither sh's double quotes nor `printf %s` expand. The
+   * ruleset landed as one line containing a literal `\n`, and pf rejected
+   * the whole of /etc/pf.conf, Apple's own anchors included.
+   */
+  const commands = killSwitchCommands({ tun: 'utun9', endpointIp: '5.78.208.190', endpointPort: 51820 })
+  const anchorWrite = commands.up[0][2]
+  const confAppend = commands.up[2][2]
+
+  it('writes the anchor with real newlines, not the characters backslash and n', () => {
+    expect(anchorWrite).not.toContain('\\n')
+    expect(anchorWrite).toContain('\nblock drop out all\n')
+  })
+
+  it('appends to pf.conf with real newlines', () => {
+    expect(confAppend).not.toContain('\\n')
+    expect(confAppend).toContain('\nanchor "org.localtunnels.vpn"\n')
+  })
+
+  it('quotes for the shell, so a path with a quote cannot end the string', () => {
+    expect(shellQuote(`it's`)).toBe(`'it'\\''s'`)
   })
 })

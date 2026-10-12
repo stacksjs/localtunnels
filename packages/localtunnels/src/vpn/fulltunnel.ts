@@ -189,6 +189,24 @@ const PF_CONF: string = '/etc/pf.conf'
 const PF_CONF_BACKUP: string = '/etc/pf.conf.localtunnels'
 
 /**
+ * Single-quote a value for `/bin/sh`, newlines and all.
+ *
+ * `JSON.stringify` was used for this, and it is not the same thing. It
+ * produces a *JavaScript* literal, which looks close enough for a word or a
+ * path and diverges exactly where it matters: a newline becomes the two
+ * characters `\` and `n`. Double quotes do not expand those in sh, and
+ * `printf %s` does not expand escapes in its argument either, so a ruleset
+ * went to disk as one line with a literal `\n` in it and pf refused the
+ * whole file — including Apple's own anchors.
+ *
+ * A single-quoted shell string carries real newlines verbatim, which is what
+ * a config file needs.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/**
  * The pf ruleset, as text. Separate from the commands so the thing that can
  * cut a machine off the network can be asserted on character by character.
  *
@@ -245,12 +263,12 @@ export function killSwitchCommands(config: KillSwitchConfig): Reversible {
     const reference = `\nanchor "${PF_ANCHOR_NAME}"\nload anchor "${PF_ANCHOR_NAME}" from "${PF_ANCHOR_FILE}"\n`
     return {
       up: [
-        ['sh', '-c', `printf %s ${JSON.stringify(pfRules(config))} > ${PF_ANCHOR_FILE}`],
+        ['sh', '-c', `printf %s ${shellQuote(pfRules(config))} > ${PF_ANCHOR_FILE}`],
         // Backed up only once: a second connect must not overwrite the
         // pristine copy with one that already carries our anchor, or
         // teardown would restore the anchor it is trying to remove.
         ['sh', '-c', `[ -f ${PF_CONF_BACKUP} ] || cp -f ${PF_CONF} ${PF_CONF_BACKUP}`],
-        ['sh', '-c', `grep -q ${JSON.stringify(PF_ANCHOR_NAME)} ${PF_CONF} || printf %s ${JSON.stringify(reference)} >> ${PF_CONF}`],
+        ['sh', '-c', `grep -q ${shellQuote(PF_ANCHOR_NAME)} ${PF_CONF} || printf %s ${shellQuote(reference)} >> ${PF_CONF}`],
         ['pfctl', '-E', '-f', PF_CONF],
       ],
       down: [

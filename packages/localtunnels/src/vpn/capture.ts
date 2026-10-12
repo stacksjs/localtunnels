@@ -253,7 +253,19 @@ export async function captureTraffic(options: CaptureOptions): Promise<void> {
     for (const command of part.up) {
       const result = await runCommand(command)
       if (!result.ok) {
-        await rollback(applied.flat().reverse())
+        /*
+         * The failing part is rolled back too, not just the ones that
+         * finished. A part is several commands, and failing on the last of
+         * them still leaves the earlier ones applied — the kill switch
+         * rewrites /etc/pf.conf before it loads it, so a load that is refused
+         * used to leave that edit on the machine permanently, with nothing
+         * recording it and pf unable to parse its own config.
+         *
+         * Every `down` command tolerates having nothing to undo, which is
+         * what makes this safe to run for a part that may have applied none
+         * of itself.
+         */
+        await rollback([...applied, part.down].flat().reverse())
         throw new Error(`\`${command.join(' ')}\` failed: ${result.stderr || 'unknown error'}`)
       }
     }
