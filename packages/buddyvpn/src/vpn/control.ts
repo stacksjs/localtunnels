@@ -29,7 +29,7 @@ import process from 'node:process'
 import type { ExecResult } from '../support/shell'
 import { buildElevatedScript, runElevated } from '../support/elevate'
 import { exec, shellEscape } from '../support/shell'
-import { helperDown, helperLogPath, helperReady, helperUp, installHelper } from './helper'
+import { HELPER_CLI, helperDown, helperLogPath, helperReady, helperUp, installHelper } from './helper'
 import { regionById } from '../regions'
 
 export { buildElevatedScript, runElevated }
@@ -194,9 +194,31 @@ export function buildConnectCommand(cli: string, entry: ServerEntry): string {
 export function looksLikeTunnel(commandLine: string, cliPath?: string | null): boolean {
   if (!/(?:^|\s)vpn:up(?:\s|$)/.test(commandLine))
     return false
+  if (ourCliPaths(cliPath).some(path => commandLine.includes(path)))
+    return true
+  // The name heuristic is the answer only when we could not find our own CLI
+  // to compare against. With a known bundle path, anything running from
+  // somewhere else is deliberately not ours.
   if (cliPath)
-    return commandLine.includes(cliPath)
+    return false
   return /(?:^|[\s/])(?:localtunnels|lt)(?:\s|$)/.test(commandLine)
+}
+
+/**
+ * Every path a tunnel of ours can be running from.
+ *
+ * There are two, and for a while this knew about one. The helper runs the
+ * root-owned copy of the CLI, not the one in the bundle, so a tunnel it
+ * started matched nothing: the window reported `managedPid: null` over a
+ * working VPN and settled back to "Not connected", and disconnect decided
+ * there was nothing of ours to stop while the traffic kept flowing. Both
+ * halves of that are worse than an error.
+ *
+ * A tunnel started from a terminal still runs neither of these and is still
+ * none of our business.
+ */
+export function ourCliPaths(cliPath?: string | null): string[] {
+  return [cliPath, HELPER_CLI].filter((path): path is string => typeof path === 'string' && path.length > 0)
 }
 
 /**

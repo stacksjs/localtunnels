@@ -272,3 +272,27 @@ describe('looksLikeTunnel, against the real orphan', () => {
     expect(looksLikeTunnel('/usr/local/bin/lt vpn:up --coordinator ws://h', '/Users/x/dist/BuddyVPN.app/Contents/MacOS/localtunnels')).toBe(false)
   })
 })
+
+describe('a tunnel the helper started is still ours', () => {
+  const app = '/Users/g/BuddyVPN.app/Contents/MacOS/localtunnels'
+  const viaHelper = '/usr/local/libexec/buddyvpn/localtunnels vpn:up --coordinator ws://h --full-tunnel'
+
+  /*
+   * The helper runs the root-owned copy, not the bundle. Matching only the
+   * bundle meant a working VPN reported `managedPid: null`, the window
+   * settled back to "Not connected" over a live tunnel, and disconnect
+   * concluded there was nothing of ours to stop while traffic kept flowing.
+   */
+  it('matches the root-owned copy the helper runs', () => {
+    expect(looksLikeTunnel(viaHelper, app)).toBe(true)
+  })
+
+  it('still matches one the app started itself', () => {
+    expect(looksLikeTunnel(`${app} vpn:up --coordinator ws://h`, app)).toBe(true)
+  })
+
+  it('still disowns a tunnel from anywhere else', () => {
+    expect(looksLikeTunnel('/usr/local/bin/lt vpn:up --coordinator ws://h', app)).toBe(false)
+    expect(looksLikeTunnel('/opt/homebrew/bin/localtunnels vpn:up', app)).toBe(false)
+  })
+})
