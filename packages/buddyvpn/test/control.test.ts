@@ -253,3 +253,22 @@ describe('parseElapsed', () => {
       expect(parseElapsed(value)).toBeNull()
   })
 })
+
+describe('looksLikeTunnel, against the real orphan', () => {
+  /*
+   * The command line of the tunnel that outlived its pid file. The app
+   * reported `managedPid: null` while this was running as root, so the stop
+   * button had nothing to stop — which is what `findTunnelPids` is for.
+   */
+  const line = '/Users/x/dist/BuddyVPN.app/Contents/MacOS/localtunnels vpn:up '
+    + '--coordinator ws://5.78.208.190:51821 --use-exit eUTkU3E3XJAr1je1tXBHkYflCJ0KvIooyqmgk/DkzlA= '
+    + '--full-tunnel --kill-switch'
+
+  it('recognises it from the bundled CLI path alone', () => {
+    expect(looksLikeTunnel(line, '/Users/x/dist/BuddyVPN.app/Contents/MacOS/localtunnels')).toBe(true)
+  })
+
+  it('still disowns a tunnel started from somewhere else', () => {
+    expect(looksLikeTunnel('/usr/local/bin/lt vpn:up --coordinator ws://h', '/Users/x/dist/BuddyVPN.app/Contents/MacOS/localtunnels')).toBe(false)
+  })
+})

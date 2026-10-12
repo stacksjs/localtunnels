@@ -25,6 +25,7 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import process from 'node:process'
 import type { ExecResult } from '../support/shell'
 import { appleScriptEscape, exec, execFile, shellEscape } from '../support/shell'
 import { regionById } from '../regions'
@@ -252,23 +253,63 @@ export function connectionUptime(pid: number): number | null {
   return ps.ok ? parseElapsed(ps.stdout) : null
 }
 
-/** The pid of the tunnel this app started, or null. */
+/** Every running process whose command line is one of our tunnels. */
+export function findTunnelPids(): number[] {
+  const cli = findCli()
+  const ps = exec('ps -axo pid=,command=', { timeout: 5000 })
+  if (!ps.ok)
+    return []
+
+  const pids: number[] = []
+  for (const line of ps.stdout.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/)
+    if (!match)
+      continue
+    const pid = Number.parseInt(match[1], 10)
+    // Never ourselves: this process's own argv mentions the CLI path whenever
+    // the app is the one that spawned it.
+    if (pid === process.pid)
+      continue
+    if (looksLikeTunnel(match[2], cli))
+      pids.push(pid)
+  }
+  return pids
+}
+
+/**
+ * The pid of the tunnel this app started, or null.
+ *
+ * The recorded pid is a hint, not the record. It is checked first because it
+ * is cheap and exact, but it can be missing or stale while the tunnel it
+ * named is still running — and a tunnel the app cannot see is a tunnel the
+ * app cannot stop, which left a root process holding the network with no way
+ * to shut it down from the window that started it.
+ *
+ * So the fallback is the process table. Matching on the bundled CLI's own
+ * path keeps the original rule intact: a tunnel started from a terminal runs
+ * a different binary and is still none of our business.
+ */
 export function connectionPid(): number | null {
-  let recorded: number
+  let recorded: number | null = null
   try {
-    recorded = Number.parseInt(fs.readFileSync(pidFile(), 'utf8').trim(), 10)
+    const parsed = Number.parseInt(fs.readFileSync(pidFile(), 'utf8').trim(), 10)
+    if (Number.isInteger(parsed) && parsed > 0)
+      recorded = parsed
   }
   catch {
-    return null
+    // No pid file. The scan below is the whole answer.
   }
-  if (!Number.isInteger(recorded) || recorded <= 0)
-    return null
 
-  const ps = exec(`ps -o command= -p ${recorded}`, { timeout: 5000 })
-  if (!ps.ok || !ps.stdout.trim())
-    return null
+  if (recorded !== null) {
+    const ps = exec(`ps -o command= -p ${recorded}`, { timeout: 5000 })
+    if (ps.ok && looksLikeTunnel(ps.stdout.trim(), findCli()))
+      return recorded
+  }
 
-  return looksLikeTunnel(ps.stdout.trim(), findCli()) ? recorded : null
+  // Lowest pid: if somehow more than one is running, the oldest is the one
+  // the window has been reporting, and the rest are cleaned up with it.
+  const found = findTunnelPids()
+  return found.length > 0 ? Math.min(...found) : null
 }
 
 export interface ActionResult {
@@ -369,7 +410,11 @@ export function disconnect(): ActionResult {
   // machine whose tunnel process crashed holding the network shut.
   const cli = findCli()
   const teardown = cli ? `${shellEscape(cli)} vpn:down; ` : ''
-  const result = runElevated(`${teardown}kill ${pid}`)
+  // Every tunnel of ours, not only the recorded one: a pid file lost while
+  // the process it named kept running is exactly how one got orphaned, and
+  // stopping all of them is what the button claims to do.
+  const pids = [...new Set([pid, ...findTunnelPids()])]
+  const result = runElevated(`${teardown}kill ${pids.join(' ')}`)
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 
