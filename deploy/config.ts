@@ -17,6 +17,17 @@ import { createBoxProvisioner, HetznerClient } from '@stacksjs/ts-cloud/drivers'
 export const SERVER_NAME: string = 'localtunnels-vpn'
 
 export const WG_PORT: number = 51820
+
+/**
+ * Where the coordinator listens, over TCP.
+ *
+ * Separate from the datapath port and a different protocol: the datapath is
+ * UDP 51820 and carries packets, the coordinator is a WebSocket on TCP and
+ * carries the directory. Both have to be open — a box with only the datapath
+ * port open accepts no new members, and the failure looks like a client that
+ * hangs rather than one that is refused.
+ */
+export const COORD_PORT: number = 51821
 export const WG_SUBNET: string = '10.8.0.0/24'
 export const SERVER_WG_IP: string = '10.8.0.1'
 export const CLIENT_WG_IP: string = '10.8.0.2'
