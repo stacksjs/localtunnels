@@ -164,7 +164,16 @@ describe('killSwitchCommands', () => {
       // A named chain can be removed exactly, without reasoning about what
       // else was inserted into OUTPUT since, or at which index.
       expect(flat(up)).toContain('iptables -N LT_KILLSWITCH')
-      expect(flat(up).at(-1)).toBe('iptables -I OUTPUT 1 -j LT_KILLSWITCH')
+      // The chain is hooked into OUTPUT only once every rule inside it
+      // exists, or there is a window where it is reachable and empty. It is
+      // the last *iptables* command rather than the last command outright:
+      // the v6 chain is built afterwards and ends with its own insert.
+      const v4 = flat(up).filter(line => line.includes('iptables') && !line.includes('ip6tables'))
+      expect(v4.at(-1)).toBe('iptables -I OUTPUT 1 -j LT_KILLSWITCH')
+    })
+
+    it('hooks the v6 chain in last of all', () => {
+      expect(flat(up).at(-1)).toContain('ip6tables -I OUTPUT 1 -j LT_KILLSWITCH')
     })
 
     it('drops last, after every exception', () => {
@@ -270,7 +279,7 @@ describe('the kill switch covers IPv6', () => {
   })
 })
 
-describe('the pf files reach disk as files', () => {
+describe.if(darwin)('the pf files reach disk as files', () => {
   /*
    * `JSON.stringify` was used to quote these for the shell. It yields a
    * JavaScript literal, so a newline came out as the two characters `\` and
@@ -298,6 +307,7 @@ describe('the pf files reach disk as files', () => {
 })
 
 describe('the kill switch never blocks loopback', () => {
+  // pfRules is the macOS ruleset; Linux builds iptables chains instead.
   const rules = pfRules({ tun: 'utun9', endpointIp: '5.78.208.190', endpointPort: 51820 })
 
   /*
