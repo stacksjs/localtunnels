@@ -13,6 +13,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+async function until(predicate: () => boolean, timeoutMs: number): Promise<void> {
+  const start = Date.now()
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs)
+      throw new Error(`condition not met within ${timeoutMs}ms`)
+    await sleep(50)
+  }
+}
+
 /*
  * The failure this covers took a machine off the internet for twenty minutes.
  *
@@ -61,13 +70,20 @@ describeVpn('a rekey that fails is tried again', () => {
     // Silence the far end. Every rekey from here on must fail.
     responder.stop()
 
-    // Count the attempts rather than trusting a timer exists: a handshake
-    // takes five tries over five seconds, so two full rounds is enough to
-    // show the chain did not stop at the first failure.
+    /*
+     * Count attempts rather than trust that a timer exists. One rekey is five
+     * handshake tries a second apart, so a second failure can only happen if
+     * something scheduled another attempt after the first gave up.
+     *
+     * Polled rather than slept for a fixed span: the timing here is five
+     * seconds of handshake plus a retry delay, which leaves almost no margin
+     * on a loaded CI runner. Waiting for the condition finishes as soon as it
+     * is true and tolerates a slow machine.
+     */
     let failures = 0
     initiator.on('error', () => { failures += 1 })
 
-    await sleep(14_000)
+    await until(() => failures > 1, 30_000)
     expect(failures).toBeGreaterThan(1)
-  }, 25_000)
+  }, 45_000)
 })
