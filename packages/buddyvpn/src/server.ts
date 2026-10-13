@@ -20,7 +20,7 @@ import { loginItemEnabled, setLoginItem } from './login-item'
 import { readSettings, writeSettings } from './settings'
 import { readCore, readIdentity, readTunnels } from './vpn/core'
 import { lookupLocation } from './vpn/geo'
-import { helperLogPath, helperReady, uninstallHelper } from './vpn/helper'
+import { helperLogPath, helperPresent, helperReady, uninstallHelper } from './vpn/helper'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -63,7 +63,11 @@ function settingsPayload(): Record<string, unknown> {
     // then describe something that is no longer true.
     settings: { ...settings, launchAtLogin: loginItemEnabled() },
     dnsChoices: Object.entries(DNS_LABELS).map(([id, label]) => ({ id, label })),
-    helperInstalled: helperReady(),
+    // Present and current are different questions; a helper from an older
+    // build is installed but not usable, and saying "not installed" hid the
+    // only control that removes it.
+    helperPresent: helperPresent(),
+    helperReady: helperReady(),
     logPath: helperLogPath(),
     versions: { app: version, cli: readCore(false).version },
   }

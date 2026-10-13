@@ -53,6 +53,22 @@
     city: document.querySelector('[data-city]'),
     picker: document.querySelector('[data-picker]'),
     foot: document.querySelector('[data-foot]'),
+    egress: document.querySelector('[data-egress]'),
+    egressKicker: document.querySelector('[data-egress-kicker]'),
+    egressWhere: document.querySelector('[data-egress-where]'),
+    egressIp: document.querySelector('[data-egress-ip]'),
+    settings: document.querySelector('[data-settings]'),
+    settingsOpen: document.querySelector('[data-settings-open]'),
+    settingsClose: document.querySelector('[data-settings-close]'),
+    setRegion: document.querySelector('[data-set-region]'),
+    setAutoconnect: document.querySelector('[data-set-autoconnect]'),
+    setLogin: document.querySelector('[data-set-login]'),
+    setDns: document.querySelector('[data-set-dns]'),
+    setLan: document.querySelector('[data-set-lan]'),
+    setShowLocation: document.querySelector('[data-set-showlocation]'),
+    about: document.querySelector('[data-about]'),
+    helperRemove: document.querySelector('[data-helper-remove]'),
+    helperNote: document.querySelector('[data-helper-note]'),
   }
 
   /** Last payload from the agent. Null until the first answer arrives. */
@@ -66,6 +82,12 @@
   let connectedSince = null
   /** Demo mode's own connection, which exists only in this window. */
   let demoConnected = false
+  /** Last answer from /api/location, or null while unknown. */
+  let egress = null
+  /** Last answer from /api/settings. */
+  let config = null
+  /** Guards the one automatic connect, so a reconnect never triggers it. */
+  let autoConnectDone = false
 
   const regions = () => (status && status.regions) || []
   const realConnected = () => Boolean(status && status.managedPid)
@@ -252,6 +274,16 @@
     else el.foot.textContent = ''
 
     paintPicker()
+    paintEgress()
+    /*
+     * The settings panel is repainted from here rather than only when it
+     * opens. Its location list comes from the agent, and settings are loaded
+     * before the first status arrives — so the list was built from an empty
+     * array and the dropdown stayed blank until the panel was closed and
+     * reopened. Painting it with everything else means it cannot be left
+     * describing a state that has since moved on.
+     */
+    if (!el.settings.hidden) paintSettings()
   }
 
   const post = (url, payload) => fetch(url, {
@@ -297,7 +329,32 @@
     }
 
     paint()
+
+    /*
+     * The route out has changed, so the address the world sees has too.
+     * Asked here rather than on every poll because that is the only moment
+     * the answer can differ, and each ask is a request to a third party.
+     */
+    if (wasConnected !== connected())
+      refreshEgress()
+
+    maybeAutoConnect()
   })
+
+/**
+ * Connect once, if that is what was asked for.
+ *
+ * Guarded by a flag rather than by "are we disconnected": without it, this
+ * would reconnect every time the tunnel dropped, which turns a setting about
+ * launching into a reconnect policy nobody asked for.
+ */
+  function maybeAutoConnect() {
+    if (autoConnectDone || !config || !config.settings.autoConnect) return
+    autoConnectDone = true
+    if (connected() || phase || !coreReady()) return
+    const here = current()
+    if (here && here.configured) toggle()
+  }
 
   /**
    * The demo's transitions, on a timer instead of a round trip.
@@ -343,6 +400,168 @@
     })
   }
 
+  /* ── What the internet sees ─────────────────────────────────────────── */
+
+  /**
+   * Ask the agent where this machine appears to be, and paint it.
+   *
+   * Called when the window opens and after the connection changes, not on
+   * the status poll: it costs a request to a third party, and the answer can
+   * only differ when the route out has.
+   */
+  function refreshEgress() {
+    return post('/api/location').then((data) => {
+      egress = (data && data.success === true) ? (data.location || null) : null
+      paintEgress()
+    })
+  }
+
+  function paintEgress() {
+    if (!egress) {
+      el.egress.hidden = true
+      return
+    }
+    el.egress.hidden = false
+    // Connected, this is the exit and the words should say so; disconnected,
+    // it is where the user actually is. Same row, because it answers the same
+    // question either way: where does my traffic come from?
+    const on = connected()
+    el.egressKicker.textContent = on ? 'Traffic leaves from' : 'Your location'
+    el.egress.dataset.tone = on ? 'on' : 'off'
+    const where = [egress.city, egress.country].filter(Boolean).join(', ')
+    el.egressWhere.textContent = where || 'Unknown location'
+    el.egressIp.textContent = egress.ip
+  }
+
+  /* ── Settings ───────────────────────────────────────────────────────── */
+
+  function loadSettings() {
+    return post('/api/settings').then((data) => {
+      if (!data || data.success !== true) return
+      config = data
+      paintSettings()
+    })
+  }
+
+  function paintSettings() {
+    if (!config) return
+    const s = config.settings
+
+    // Locations come from the agent so this list cannot drift from the one
+    // on the main screen.
+    if (el.setRegion.options.length !== regions().length) {
+      el.setRegion.innerHTML = ''
+      for (const r of regions()) {
+        const option = document.createElement('option')
+        option.value = r.id
+        option.textContent = r.country
+        el.setRegion.append(option)
+      }
+    }
+    el.setRegion.value = s.defaultRegion
+
+    if (el.setDns.options.length !== (config.dnsChoices || []).length) {
+      el.setDns.innerHTML = ''
+      for (const choice of config.dnsChoices || []) {
+        const option = document.createElement('option')
+        option.value = choice.id
+        option.textContent = choice.label
+        el.setDns.append(option)
+      }
+    }
+    el.setDns.value = s.dns
+
+    el.setAutoconnect.checked = s.autoConnect
+    el.setLogin.checked = s.launchAtLogin
+    el.setLan.checked = s.allowLan
+    el.setShowLocation.checked = s.showLocation
+
+    // A location cannot be changed while connected, and neither can the
+    // settings that only take effect when a tunnel is built.
+    const live = connected()
+    el.setLan.disabled = live
+    el.setDns.disabled = live
+
+    el.about.innerHTML = ''
+    const facts = [
+      ['App', config.versions && config.versions.app],
+      ['Core', config.versions && config.versions.cli],
+      ['Your key', status && status.identity && status.identity.publicKey],
+      ['Helper', config.helperPresent
+        ? (config.helperReady ? 'installed' : 'installed, updates on next connect')
+        : 'not installed'],
+      ['Log', config.logPath],
+    ]
+    for (const [name, value] of facts) {
+      if (!value) continue
+      const dt = document.createElement('dt')
+      dt.textContent = name
+      const dd = document.createElement('dd')
+      dd.textContent = value
+      el.about.append(dt, dd)
+    }
+
+    el.helperRemove.hidden = !config.helperPresent
+    el.helperNote.textContent = config.helperPresent
+      ? 'Removing it means every connect asks for your password again.'
+      : 'Installed the first time you connect, so connecting stops asking for your password.'
+  }
+
+  function save(patch) {
+    return post('/api/settings/update', patch).then((data) => {
+      if (data && data.success === true) config = data
+      paintSettings()
+      // Turning the location off should clear what is already on screen,
+      // rather than leaving the last answer visible under a setting that
+      // says it is not being asked for.
+      return refreshEgress()
+    })
+  }
+
+  function openSettings() {
+    el.settings.hidden = false
+    // Painted before the fetch, not after it. Opening on an empty panel and
+    // filling it a round trip later shows a blank dropdown for long enough
+    // to read as broken, and everything needed is already in hand from the
+    // last time.
+    paintSettings()
+    loadSettings()
+  }
+
+  function closeSettings() {
+    el.settings.hidden = true
+  }
+
+  el.settingsOpen.addEventListener('click', openSettings)
+  el.settingsClose.addEventListener('click', closeSettings)
+  el.setRegion.addEventListener('change', () => save({ defaultRegion: el.setRegion.value }))
+  el.setDns.addEventListener('change', () => save({ dns: el.setDns.value }))
+  el.setAutoconnect.addEventListener('change', () => save({ autoConnect: el.setAutoconnect.checked }))
+  el.setLogin.addEventListener('change', () => save({ launchAtLogin: el.setLogin.checked }))
+  el.setLan.addEventListener('change', () => save({ allowLan: el.setLan.checked }))
+  el.setShowLocation.addEventListener('change', () => save({ showLocation: el.setShowLocation.checked }))
+
+  el.helperRemove.addEventListener('click', () => {
+    post('/api/helper/uninstall').then((data) => {
+      if (data && data.success === true) config = data
+      paintSettings()
+    })
+  })
+
+  /*
+   * The standard macOS shortcut. The application menu has a Settings item
+   * that this app never wired to anything, so pressing it does nothing and
+   * the shortcut is the only thing a Mac user will try next.
+   */
+  document.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+      event.preventDefault()
+      el.settings.hidden ? openSettings() : closeSettings()
+      return
+    }
+    if (event.key === 'Escape' && !el.settings.hidden) closeSettings()
+  })
+
   el.power.addEventListener('click', toggle)
   el.location.addEventListener('click', () => {
     if (el.location.disabled) return
@@ -367,6 +586,13 @@
   }, 1000)
 
   paint()
-  refresh(false)
+  // Settings first: the stored default location is what the window should
+  // open on, and auto-connect cannot be decided before it is known.
+  loadSettings()
+    .then(() => {
+      if (region === null && config) region = config.settings.defaultRegion
+      return refresh(false)
+    })
+    .then(refreshEgress)
   setInterval(() => { if (!phase) refresh(false) }, POLL_MS)
 })()

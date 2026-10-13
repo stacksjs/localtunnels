@@ -63,7 +63,6 @@ export const HELPER_VERSION = '4'
  */
 export function helperScript(): string {
   const regions = REGIONS.map(region => region.id).join('|')
-  const dnsNames = Object.keys(DNS_PRESETS).join('|')
   // The addresses are baked in here, not passed in. A caller names a
   // resolver; it never supplies one.
   const dnsCases = Object.entries(DNS_PRESETS)
@@ -173,6 +172,18 @@ function digestOf(file: string): string | null {
  * quieter form — a redeploy rewrites it, and the copy would keep connecting
  * to a coordinator the window has stopped offering.
  */
+/**
+ * Whether a helper is on disk at all, current or not.
+ *
+ * Separate from {@link helperReady} because the two answer different
+ * questions and conflating them got one of them wrong: a helper left over
+ * from an older build is not ready, but it is installed, and reporting it as
+ * absent left the only control that removes it hidden.
+ */
+export function helperPresent(): boolean {
+  return fs.existsSync(HELPER_PATH) || fs.existsSync(SUDOERS_PATH)
+}
+
 export function helperReady(): boolean {
   if (!fs.existsSync(HELPER_PATH) || !fs.existsSync(SUDOERS_PATH))
     return false

@@ -18,12 +18,37 @@
       it is also the only drag handle. WebKit discards
       `-webkit-app-region: drag`, so the press is handed to Craft.
     -->
-    <header class="chrome" data-window-drag>BuddyVPN</header>
+    <header class="chrome" data-window-drag>
+      <span class="chrome-title">BuddyVPN</span>
+      <!--
+        The strip is the only drag handle, so this sits outside it as far as
+        the pointer is concerned: `data-window-drag` is what Craft is told to
+        move the window by, and a button inside it would drag instead of
+        click.
+      -->
+      <button class="gear" type="button" data-settings-open aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </header>
 
     <main class="body">
       <div class="status">
         <div class="status-label" data-status-label>Checking…</div>
         <div class="status-clock" data-clock></div>
+      </div>
+
+      <!--
+        What the internet sees. Hidden until there is an answer, because an
+        empty row reserving space reads as something that failed to load.
+      -->
+      <div class="egress" data-egress hidden>
+        <span class="egress-kicker" data-egress-kicker>Your location</span>
+        <span class="egress-where" data-egress-where></span>
+        <span class="egress-ip" data-egress-ip></span>
       </div>
 
       <!--
@@ -71,6 +96,97 @@
 
       <p class="foot" data-foot></p>
     </main>
+
+    <!--
+      Settings is a panel over this window rather than a second one. The app
+      is one 380pt window with one job; a separate window would need its own
+      chrome, its own position memory and its own place in the menu, to show
+      six controls.
+    -->
+    <section class="settings" data-settings hidden aria-label="Settings">
+      <header class="settings-head">
+        <button class="back" type="button" data-settings-close aria-label="Back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m15 18-6-6 6-6"></path>
+          </svg>
+        </button>
+        <span>Settings</span>
+      </header>
+
+      <div class="settings-body">
+        <h3 class="group">Connection</h3>
+
+        <label class="row">
+          <span class="row-text">
+            <span class="row-name">Default location</span>
+            <span class="row-note">Where the window starts.</span>
+          </span>
+          <select class="control" data-set-region></select>
+        </label>
+
+        <label class="row">
+          <span class="row-text">
+            <span class="row-name">Connect on launch</span>
+            <span class="row-note">Connect as soon as BuddyVPN opens.</span>
+          </span>
+          <input class="toggle" type="checkbox" data-set-autoconnect>
+        </label>
+
+        <label class="row">
+          <span class="row-text">
+            <span class="row-name">Start at login</span>
+            <span class="row-note">Open BuddyVPN when you log in.</span>
+          </span>
+          <input class="toggle" type="checkbox" data-set-login>
+        </label>
+
+        <h3 class="group">Network</h3>
+
+        <label class="row">
+          <span class="row-text">
+            <span class="row-name">DNS</span>
+            <span class="row-note">Resolver used while connected. Takes effect on the next connect.</span>
+          </span>
+          <select class="control" data-set-dns></select>
+        </label>
+
+        <label class="row">
+          <span class="row-text">
+            <span class="row-name">Allow local network</span>
+            <span class="row-note">Reach printers and other machines at home while connected.</span>
+          </span>
+          <input class="toggle" type="checkbox" data-set-lan>
+        </label>
+
+        <!--
+          Said plainly rather than left as two toggles that are not there.
+          Someone looking for them should find out why in the place they
+          looked.
+        -->
+        <p class="note">
+          Full-tunnel mode and the kill switch are always on. An app for putting your
+          traffic somewhere else has no honest setting for "but not really", and a kill
+          switch that is off by default protects only people who already knew to turn it on.
+        </p>
+
+        <h3 class="group">Privacy</h3>
+
+        <label class="row">
+          <span class="row-text">
+            <span class="row-name">Show my location</span>
+            <span class="row-note">Asks ipinfo.io what address the internet sees. Off means it is never asked.</span>
+          </span>
+          <input class="toggle" type="checkbox" data-set-showlocation>
+        </label>
+
+        <h3 class="group">About</h3>
+        <dl class="about" data-about></dl>
+
+        <button class="danger" type="button" data-helper-remove hidden>Remove privileged helper</button>
+        <p class="note" data-helper-note></p>
+      </div>
+    </section>
   </div>
 
   <script src="/app.js"></script>

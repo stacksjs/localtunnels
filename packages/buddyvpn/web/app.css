@@ -76,7 +76,7 @@ html, body {
    page also renders, the opaque background above is the correct answer. */
 :root[data-craft-native-sidebar] body { background: var(--wash); }
 
-.window { display: flex; flex-direction: column; width: 100vw; height: 100vh; overflow: hidden; }
+.window { position: relative; display: flex; flex-direction: column; width: 100vw; height: 100vh; overflow: hidden; }
 
 /* At least as tall as the window buttons AppKit draws over it. The floor
    covers a runtime that publishes nothing, and a browser. */
@@ -242,3 +242,142 @@ html, body {
   .ring { animation: none !important; }
   .chevron { transition: none; }
 }
+
+/* ── The gear, and the title it sits beside ───────────────────────────────
+ *
+ * The chrome strip centres its title and is also the drag handle, so the
+ * gear is absolutely positioned rather than placed in the flow: a third flex
+ * child would shift the title off centre, and the title is what the window
+ * is named by.
+ */
+.chrome { position: relative; }
+.chrome-title { pointer-events: none; }
+
+.gear {
+  position: absolute; right: var(--space-4); top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--tertiary); cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.gear svg { width: 15px; height: 15px; }
+.gear:hover { background: var(--hover); color: var(--ink); }
+
+/* ── What the internet sees ───────────────────────────────────────────────
+ *
+ * Directly under the status word, because it is the evidence for it. The
+ * address is monospaced so a changed digit is visible at a glance rather
+ * than having to be read.
+ */
+.egress {
+  flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  margin-top: var(--space-2);
+}
+.egress-kicker {
+  font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--tertiary);
+}
+.egress-where { font-size: 13px; font-weight: 500; color: var(--ink); }
+.egress-ip {
+  font: 500 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--secondary);
+}
+.egress[data-tone="on"] .egress-where { color: var(--green); }
+
+/* ── Settings ─────────────────────────────────────────────────────────────
+ *
+ * A panel over the window, not a second window. It covers rather than pushes
+ * so the connection underneath keeps its state and its clock.
+ */
+.settings {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; flex-direction: column;
+  background: var(--app-bg);
+}
+.settings[hidden] { display: none; }
+
+.settings-head {
+  flex: none; position: relative;
+  height: max(44px, var(--band, 44px));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.back {
+  position: absolute; left: var(--space-3); top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--secondary); cursor: pointer;
+}
+.back svg { width: 16px; height: 16px; }
+.back:hover { background: var(--hover); color: var(--ink); }
+
+.settings-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--space-3) var(--space-4) var(--space-5);
+}
+
+.group {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--tertiary);
+}
+.group:first-child { margin-top: var(--space-1); }
+
+.row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--card); border: 1px solid var(--card-line); border-radius: 10px;
+  margin-bottom: var(--space-2);
+}
+.row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.row-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.row-note { font-size: 11px; line-height: 1.35; color: var(--tertiary); }
+
+.control {
+  flex: none; max-width: 48%;
+  font: inherit; font-size: 12px;
+  padding: 5px 8px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+
+/* A checkbox styled as a switch: the native one is a different size in every
+ * macOS version and does not take a colour. */
+.toggle {
+  flex: none; appearance: none; -webkit-appearance: none; margin: 0;
+  width: 38px; height: 22px; border-radius: 11px;
+  background: var(--surface-inset); border: 1px solid var(--line-soft);
+  position: relative; cursor: pointer; transition: background .15s ease;
+}
+.toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  transition: transform .15s ease;
+}
+.toggle:checked { background: var(--green); border-color: transparent; }
+.toggle:checked::after { transform: translateX(16px); }
+.toggle:disabled { opacity: .45; cursor: default; }
+
+.note {
+  margin: var(--space-2) 0 0;
+  font-size: 11px; line-height: 1.45; color: var(--tertiary);
+}
+
+.about { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px var(--space-3); }
+.about dt { font-size: 11px; color: var(--tertiary); }
+.about dd {
+  margin: 0; font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--secondary); overflow-wrap: anywhere;
+}
+
+.danger {
+  margin-top: var(--space-4); width: 100%;
+  font: inherit; font-size: 12px; font-weight: 500;
+  padding: 8px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--card-line); background: var(--card); color: var(--red);
+}
+.danger:hover { background: var(--hover); }
