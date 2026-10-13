@@ -80,10 +80,23 @@ describeVpn('a rekey that fails is tried again', () => {
      * on a loaded CI runner. Waiting for the condition finishes as soon as it
      * is true and tolerates a slow machine.
      */
-    let failures = 0
-    initiator.on('error', () => { failures += 1 })
+    let rekeyTimeouts = 0
+    /*
+     * Only handshake timeouts count. On Linux a datagram to a port nobody is
+     * bound to returns ICMP port-unreachable, which the kernel reports on the
+     * sending socket as ECONNREFUSED — so stopping the responder produces a
+     * stream of socket errors that have nothing to do with rekeying, and
+     * counting those would make this pass without the retry existing.
+     */
+    initiator.on('error', (err) => {
+      if (/timed out after/.test(err.message))
+        rekeyTimeouts += 1
+    })
+    // The responder is stopped and will raise for the same reason; nothing
+    // listening would make that an uncaught error.
+    responder.on('error', () => {})
 
-    await until(() => failures > 1, 30_000)
-    expect(failures).toBeGreaterThan(1)
+    await until(() => rekeyTimeouts > 1, 30_000)
+    expect(rekeyTimeouts).toBeGreaterThan(1)
   }, 45_000)
 })

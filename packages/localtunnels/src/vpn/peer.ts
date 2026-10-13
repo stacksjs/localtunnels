@@ -199,6 +199,28 @@ export class VpnPeer extends TypedEventEmitter<VpnPeerEvents> {
             this.emit('error', err instanceof Error ? err : new Error(String(err)))
           }
         },
+        /*
+         * Socket errors are reported, not thrown.
+         *
+         * Without this handler there is nothing listening and the error is
+         * raised uncaught, which ends the process. That is not hypothetical
+         * on Linux: a datagram sent to a port nobody is bound to comes back
+         * as ICMP port-unreachable, and the kernel hands it to the sending
+         * socket as ECONNREFUSED. So an exit node that reboots, redeploys or
+         * crashes kills every client still sending to it — and a client
+         * holding a kill switch loses its network along with the tunnel.
+         *
+         * macOS does not deliver these to an unconnected UDP socket, which is
+         * why it took a Linux CI run to find.
+         *
+         * Reporting is the right level: a peer that has gone away is a
+         * transient condition the handshake retries already cover, and losing
+         * one datagram is not a reason to tear down a tunnel that may still
+         * have other peers.
+         */
+        error: (_sock, err) => {
+          this.emit('error', err instanceof Error ? err : new Error(String(err)))
+        },
       },
     })
   }
