@@ -30,7 +30,10 @@ import type { ExecResult } from '../support/shell'
 import { buildElevatedScript, runElevated } from '../support/elevate'
 import { exec, shellEscape } from '../support/shell'
 import { HELPER_CLI, helperDown, helperLogPath, helperReady, helperUp, installHelper } from './helper'
+import type { Settings } from '../settings'
+import { dnsServers } from '../dns'
 import { regionById } from '../regions'
+import { readSettings } from '../settings'
 
 export { buildElevatedScript, runElevated }
 import { findCli } from './core'
@@ -166,8 +169,17 @@ export function readServers(): ServerMap {
  * setting for "but not really", and a kill switch that is off by default
  * protects the people who already knew to turn it on.
  */
-export function buildConnectCommand(cli: string, entry: ServerEntry): string {
+export interface ConnectOptions {
+  /** Resolver addresses, comma separated, as `--dns` wants them. */
+  dns: string
+  allowLan: boolean
+}
+
+export function buildConnectCommand(cli: string, entry: ServerEntry, options: ConnectOptions): string {
   const args = ['vpn:up', '--coordinator', entry.coordinatorUrl]
+  args.push('--dns', options.dns)
+  if (options.allowLan)
+    args.push('--allow-lan')
   // `--full-tunnel` refuses to run without an exit, so an entry that names
   // none falls back to `auto` rather than producing a tunnel that carries
   // nothing.
@@ -336,8 +348,8 @@ function formatOsaError(message: string): ActionResult {
  * `connectionPid` would find the process anyway by scanning, but the file is
  * what makes the common case a single `ps` rather than a full table read.
  */
-function helperStart(regionId: string): ExecResult {
-  const started = helperUp(regionId)
+function helperStart(regionId: string, settings: Settings): ExecResult {
+  const started = helperUp(regionId, { dns: settings.dns, allowLan: settings.allowLan })
   if (!started.success)
     return { ok: false, stdout: '', stderr: started.error ?? '', code: 1 }
   if (started.pid !== undefined) {
@@ -381,9 +393,12 @@ export function connect(regionId: string): ActionResult {
   if (!helperReady())
     installHelper()
 
+  const settings = readSettings()
+  const options: ConnectOptions = { dns: dnsServers(settings.dns), allowLan: settings.allowLan }
+
   const result = helperReady()
-    ? helperStart(regionId)
-    : runElevated(buildConnectCommand(cli, entry))
+    ? helperStart(regionId, settings)
+    : runElevated(buildConnectCommand(cli, entry, options))
   if (!result.ok)
     return formatOsaError(result.stderr || result.stdout)
 

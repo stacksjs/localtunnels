@@ -27,6 +27,7 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { DNS_PRESETS } from '../dns'
 import { runElevated } from '../support/elevate'
 import { exec, shellEscape } from '../support/shell'
 import { REGIONS } from '../regions'
@@ -50,7 +51,7 @@ export const HELPER_SERVERS: string = `${HELPER_DIR}/servers.json`
 export const SUDOERS_PATH: string = '/etc/sudoers.d/buddyvpn'
 
 /** Bumped when the wrapper's contents change, so an old one is replaced. */
-export const HELPER_VERSION = '3'
+export const HELPER_VERSION = '4'
 
 /**
  * The wrapper, as text.
@@ -62,6 +63,12 @@ export const HELPER_VERSION = '3'
  */
 export function helperScript(): string {
   const regions = REGIONS.map(region => region.id).join('|')
+  const dnsNames = Object.keys(DNS_PRESETS).join('|')
+  // The addresses are baked in here, not passed in. A caller names a
+  // resolver; it never supplies one.
+  const dnsCases = Object.entries(DNS_PRESETS)
+    .map(([name, servers]) => `      ${name}) dns='${servers.join(',')}' ;;`)
+    .join('\n')
   return `#!/bin/sh
 # BuddyVPN privileged helper, version ${HELPER_VERSION}.
 # Installed by BuddyVPN. Remove with: buddyvpn-helper uninstall
@@ -92,12 +99,24 @@ case "\${1:-}" in
       ${regions}) ;;
       *) echo "unknown region" >&2; exit 2 ;;
     esac
+    # Two more words, each matched against a list this script already knows.
+    # Nothing a caller sends is ever used as a value.
+    case "\${3:-cloudflare}" in
+${dnsCases}
+      *) echo "unknown resolver" >&2; exit 2 ;;
+    esac
+    case "\${4:-nolan}" in
+      lan) lanflag=--allow-lan ;;
+      nolan) lanflag= ;;
+      *) echo "unknown lan option" >&2; exit 2 ;;
+    esac
     # The key is read by the shell from a root-only file, never passed in
     # argv, because \`ps\` shows argv to every user on the machine.
     coordinator=$("$CLI" vpn:config --servers "$SERVERS" --region "$region" --field coordinatorUrl)
     exit_key=$("$CLI" vpn:config --servers "$SERVERS" --region "$region" --field useExit)
     LOCALTUNNELS_AUTH_KEY=$("$CLI" vpn:config --servers "$SERVERS" --region "$region" --field authKey) \\
       "$CLI" vpn:up --coordinator "$coordinator" --use-exit "$exit_key" \\
+        --dns "$dns" $lanflag \\
         --full-tunnel --kill-switch < /dev/null >> "$LOG" 2>&1 &
     echo $!
     ;;
@@ -176,9 +195,15 @@ export function helperReady(): boolean {
   return serversDigest === ourServers && cliDigest === ourCli
 }
 
+export interface HelperUpOptions {
+  dns: string
+  allowLan: boolean
+}
+
 /** Start the tunnel through the helper. Returns the tunnel's pid. */
-export function helperUp(regionId: string): { success: boolean, pid?: number, error?: string } {
-  const result = exec(`sudo -n ${shellEscape(HELPER_PATH)} up ${shellEscape(regionId)}`, { timeout: 60_000 })
+export function helperUp(regionId: string, options: HelperUpOptions): { success: boolean, pid?: number, error?: string } {
+  const words = [regionId, options.dns, options.allowLan ? 'lan' : 'nolan'].map(shellEscape).join(' ')
+  const result = exec(`sudo -n ${shellEscape(HELPER_PATH)} up ${words}`, { timeout: 60_000 })
   if (!result.ok)
     return { success: false, error: result.stderr.trim() || 'the helper refused to start the tunnel' }
   const pid = Number.parseInt(result.stdout.trim(), 10)

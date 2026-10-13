@@ -86,11 +86,14 @@ describe('parseServers', () => {
   })
 })
 
+/** What the window passes now: a resolver by name, resolved to addresses. */
+const OPTIONS = { dns: '1.1.1.1,1.0.0.1', allowLan: false }
+
 describe('buildConnectCommand', () => {
   it('quotes every argument and records the pid', () => {
     const command = buildConnectCommand('/Applications/BuddyVPN.app/Contents/MacOS/localtunnels', {
       coordinatorUrl: 'wss://vpn.example.com:51821',
-    })
+    }, OPTIONS)
     expect(command).toContain(`'/Applications/BuddyVPN.app/Contents/MacOS/localtunnels'`)
     expect(command).toContain(`'vpn:up'`)
     expect(command).toContain(`'wss://vpn.example.com:51821'`)
@@ -105,7 +108,7 @@ describe('buildConnectCommand', () => {
   })
 
   it('omits the auth key when the coordinator is open', () => {
-    const command = buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })
+    const command = buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' }, OPTIONS)
     expect(command).not.toContain('--auth-key')
     expect(command).not.toContain('LOCALTUNNELS_AUTH_KEY')
   })
@@ -119,7 +122,7 @@ describe('buildConnectCommand', () => {
     const command = buildConnectCommand('/bin/lt', {
       coordinatorUrl: 'ws://host',
       authKey: 'THE-SHARED-SECRET',
-    })
+    }, OPTIONS)
     expect(command).not.toContain('THE-SHARED-SECRET')
     expect(command).not.toContain('--auth-key')
   })
@@ -128,7 +131,7 @@ describe('buildConnectCommand', () => {
     const command = buildConnectCommand('/bin/lt', {
       coordinatorUrl: 'ws://host',
       authKey: 'THE-SHARED-SECRET',
-    })
+    }, OPTIONS)
     expect(command).toContain(`LOCALTUNNELS_AUTH_KEY=$(cat '${authKeyFile()}')`)
     // The assignment has to precede the command it applies to, or it is just
     // a variable nothing reads.
@@ -145,19 +148,19 @@ describe('buildConnectCommand', () => {
       { coordinatorUrl: 'ws://host', authKey: 'secret' },
       { coordinatorUrl: 'ws://host', useExit: 'auto' },
     ]) {
-      const command = buildConnectCommand('/bin/lt', entry)
+      const command = buildConnectCommand('/bin/lt', entry, OPTIONS)
       expect(command).toContain('--full-tunnel')
       expect(command).toContain('--kill-switch')
     }
   })
 
   it('falls back to an automatic exit, since --full-tunnel refuses without one', () => {
-    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' })).toContain(`'--use-exit' 'auto'`)
+    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host' }, OPTIONS)).toContain(`'--use-exit' 'auto'`)
   })
 
   it('uses a pinned exit when the server entry names one', () => {
     const key = 'SqaUeBaVgl3FMs4LCSTujr8X2h5vYY4uFlqxuUvUr2A='
-    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host', useExit: key }))
+    expect(buildConnectCommand('/bin/lt', { coordinatorUrl: 'ws://host', useExit: key }, OPTIONS))
       .toContain(`'--use-exit' '${key}'`)
   })
 
@@ -166,7 +169,7 @@ describe('buildConnectCommand', () => {
     // under a folder a user may well have put a space in.
     const command = buildConnectCommand('/Users/a b/BuddyVPN.app/Contents/MacOS/localtunnels', {
       coordinatorUrl: 'ws://host',
-    })
+    }, OPTIONS)
     expect(command).toContain(`'/Users/a b/BuddyVPN.app/Contents/MacOS/localtunnels'`)
   })
 })
@@ -194,7 +197,7 @@ describe('buildElevatedScript', () => {
     const script = buildElevatedScript(buildConnectCommand('/Applications/B.app/x/localtunnels', {
       coordinatorUrl: 'ws://host',
       authKey: 'secret',
-    }))
+    }, OPTIONS))
     expect(script.startsWith('do shell script "')).toBe(true)
     expect(script.endsWith('" with administrator privileges')).toBe(true)
     expect(script).toContain(`'/Applications/B.app/x/localtunnels'`)

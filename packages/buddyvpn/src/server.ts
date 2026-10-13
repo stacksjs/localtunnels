@@ -14,8 +14,13 @@ import * as path from 'node:path'
 import process from 'node:process'
 import { DEFAULT_REGION, REGIONS } from './regions'
 import { connect, connectionPid, connectionUptime, disconnect, readServers } from './vpn/control'
+import { version } from '../package.json'
+import { DNS_LABELS } from './dns'
+import { loginItemEnabled, setLoginItem } from './login-item'
+import { readSettings, writeSettings } from './settings'
 import { readCore, readIdentity, readTunnels } from './vpn/core'
-import { helperReady } from './vpn/helper'
+import { lookupLocation } from './vpn/geo'
+import { helperLogPath, helperReady, uninstallHelper } from './vpn/helper'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -48,6 +53,37 @@ function json(body: unknown, status = 200): Response {
  * that is up — and four calls would let it paint three quarters of a state
  * that never existed.
  */
+/** Settings plus the state of the two things that are not stored in the file. */
+function settingsPayload(): Record<string, unknown> {
+  const settings = readSettings()
+  return {
+    success: true,
+    // Read from disk rather than trusted from the file: the login item is a
+    // plist somebody can remove in System Settings, and the stored flag would
+    // then describe something that is no longer true.
+    settings: { ...settings, launchAtLogin: loginItemEnabled() },
+    dnsChoices: Object.entries(DNS_LABELS).map(([id, label]) => ({ id, label })),
+    helperInstalled: helperReady(),
+    logPath: helperLogPath(),
+    versions: { app: version, cli: readCore(false).version },
+  }
+}
+
+function updateSettings(patch: Record<string, unknown>): Record<string, unknown> {
+  // The login item is an action, not a value, so it is applied before the
+  // file is written and its real outcome is what gets stored.
+  let loginError: string | undefined
+  if (typeof patch.launchAtLogin === 'boolean') {
+    const applied = setLoginItem(patch.launchAtLogin)
+    patch.launchAtLogin = applied.enabled
+    loginError = applied.error
+  }
+  writeSettings(patch as Parameters<typeof writeSettings>[0])
+  // A changed resolver or LAN rule only takes effect on the next connect;
+  // the window says so rather than implying a live change.
+  return { ...settingsPayload(), error: loginError }
+}
+
 function status(refresh: boolean): Response {
   const core = readCore(refresh)
   const servers = readServers()
@@ -129,6 +165,25 @@ export async function runAgent(): Promise<void> {
           }
           case '/api/disconnect':
             return json(disconnect())
+          /*
+           * Its own endpoint rather than a field on status, because it costs
+           * a request to a third party and status is polled every few
+           * seconds. The window asks for it when it opens and after the
+           * connection changes, which is when the answer can differ.
+           */
+          case '/api/location': {
+            if (!readSettings().showLocation)
+              return json({ success: true, location: null, disabled: true })
+            return json({ success: true, location: await lookupLocation() })
+          }
+          case '/api/settings':
+            return json(settingsPayload())
+          case '/api/settings/update':
+            return json(updateSettings(await body(request)))
+          case '/api/helper/uninstall': {
+            const removed = uninstallHelper()
+            return json({ ...removed, ...settingsPayload() })
+          }
           default:
             return json({ success: false, error: 'Unknown endpoint' }, 404)
         }
