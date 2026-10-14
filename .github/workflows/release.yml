@@ -64,3 +64,115 @@ jobs:
             bin/localtunnels-darwin-arm64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # BuddyVPN's installer — the .dmg people actually double-click.
+  #
+  # Its own job, on a real Mac, because none of what it needs exists on the
+  # Linux runner above: `codesign`, `notarytool`, `hdiutil`, and a Craft
+  # runtime that is a Mach-O binary.
+  #
+  # It runs after `npm` rather than beside it so a release is never left with
+  # an installer attached to a version that failed its own tests.
+  desktop:
+    name: BuddyVPN installer
+    needs: npm
+    # Skipped until a Developer ID is configured, so the CLI release is never
+    # blocked by a half-finished signing setup.
+    #
+    # Attaching an unsigned build would be worse than attaching nothing. An
+    # ad-hoc seal is valid only on the machine that produced it: Gatekeeper
+    # refuses it everywhere else, so a download would fail for every person
+    # who tried it, and fail in a way that looks like a broken app rather than
+    # a missing certificate.
+    if: ${{ vars.DESKTOP_SIGNING_IDENTITY_NAME != '' }}
+    runs-on: macos-26
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Brings in what deps.yaml declares — the Craft runtime the window is
+      # drawn in, and Zig for the native core that goes in the bundle beside
+      # the CLI — and imports the Developer ID identity into an ephemeral
+      # keychain that its post step removes even if the job is cancelled.
+      - name: Setup Pantry
+        uses: pantry-pm/pantry/packages/action@v0.11.74
+        with:
+          apple-signing: 'true'
+          apple-signing-application-certificate: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          apple-signing-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install Dependencies
+        run: bun install
+
+      # The bundle ships its own libltvpn.dylib: the CLI resolves the library
+      # next to its own executable, so a bundle without it is an app whose
+      # every VPN command fails on launch.
+      - name: Build the native core
+        run: bun run build:native
+
+      # A keychain profile notarytool can be pointed at by name, so the
+      # app-specific password never reaches a command line that `ps` would
+      # show to every process on the runner.
+      - name: Store notary credentials
+        run: |
+          xcrun notarytool store-credentials buddyvpn \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+      # Signs with the Developer ID, images the .dmg, submits it to Apple and
+      # staples the ticket. Stapling rewrites the file, so nothing may read or
+      # upload it before this finishes.
+      - name: Build, sign and notarize
+        run: bun run build:app
+        env:
+          DESKTOP_SIGNING_IDENTITY: ${{ vars.DESKTOP_SIGNING_IDENTITY_NAME }}
+          NOTARY_PROFILE: buddyvpn
+
+      # Resolved to an exact path, and checked.
+      #
+      # The filename carries the version, which `bun run release` bumps across
+      # every workspace package, so a literal path would go stale at the next
+      # release. A glob would fix that only if the upload action expands one —
+      # and if it does not, it sees a path matching no file and treats that as
+      # nothing to upload, passing green having attached no installer at all.
+      # That exact failure shipped two releases of the system-cleaner app.
+      #
+      # So the path is found here, where a missing file is an error rather
+      # than a silently empty upload.
+      - name: Locate the installer
+        id: dmg
+        run: |
+          path=$(ls packages/buddyvpn/dist/*.dmg 2>/dev/null | head -1)
+          if [ -z "$path" ]; then
+            echo "::error::build:app produced no .dmg"
+            exit 1
+          fi
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "Attaching $path ($(du -h "$path" | cut -f1))"
+
+      # Verified before it is published, not after. A DMG that fails this is
+      # one Gatekeeper will refuse on arrival, and finding that out from a
+      # user is finding it out too late.
+      - name: Check it is signed, notarized and stapled
+        run: |
+          codesign --verify --deep --strict --verbose=2 "${{ steps.dmg.outputs.path }}"
+          spctl --assess --type open --context context:primary-signature -v "${{ steps.dmg.outputs.path }}"
+          xcrun stapler validate "${{ steps.dmg.outputs.path }}"
+
+      - name: Attach the installer to the release
+        uses: stacksjs/action-releaser@v1.2.9
+        with:
+          files: ${{ steps.dmg.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

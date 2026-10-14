@@ -24,6 +24,11 @@
  *
  * Signing
  * -------
+ * `NOTARY_PROFILE` then notarizes and staples the DMG, which Gatekeeper
+ * requires on any Mac that has never seen this app. Signed without it is not
+ * distributable; unsigned still builds, which is useful locally and nowhere
+ * else.
+ *
  * `DESKTOP_SIGNING_IDENTITY` (a Developer ID Application identity) signs for
  * distribution. Without one the bundle is still sealed, ad hoc — because an
  * unsealed bundle does not launch *anywhere*. `bun build --compile` leaves the
@@ -253,7 +258,48 @@ const dmg = path.join(OUT_DIR, `BuddyVPN-${APP_VERSION}.dmg`)
 run('hdiutil', ['create', '-volname', `${APP_NAME} ${APP_VERSION}`, '-srcfolder', stage, '-ov', '-format', 'UDZO', dmg])
 fs.rmSync(stage, { recursive: true, force: true })
 
+/*
+ * The image is signed too, not just the app inside it.
+ *
+ * Gatekeeper checks the signature of the thing that was downloaded, and that
+ * is the .dmg — `codesign --verify` on an unsigned one says "code object is
+ * not signed at all" however well sealed the bundle inside it is. The notary
+ * service expects a signed artifact as well.
+ *
+ * Without the hardened-runtime and entitlements arguments: those describe how
+ * a program runs, and a disk image does not run. An ad-hoc seal is skipped
+ * entirely rather than applied to the image — it would buy nothing, since an
+ * ad-hoc signature is already only valid on the machine that made it.
+ */
+if (!adhoc) {
+  run('codesign', ['--force', '--timestamp', '--sign', identity as string, dmg])
+  run('codesign', ['--verify', '--strict', dmg])
+}
+
+// ── 8. Notarize ─────────────────────────────────────────────────
+// Signing and notarizing are different things, and a signed-but-un-notarized
+// DMG is still refused by Gatekeeper on a Mac that has never seen this app —
+// which is every Mac except the one that built it. Apple has required this
+// for distributed software since Catalina.
+//
+// `NOTARY_PROFILE` names a keychain profile created once with
+// `xcrun notarytool store-credentials`. `--wait` blocks until Apple answers,
+// because stapling a ticket that has not been issued fails, and a DMG that
+// shipped before the verdict arrived may be one Apple went on to reject.
+//
+// Stapling writes the ticket into the DMG, so anything that hashes or
+// uploads it has to come after this, not before.
+const notaryProfile = process.env.NOTARY_PROFILE
+if (notaryProfile && !adhoc) {
+  console.log('[buddyvpn] submitting to the notary service (this takes a few minutes)')
+  run('xcrun', ['notarytool', 'submit', dmg, '--keychain-profile', notaryProfile, '--wait'])
+  run('xcrun', ['stapler', 'staple', dmg])
+  console.log('[buddyvpn] notarized and stapled')
+}
+
 console.log(`[buddyvpn] ${path.relative(ROOT, APP_DIR)}`)
 console.log(`[buddyvpn] ${path.relative(ROOT, dmg)}`)
 if (adhoc)
   console.warn('[buddyvpn] DESKTOP_SIGNING_IDENTITY is unset — sealed ad hoc, so it runs on this Mac and is refused on every other')
+else if (!notaryProfile)
+  console.warn('[buddyvpn] NOTARY_PROFILE is unset — signed but not notarized, so Gatekeeper still refuses it elsewhere')
