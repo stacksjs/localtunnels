@@ -64,9 +64,12 @@ permissions:
 env:
   # BUDDY_BOT_TOKEN is a Personal Access Token with `repo` and `workflow`
   # scopes. Without it this falls back to GITHUB_TOKEN, which GitHub forbids
-  # from writing anything under .github/workflows — so the action pins in
-  # these files are the one kind of dependency that will NOT be updated.
-  # Everything in package.json and deps.yaml still is.
+  # from writing anything under .github/workflows.
+  #
+  # buddy-bot.config.ts therefore excludes those files from scanning while the
+  # secret is unset — otherwise this would find the action updates, build a
+  # branch containing them and fail on the push, once a day, forever. Add the
+  # secret and delete the `ignorePaths` entry to turn them on.
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   BUDDY_BOT_TOKEN: ${{ secrets.BUDDY_BOT_TOKEN }}
 
