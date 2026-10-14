@@ -12,6 +12,7 @@
  * asked. `vpn:down` reads the file and runs what it finds, whether or not it
  * was the process that wrote it.
  */
+import * as dns from 'node:dns/promises'
 import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as os from 'node:os'
@@ -32,6 +33,14 @@ export interface CaptureOptions {
   /** The VPN server's public address and port. */
   endpointIp: string
   endpointPort: number
+  /**
+   * The coordinator's address and TCP port, when there is one.
+   *
+   * The kill switch has to let these through or the session is dropped from
+   * the directory about two minutes in — see `KillSwitchConfig.coordinatorIp`.
+   */
+  coordinatorIp?: string
+  coordinatorPort?: number
   /** Resolvers to use while connected — usually the tunnel's own. */
   dnsServers: string[]
   /** Off by default; a kill switch is the point of connecting. */
@@ -44,6 +53,53 @@ export interface CaptureOptions {
 export function restorePath(): string {
   const base = process.env.LOCALTUNNELS_HOME || path.join(os.homedir(), '.localtunnels')
   return path.join(base, 'vpn', 'restore.json')
+}
+
+/**
+ * The coordinator's host and port, as the kill switch needs them.
+ *
+ * Split out and resolved before the switch is armed, because afterwards it
+ * cannot be done: DNS goes through the tunnel, and a rule that still needs a
+ * name looked up is a rule that arms too late to protect the lookup.
+ *
+ * A hostname is resolved to an address here rather than written into the rule,
+ * so what is passed is pinned for the session. A coordinator behind a name
+ * that moves to a different address mid-session loses its heartbeats — the
+ * rare case, traded for not re-resolving inside a rule set that is reloaded
+ * on every change.
+ */
+export function parseCoordinatorUrl(url: string): { host: string, port: number } | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  }
+  catch {
+    return null
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '')
+  if (!host)
+    return null
+  const secure = parsed.protocol === 'wss:' || parsed.protocol === 'https:'
+  const port = parsed.port ? Number.parseInt(parsed.port, 10) : (secure ? 443 : 80)
+  if (!Number.isInteger(port) || port <= 0 || port > 65535)
+    return null
+  return { host, port }
+}
+
+/** Resolve {@link parseCoordinatorUrl}'s host to an address pf can match on. */
+export async function resolveCoordinator(url: string): Promise<{ ip: string, port: number } | null> {
+  const parsed = parseCoordinatorUrl(url)
+  if (!parsed)
+    return null
+  if (net.isIP(parsed.host))
+    return { ip: parsed.host, port: parsed.port }
+  try {
+    const { address } = await dns.lookup(parsed.host, { family: 4 })
+    return { ip: address, port: parsed.port }
+  }
+  catch {
+    return null
+  }
 }
 
 export interface RunResult {
@@ -237,6 +293,8 @@ export async function captureTraffic(options: CaptureOptions): Promise<void> {
       tun: options.tun,
       endpointIp: options.endpointIp,
       endpointPort: options.endpointPort,
+      coordinatorIp: options.coordinatorIp,
+      coordinatorPort: options.coordinatorPort,
       allowLan: options.allowLan,
     }))
   }

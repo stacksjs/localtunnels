@@ -1,11 +1,55 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  parseCoordinatorUrl,
   parseDnsServers,
   parseGateway,
   parseIpv6Setting,
   parseNetworkServices,
   readRestore,
+  resolveCoordinator,
 } from '../src/vpn/capture'
+
+/*
+ * The kill switch needs the coordinator's address before it arms, because
+ * afterwards DNS runs through the tunnel. Getting this wrong is not a failed
+ * connect: the heartbeats stop leaving, the directory drops the node about
+ * two minutes later, and the exit node withdraws the route while every log
+ * line still says the link is up.
+ */
+describe('parseCoordinatorUrl', () => {
+  it('reads the host and port out of a ws url', () => {
+    expect(parseCoordinatorUrl('ws://5.78.208.190:51821')).toEqual({ host: '5.78.208.190', port: 51821 })
+  })
+
+  it('defaults the port per scheme when the url omits one', () => {
+    expect(parseCoordinatorUrl('ws://coordinator.example')).toEqual({ host: 'coordinator.example', port: 80 })
+    expect(parseCoordinatorUrl('wss://coordinator.example')).toEqual({ host: 'coordinator.example', port: 443 })
+  })
+
+  it('unwraps a bracketed v6 literal, which is not a matchable address', () => {
+    expect(parseCoordinatorUrl('ws://[2001:db8::1]:51821')).toEqual({ host: '2001:db8::1', port: 51821 })
+  })
+
+  it('returns null rather than a half-parsed address', () => {
+    expect(parseCoordinatorUrl('not a url')).toBeNull()
+    expect(parseCoordinatorUrl('')).toBeNull()
+  })
+})
+
+describe('resolveCoordinator', () => {
+  it('passes an address through without a lookup', async () => {
+    expect(await resolveCoordinator('ws://5.78.208.190:51821')).toEqual({ ip: '5.78.208.190', port: 51821 })
+  })
+
+  /*
+   * Null, not a throw, and not a guess. The caller decides what it means —
+   * and under a kill switch it refuses the connect, because a tunnel that
+   * cannot reach its coordinator has about two minutes to live.
+   */
+  it('reports a name it cannot resolve as unresolved', async () => {
+    expect(await resolveCoordinator('ws://coordinator.invalid:51821')).toBeNull()
+  })
+})
 
 describe('parseGateway', () => {
   it('reads the macOS block', () => {

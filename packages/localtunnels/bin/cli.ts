@@ -881,7 +881,7 @@ cli
   .action(async (options: VpnUpOptions) => {
     try {
       const { TunError, VpnInterface, decodeKey, enableExitNode } = await import('../src/vpn')
-      const { captureTraffic, releaseTraffic } = await import('../src/vpn/capture')
+      const { captureTraffic, releaseTraffic, resolveCoordinator } = await import('../src/vpn/capture')
       const { loadOrCreateIdentity } = await import('../src/vpn/store')
       const { encodeKey } = await import('../src/vpn/keys')
 
@@ -963,10 +963,29 @@ cli
         captured = true
         const endpoint = exitEndpoint
         try {
+          /*
+           * Resolved before the switch is armed, and a hard failure when it
+           * is needed and missing.
+           *
+           * The heartbeats to the coordinator run for the life of the
+           * session. A kill switch that blocks them gets this node dropped
+           * from the directory in about two minutes, after which the exit
+           * node withdraws our route and forwards nothing back — a tunnel
+           * that is up, handshaking and carrying traffic one way, which is
+           * far worse to debug than a connect that refused.
+           */
+          let coordinator: { ip: string, port: number } | null = null
+          if (options.coordinator) {
+            coordinator = await resolveCoordinator(options.coordinator)
+            if (!coordinator && options.killSwitch)
+              throw new Error(`the coordinator address ${options.coordinator} could not be resolved, and the kill switch would cut this tunnel off from it within two minutes`)
+          }
           await captureTraffic({
             tun,
             endpointIp: endpoint.host,
             endpointPort: endpoint.port,
+            coordinatorIp: coordinator?.ip,
+            coordinatorPort: coordinator?.port,
             dnsServers: (options.dns ?? '1.1.1.1,1.0.0.1').split(',').map(d => d.trim()).filter(Boolean),
             killSwitch: options.killSwitch,
             allowLan: options.allowLan,

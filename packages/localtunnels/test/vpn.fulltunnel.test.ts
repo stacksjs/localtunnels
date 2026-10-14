@@ -125,6 +125,29 @@ describe('pfRules', () => {
     expect(lan).toContain('pass out quick to 192.168.0.0/16')
     expect(lan).toContain('pass out quick to 10.0.0.0/8')
   })
+
+  /*
+   * The regression this exists for: the switch armed without this rule, the
+   * heartbeats piled up unsent, the coordinator dropped the node after ~2
+   * minutes and the exit node withdrew its route. The tunnel then carried
+   * traffic one way with both ends still logging `link up`.
+   */
+  it('lets the coordinator through, so the session stays registered', () => {
+    const withCoordinator = pfRules({
+      tun: 'utun7',
+      endpointIp: '203.0.113.9',
+      endpointPort: 51820,
+      coordinatorIp: '203.0.113.9',
+      coordinatorPort: 51821,
+    })
+    expect(withCoordinator).toContain('pass out quick proto tcp to 203.0.113.9 port 51821')
+    // TCP, not UDP: it is a WebSocket, and a udp rule would match nothing.
+    expect(withCoordinator).not.toContain('pass out quick proto udp to 203.0.113.9 port 51821')
+  })
+
+  it('opens nothing when there is no coordinator to stay registered with', () => {
+    expect(rules).not.toContain('proto tcp')
+  })
 })
 
 describe('killSwitchCommands', () => {
@@ -179,6 +202,17 @@ describe('killSwitchCommands', () => {
     it('drops last, after every exception', () => {
       const rules = flat(up).filter(line => line.includes('-A LT_KILLSWITCH'))
       expect(rules.at(-1)).toContain('-j DROP')
+    })
+
+    it('returns the coordinator’s TCP port, ahead of the drop', () => {
+      const withCoordinator = flat(killSwitchCommands({
+        ...config,
+        coordinatorIp: '203.0.113.9',
+        coordinatorPort: 51821,
+      }).up).filter(line => line.includes('-A LT_KILLSWITCH'))
+      const exception = withCoordinator.findIndex(line => line.includes('-p tcp') && line.includes('--dport 51821'))
+      expect(exception).toBeGreaterThanOrEqual(0)
+      expect(exception).toBeLessThan(withCoordinator.findIndex(line => line.includes('-j DROP')))
     })
 
     it('clears a stale chain before building, so a crash cannot block a retry', () => {
