@@ -145,6 +145,27 @@ describe('pfRules', () => {
     expect(withCoordinator).not.toContain('pass out quick proto udp to 203.0.113.9 port 51821')
   })
 
+  /*
+   * The second half of the same regression, and the one that looked right.
+   *
+   * pf defaults a stateful rule to `flags S/SA`, so it matches only the SYN
+   * that opens a connection. The coordinator's socket is already open when
+   * the switch arms, so every packet left on it is mid-stream and matches
+   * nothing — the rule installs perfectly and drops the heartbeats anyway.
+   */
+  it('matches the coordinator’s connection mid-stream, not just its opening SYN', () => {
+    const withCoordinator = pfRules({
+      tun: 'utun7',
+      endpointIp: '203.0.113.9',
+      endpointPort: 51820,
+      coordinatorIp: '203.0.113.9',
+      coordinatorPort: 51821,
+    })
+    const rule = withCoordinator.split('\n').find(line => line.includes('proto tcp'))
+    expect(rule).toContain('flags any')
+    expect(rule).toContain('no state')
+  })
+
   it('opens nothing when there is no coordinator to stay registered with', () => {
     expect(rules).not.toContain('proto tcp')
   })

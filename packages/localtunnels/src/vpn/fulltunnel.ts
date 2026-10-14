@@ -267,8 +267,25 @@ export function pfRules(config: KillSwitchConfig): string {
   // See `coordinatorIp`: without this the directory drops us after ~2 minutes
   // and the exit node stops routing to us, while everything on screen still
   // says connected.
+  /*
+   * `flags any no state` is the whole rule, and without it this passes
+   * nothing at all.
+   *
+   * pf applies `flags S/SA` to a stateful rule by default, so it matches only
+   * the SYN that opens a connection. This websocket is already open by the
+   * time the switch arms — every packet left on it is a mid-stream ACK or
+   * PSH, none of which carry SYN, so they skip this rule entirely and land on
+   * the block above. The first version of this fix read exactly like a rule
+   * that works, installed correctly, and dropped the heartbeats anyway.
+   *
+   * `no state` rather than `keep state`: pf.conf(5) warns that a state
+   * adopted from an intermediate packet is missing details like the window
+   * scaling factor and that such connections stall and time out. There is
+   * nothing to track here anyway — the block is outbound-only, so the replies
+   * were never in question.
+   */
   if (coordinatorIp && coordinatorPort)
-    lines.push(`pass out quick proto tcp to ${coordinatorIp} port ${coordinatorPort}`)
+    lines.push(`pass out quick proto tcp to ${coordinatorIp} port ${coordinatorPort} flags any no state`)
   if (allowLan)
     lines.push(...LAN_RANGES.map(range => `pass out quick to ${range}`))
   return `${lines.join('\n')}\n`
