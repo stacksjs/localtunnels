@@ -16,9 +16,9 @@ from this directory. Do not edit it: a hand-kept copy stops matching the
 moment a screen is added, and the build would succeed with the new screen
 simply absent from the app.
 
-## Known gap: directives are not compiling to native behaviour
+## What the build's warnings mean
 
-The build currently reports eight of these:
+The build prints warnings like these, and they are expected:
 
 ```text
 warning: dropped-subtree: script
@@ -26,27 +26,39 @@ warning: unread-event: p: @if
 warning: unread-event: li: @for
 ```
 
-They are connected. The native compiler drops `<script client>` (first
-warning), so by the time it reaches `@if(locked())` the symbols that
-expression needs do not exist — the directive is left on the element as an
-attribute it cannot read, which is what `unread-event` means.
+An earlier version of this file read them as a defect and said the screens
+"render and do not react". That was wrong, and the mistake is worth keeping
+written down because the warning text invites it.
 
-The consequence is specific, and worth stating plainly: **those controls
-render, and do not react.** The location list draws, the conditional banners
-draw, and neither responds to state. The bundle builds and the app would
-launch looking right.
+Both come from passes that are not the one that matters:
 
-What this means in practice:
+- `dropped-subtree: script` is stx's own description of deliberate
+  behaviour — "deliberately not translated: a script". The script is not
+  lost; it is lifted into a `__stx_setup_*` function carried by the bundle's
+  entry, which is where a native screen's state is supposed to come from.
+- `unread-event` comes from the translator's attribute pass, which maps `@x`
+  onto a native event. `@if` and `@for` are not events, so that pass declines
+  them. It runs *after* `extractBindingManifest` has already claimed the same
+  attributes as `if` and `for` bindings, and the manifest is what the runtime
+  hydrates from.
 
-- the screens are correct as a description of the interface
-- they are not yet correct as a native application
-- the fix is in how state reaches a native screen, not in the markup
+What actually reaches the device is `document + manifest + setup`, handed to
+`prepareSharedNativeScreen`. The build asserts that now rather than inferring
+it, and reports what it found:
 
-The webview renderer takes `<script client>` as written — the desktop app
-works that way. The native renderer wants setup delivered through the bundle's
-own entry (`__stx_latestSetup`) instead. Resolving that is the next piece of
-work, and until it is resolved nobody should read a screenshot of this app as
-evidence that it functions.
+```text
+[mobile] bindings: 2 attr, 7 if, 2 event, 2 for
+```
+
+It fails outright if the bundle carries no setup function, since
+`__stx_latestSetup = null` is the one state that really would leave every
+screen inert — and stx still emits a bundle in that case.
+
+## What is still unverified
+
+The bundle contains the right things. Nobody has run it. There is no Xcode
+project yet, so the screens have never been drawn on a device or a simulator,
+and no claim here should be read as saying they have.
 
 ## Why there is no tunnel behind any of it
 

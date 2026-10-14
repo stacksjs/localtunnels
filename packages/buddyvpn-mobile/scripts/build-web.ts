@@ -103,12 +103,22 @@ const result = run(['native', 'compile', '--format', 'bundle', '--output', bundl
 /*
  * stx reports a screen it could not fully translate as a warning and still
  * emits a bundle, so exit status alone would call a half-compiled app a
- * success. The warnings are printed, and the ones that mean a control will
- * not work are counted.
+ * success. What the warnings mean, though, needs reading carefully — an
+ * earlier version of this script got it backwards and said so in the output.
  *
- * `unread-event` is that kind: it means a directive was parsed as an event
- * handler the renderer has no use for, so an `@if` never becomes a condition
- * and a loop never becomes a list.
+ * `unread-event` comes from the translator's attribute pass, which maps `@x`
+ * to a native event. `@if` and `@for` are not events, so that pass reports
+ * them — but it runs *after* the binding manifest has already claimed those
+ * same attributes as `if` and `for` bindings, and it is the manifest the
+ * runtime hydrates from. A warning naming a directive is therefore expected
+ * and means nothing is wrong.
+ *
+ * A warning naming a real event (`@click` on something that cannot carry one)
+ * is a different matter and does mean a dead control.
+ *
+ * Rather than re-deriving which is which, this checks the artifact: an
+ * attribute that reached the manifest appears in the emitted bundle as a
+ * binding under its own name.
  */
 const warnings = `${result.stdout}\n${result.stderr}`
   .split('\n')
@@ -118,12 +128,29 @@ const warnings = `${result.stdout}\n${result.stderr}`
 for (const warning of warnings)
   console.warn(`[mobile] ${warning}`)
 
-const unread = warnings.filter(line => line.includes('unread-event')).length
-
 if (!result.ok) {
   console.error(result.stderr || result.stdout)
   process.exit(1)
 }
+
+const compiled = existsSync(bundle) ? await Bun.file(bundle).text() : ''
+
+/*
+ * The one failure that would make every screen inert, and the one worth
+ * failing the build over: no setup function means no signals, so nothing the
+ * bindings refer to would exist. stx writes `__stx_latestSetup = null` for a
+ * route whose script it could not lift, and still emits a bundle.
+ */
+if (compiled.includes('__stx_latestSetup = null') || !compiled.includes('__stx_setup_')) {
+  console.error('[mobile] the bundle carries no setup function, so the screens would render inert')
+  process.exit(1)
+}
+
+const bound = new Set(Array.from(compiled.matchAll(/name:"([^"]+)"/g), match => match[1]))
+const unaccounted = warnings
+  .filter(line => line.includes('unread-event'))
+  .map(line => line.slice(line.lastIndexOf(':') + 1).trim())
+  .filter(name => !bound.has(name))
 
 writeFileSync(join(OUT_DIR, 'craft.config.json'), `${JSON.stringify(craftConfig(), null, 2)}\n`)
 
@@ -131,7 +158,11 @@ const size = existsSync(bundle) ? Bun.file(bundle).size : 0
 console.log(`[mobile] dist/native-screens.js (${(size / 1024).toFixed(0)} KB)`)
 console.log('[mobile] dist/craft.config.json')
 
-if (unread > 0) {
-  console.warn(`[mobile] ${unread} directive(s) did not become native behaviour — those controls will render but not react`)
-  console.warn('[mobile] see screens/README.md')
+const bindings = Array.from(compiled.matchAll(/kind:"(if|for|event|attr|text|show|class|style|model|html)"/g), m => m[1])
+const counted = bindings.reduce<Record<string, number>>((all, kind) => ({ ...all, [kind]: (all[kind] ?? 0) + 1 }), {})
+console.log(`[mobile] bindings: ${Object.entries(counted).map(([kind, n]) => `${n} ${kind}`).join(', ') || 'none'}`)
+
+if (unaccounted.length > 0) {
+  console.warn(`[mobile] ${unaccounted.length} handler(s) reached no binding: ${[...new Set(unaccounted)].join(', ')}`)
+  console.warn('[mobile] those controls will render and not react — see screens/README.md')
 }
