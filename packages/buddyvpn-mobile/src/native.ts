@@ -15,6 +15,10 @@
 interface CraftBridge {
   haptics?: { impact?: (style: string) => void, selection?: () => void }
   window?: { startDrag?: () => void }
+  navigation?: {
+    push?: (screen: string, params?: Record<string, unknown>) => void
+    back?: () => void
+  }
 }
 
 declare global {
@@ -86,6 +90,50 @@ export const haptics = {
   impact(style: 'light' | 'medium' | 'heavy' = 'medium'): void {
     try {
       window.craft?.haptics?.impact?.(style)
+    }
+    catch {
+      // As above.
+    }
+  },
+}
+
+/**
+ * Moving between screens.
+ *
+ * A native screen is not a page, and a link is not how you leave one. Each
+ * screen in the bundle is its own route that the host pushes onto a stack, so
+ * `<a href>` and `history.back()` reach nothing — the location row rendered
+ * perfectly and did nothing at all when tapped, because there was no
+ * navigator listening for a link.
+ *
+ * `push` takes the *route name* the bundle knows, which is the screen's
+ * filename without its extension, not a URL path. The host rejects a name it
+ * has no screen for, so a typo here is an error at the tap rather than a
+ * blank screen.
+ *
+ * Falls back to the browser's own history so the screens stay walkable while
+ * being written, where there is no host to push anything.
+ */
+export const navigation = {
+  /** Open another screen, keeping this one beneath it. */
+  push(screen: string): void {
+    try {
+      const native = window.craft?.navigation?.push
+      if (native)
+        return native.call(window.craft!.navigation, screen)
+      window.location.assign(`/${screen}`)
+    }
+    catch {
+      // A screen that cannot be opened should not take the current one down.
+    }
+  },
+  /** Return to the screen underneath. */
+  back(): void {
+    try {
+      const native = window.craft?.navigation?.back
+      if (native)
+        return native.call(window.craft!.navigation)
+      window.history.back()
     }
     catch {
       // As above.

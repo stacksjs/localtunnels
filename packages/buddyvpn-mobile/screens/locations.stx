@@ -1,5 +1,23 @@
+<script server>
+/*
+ * Server-side, on purpose, and this is the whole reason the list renders.
+ *
+ * A client `@for` cannot draw a list on the native renderer. The runtime
+ * finds lists with `el.hasAttribute('@for')`, the translator drops that
+ * attribute from the node (it reports it as `unread-event`), and a native
+ * node does not implement `hasAttribute` in the first place — so the loop
+ * matched nothing and the screen drew one empty row.
+ *
+ * Nothing is lost by moving it: the regions are fixed when the app is built.
+ * Expanding here produces one real element per region, each carrying its own
+ * bindings for the parts that do change — whether a tunnel is up, and whether
+ * a region has a server behind it.
+ */
+import { REGIONS } from '../src/regions'
+</script>
+
 <script client>
-import { haptics } from '../src/native'
+import { haptics, navigation } from '../src/native'
 import { REGIONS } from '../src/regions'
 import { tunnel } from '../src/tunnel'
 
@@ -22,7 +40,7 @@ const choose = (id: string) => {
   catch {
     // The choice still applies to this session; it just will not outlive it.
   }
-  history.back()
+  navigation.back()
 }
 </script>
 
@@ -43,22 +61,26 @@ const choose = (id: string) => {
           client binding, so its body is a template the runtime fills per item.
           A mustache in here is as literal as one anywhere else.
         -->
-        <button
-          type="button"
+        <a
           class="flex w-full flex-row items-center gap-3 rounded-xl bg-white p-4 dark:bg-gray-900"
-          :class="!region.exitIp || locked() ? 'flex w-full flex-row items-center gap-3 rounded-xl bg-gray-100 p-4 dark:bg-gray-800' : 'flex w-full flex-row items-center gap-3 rounded-xl bg-white p-4 dark:bg-gray-900'"
-          :disabled="locked() || !region.exitIp"
-          @click="choose(region.id)"
+          :class="locked() ? 'flex w-full flex-row items-center gap-3 rounded-xl bg-gray-100 p-4 dark:bg-gray-800' : 'flex w-full flex-row items-center gap-3 rounded-xl bg-white p-4 dark:bg-gray-900'"
+          @click="choose('{{ region.id }}')"
         >
-          <span class="text-xl" :text="region.badge"></span>
-          <span class="flex-1 text-base font-medium text-gray-900 dark:text-gray-100" :text="region.country"></span>
-          <span class="text-sm text-gray-500 dark:text-gray-400" :text="region.city"></span>
+          <!--
+            Interpolated, not bound. `region` is the server loop's variable and
+            does not exist at runtime, so `:text="region.badge"` evaluated to
+            nothing and the rows drew empty. These values are fixed when the
+            app is built, so baking them in is what they want anyway.
+          -->
+          <span class="shrink-0 text-xl">{{ region.badge }}</span>
+          <span class="shrink-0 text-base font-medium text-gray-900 dark:text-gray-100">{{ region.country }}</span>
+          <span class="flex-1 truncate text-sm text-gray-500 dark:text-gray-400">{{ region.city }}</span>
           <!-- A location with no server says so here, rather than looking
                available and failing on tap. -->
           @if(!region.exitIp)
-            <span class="rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">No server yet</span>
+            <span class="shrink-0 rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">No server yet</span>
           @endif
-        </button>
+        </a>
       </li>
     @endforeach
   </ul>

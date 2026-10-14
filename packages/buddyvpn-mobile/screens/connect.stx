@@ -1,5 +1,5 @@
 <script client>
-import { haptics, whenNativeHost } from '../src/native'
+import { haptics, navigation, whenNativeHost } from '../src/native'
 import { DEFAULT_REGION, regionById } from '../src/regions'
 import { formatUptime, tunnel } from '../src/tunnel'
 
@@ -42,6 +42,15 @@ const statusLabel = () => {
   if (phase() === 'connecting') return 'Connecting…'
   if (phase() === 'disconnecting') return 'Disconnecting…'
   return connected() ? 'Connected' : 'Not connected'
+}
+
+// Changing location mid-connection would mean tearing the tunnel down and
+// building another, so the row is inert while one is up rather than offering
+// a tap that quietly does that.
+const openLocations = () => {
+  if (connected()) return
+  haptics.selection()
+  navigation.push('locations')
 }
 
 const toggle = () => {
@@ -164,11 +173,21 @@ const toggle = () => {
   <!-- Locked while a tunnel is up, for the same reason the desktop app locks
        it: changing location mid-connection is a disconnect and a fresh
        handshake, and a row that silently means that is a row that lies. -->
-  <StxLink
-    to="/locations"
+  <!--
+    A tappable container with a handler, which is two fixes in one place.
+
+    `<StxLink to="/locations">` rendered its contents and did nothing when
+    tapped: a native screen is not a page, and nothing reads an href. A
+    `<button>` is the opposite trap — it becomes a native Button, which takes
+    its label from `title` and drops its children, so the row went blank.
+
+    `<a>` maps to a TouchableOpacity: it keeps what is inside it and it
+    accepts the tap. The handler pushes the route by name.
+  -->
+  <a
     class="flex flex-row items-center gap-3 rounded-xl bg-white p-4 dark:bg-gray-900"
     :aria-disabled="connected() ? 'true' : 'false'"
-    data-stx-nav="push"
+    @click="openLocations"
   >
     <span class="text-xl" :text="here()?.badge"></span>
     <!--
@@ -181,7 +200,7 @@ const toggle = () => {
     <span class="flex-1 text-xs font-semibold uppercase text-gray-400" :text="connected() ? 'Location · disconnect to change' : 'Location'"></span>
     <span class="text-base font-medium text-gray-900 dark:text-gray-100" :text="here()?.country"></span>
     <span class="text-sm text-gray-500 dark:text-gray-400" :text="here()?.city"></span>
-  </StxLink>
+  </a>
 
   @if(native())
     <p class="text-center text-xs text-gray-400">Running in a native shell.</p>
