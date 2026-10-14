@@ -52,7 +52,7 @@ const toggle = () => {
 }
 </script>
 
-<div class="screen" data-phase="{{ phase() }}">
+<div class="screen" :data-phase="phase()">
   <!--
     Said at the top, permanently, and not as a dismissible notice.
 
@@ -69,9 +69,9 @@ const toggle = () => {
   @endif
 
   <header class="status">
-    <h1 class="status-label" data-tone="{{ connected() ? 'on' : '' }}">{{ statusLabel() }}</h1>
+    <h1 class="status-label" :data-tone="connected() ? 'on' : ''" :text="statusLabel()"></h1>
     @if(connected())
-      <p class="status-clock">{{ formatUptime(snapshot().uptimeSeconds) }}</p>
+      <p class="status-clock" :text="formatUptime(snapshot().uptimeSeconds)"></p>
     @endif
   </header>
 
@@ -83,8 +83,8 @@ const toggle = () => {
   @if(connected())
     <p class="egress">
       <span class="egress-kicker">Would leave from</span>
-      <span class="egress-where">{{ here()?.city }}</span>
-      <span class="egress-ip">{{ here()?.exitIp }}</span>
+      <span class="egress-where" :text="here()?.city"></span>
+      <span class="egress-ip" :text="here()?.exitIp"></span>
     </p>
   @endif
 
@@ -92,9 +92,9 @@ const toggle = () => {
     <ConnectButton phase="{{ phase() }}" enabled="{{ deployed() }}" @click="toggle" />
     <p class="caption">
       @if(!deployed())
-        No server in {{ here()?.country }} yet
+        <span :text="`No server in ${here()?.country ?? 'this location'} yet`"></span>
       @else
-        {{ connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}` }}
+        <span :text="connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}`"></span>
       @endif
     </p>
   </div>
@@ -105,14 +105,14 @@ const toggle = () => {
   <StxLink
     to="/locations"
     class="location-row"
-    aria-disabled="{{ connected() ? 'true' : 'false' }}"
+    :aria-disabled="connected() ? 'true' : 'false'"
     data-stx-nav="push"
   >
-    <span class="badge">{{ here()?.badge }}</span>
+    <span class="badge" :text="here()?.badge"></span>
     <span class="location-text">
-      <span class="location-kicker">{{ connected() ? 'Location · disconnect to change' : 'Location' }}</span>
-      <span class="location-name">{{ here()?.country }}</span>
-      <span class="location-city">{{ here()?.city }}</span>
+      <span class="location-kicker" :text="connected() ? 'Location · disconnect to change' : 'Location'"></span>
+      <span class="location-name" :text="here()?.country"></span>
+      <span class="location-city" :text="here()?.city"></span>
     </span>
     <span class="chevron" aria-hidden="true">›</span>
   </StxLink>

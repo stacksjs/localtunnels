@@ -45,6 +45,39 @@ if (!existsSync(BUNDLE)) {
   process.exit(1)
 }
 
+/*
+ * XcodeGen has to be reached by its real path, not through a symlink.
+ *
+ * It finds its SettingPresets relative to its own executable, and those
+ * presets are where `PRODUCT_NAME = "$(TARGET_NAME)"` comes from. Reached
+ * through `~/.local/share/pantry/global/bin/xcodegen` it looks for them
+ * beside *that* directory, finds none, and silently generates a project with
+ * no product name — which Xcode then fails to build with
+ *
+ *   error: Multiple commands produce '…/Debug-iphonesimulator/.app'
+ *
+ * naming an app bundle that is nothing but an extension. The cause is a
+ * package that symlinks `bin` without `share`, so it is worth being immune to
+ * rather than diagnosing again: the real directory goes first on PATH, and
+ * the tool resolves its own resources correctly from there.
+ */
+function withResolvedXcodegen(): void {
+  const found = Bun.spawnSync(['which', 'xcodegen'], { stdout: 'pipe' })
+  const onPath = found.stdout.toString().trim()
+  if (!onPath)
+    return
+  const real = Bun.spawnSync(['readlink', '-f', onPath], { stdout: 'pipe' }).stdout.toString().trim()
+  if (!real || real === onPath)
+    return
+  const realDir = dirname(real)
+  if (!existsSync(join(realDir, '..', 'share', 'xcodegen', 'SettingPresets')))
+    return
+  console.log(`[mobile] using ${real} directly — its presets do not resolve through the symlink on PATH`)
+  process.env.PATH = `${realDir}:${process.env.PATH ?? ''}`
+}
+
+withResolvedXcodegen()
+
 const { ios } = config
 
 /*
