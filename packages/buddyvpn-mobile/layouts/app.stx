@@ -17,7 +17,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>BuddyVPN</title>
-<link rel="stylesheet" href="/app.css">
 
 <script client>
 import { whenNativeHost } from '../src/native'
@@ -31,8 +30,14 @@ onMount(() => {
 })
 </script>
 
-<div class="app">
-  <main class="app-body">
+<!--
+  No stylesheet link: a native screen has no CSS. The renderer compiles each
+  element's class list into Yoga styles itself, so the frame is utility
+  classes like everything else, and `app.css` was deleted rather than left
+  looking load-bearing.
+-->
+<div class="flex min-h-full flex-1 flex-col bg-gray-100 dark:bg-black">
+  <main class="flex flex-1 flex-col">
     <slot />
   </main>
 </div>

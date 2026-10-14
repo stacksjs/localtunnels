@@ -52,7 +52,20 @@ const toggle = () => {
 }
 </script>
 
-<div class="screen" :data-phase="phase()">
+<!--
+  Styling is utility classes, not a stylesheet.
+
+  A native screen has no CSS: the renderer compiles the class list into Yoga
+  styles through its own Tailwind-shaped mapping, and a class it does not
+  recognise is dropped in silence. `app.css` therefore styled nothing here —
+  which is why this screen first rendered as unstyled text with no button
+  visible, and why nothing warned about it.
+
+  `dark:` is the one variant that survives, because the host knows the
+  appearance. Hover, focus and breakpoints have no meaning on a phone and are
+  discarded.
+-->
+<div class="flex flex-1 flex-col gap-4 bg-gray-100 px-5 pb-5 dark:bg-black" :data-phase="phase()">
   <!--
     Said at the top, permanently, and not as a dismissible notice.
 
@@ -63,15 +76,27 @@ const toggle = () => {
     footnote under the fold.
   -->
   @if(snapshot().simulated)
-    <p class="sim-banner" role="status">
+    <p
+      class="mt-3 rounded-xl border border-orange-300 bg-orange-100 p-3 text-center text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-950 dark:text-orange-300"
+      role="status"
+    >
       Simulated — this build has no VPN entitlement, so nothing is routed.
     </p>
   @endif
 
-  <header class="status">
-    <h1 class="status-label" :data-tone="connected() ? 'on' : ''" :text="statusLabel()"></h1>
+  <header class="items-center pt-4">
+    <!--
+      The colour is a bound class, not an attribute a stylesheet would have
+      read: `data-tone` selects nothing when there is no CSS. The runtime
+      recompiles this class list when the expression changes.
+    -->
+    <h1
+      class="text-2xl font-bold text-gray-900 dark:text-gray-50"
+      :class="connected() ? 'text-2xl font-bold text-green-700 dark:text-green-400' : 'text-2xl font-bold text-gray-900 dark:text-gray-50'"
+      :text="statusLabel()"
+    ></h1>
     @if(connected())
-      <p class="status-clock" :text="formatUptime(snapshot().uptimeSeconds)"></p>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400" :text="formatUptime(snapshot().uptimeSeconds)"></p>
     @endif
   </header>
 
@@ -81,22 +106,59 @@ const toggle = () => {
     through, so this is the location's claim and is worded as one.
   -->
   @if(connected())
-    <p class="egress">
-      <span class="egress-kicker">Would leave from</span>
-      <span class="egress-where" :text="here()?.city"></span>
-      <span class="egress-ip" :text="here()?.exitIp"></span>
-    </p>
+    <div class="items-center gap-1">
+      <span class="text-xs font-semibold uppercase text-gray-400">Would leave from</span>
+      <span class="text-sm font-medium text-gray-900 dark:text-gray-100" :text="here()?.city"></span>
+      <span class="text-xs text-gray-500 dark:text-gray-400" :text="here()?.exitIp"></span>
+    </div>
   @endif
 
-  <div class="power-wrap">
-    <ConnectButton phase="{{ phase() }}" enabled="{{ deployed() }}" @click="toggle" />
-    <p class="caption">
-      @if(!deployed())
-        <span :text="`No server in ${here()?.country ?? 'this location'} yet`"></span>
-      @else
-        <span :text="connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}`"></span>
-      @endif
-    </p>
+  <div class="flex flex-1 flex-col items-center justify-center gap-4">
+    <!--
+      The button is markup here rather than a component.
+
+      A component's props are evaluated once, server-side, while the page is
+      rendered — `phase="{{ phase() }}"` reaches it as the empty string and
+      never changes again. Anything that has to react must read the screen's
+      own signals, and a component file that silently depends on its caller's
+      scope is harder to trust than the markup being where its state is.
+
+      It says what pressing it does rather than what the state is: the label
+      above already reads "Connected", so a power glyph on a live connection
+      would leave the only question this control answers unanswered.
+    -->
+    <button
+      type="button"
+      class="h-48 w-48 items-center justify-center rounded-full bg-blue-600 text-white"
+      :class="!deployed() ? 'h-48 w-48 items-center justify-center rounded-full bg-gray-300 text-white dark:bg-gray-700' : busy() ? 'h-48 w-48 items-center justify-center rounded-full bg-gray-400 text-white' : connected() ? 'h-48 w-48 items-center justify-center rounded-full bg-red-600 text-white' : 'h-48 w-48 items-center justify-center rounded-full bg-blue-600 text-white'"
+      :aria-busy="busy() ? 'true' : 'false'"
+      :aria-label="connected() ? 'Disconnect' : 'Connect'"
+      @click="toggle"
+      :title="connected() ? 'Stop' : 'Start'"
+    ></button>
+
+    <!--
+      Two complementary conditions, not an `@if`/`@else`.
+
+      An `@else` in this position compiles, renders nothing, and takes the
+      whole screen down with it at runtime:
+
+        [stx] effect error (the effect is disposed):
+        undefined is not an object (evaluating 'D.__stx_detached_if')
+
+      The screen went blank — not the missing caption it was meant to fix.
+
+      Two elements under the condition, not two spans inside one paragraph.
+      A `<p>` becomes a Text node, and inline children of a Text node are
+      flattened into its own words — the binding goes with the structure, so
+      the caption rendered as nothing at all.
+    -->
+    @if(!deployed())
+      <p class="text-center text-sm text-gray-500 dark:text-gray-400" :text="`No server in ${here()?.country ?? 'this location'} yet`"></p>
+    @endif
+    @if(deployed())
+      <p class="text-center text-sm text-gray-500 dark:text-gray-400" :text="connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}`"></p>
+    @endif
   </div>
 
   <!-- Locked while a tunnel is up, for the same reason the desktop app locks
@@ -104,20 +166,24 @@ const toggle = () => {
        handshake, and a row that silently means that is a row that lies. -->
   <StxLink
     to="/locations"
-    class="location-row"
+    class="flex flex-row items-center gap-3 rounded-xl bg-white p-4 dark:bg-gray-900"
     :aria-disabled="connected() ? 'true' : 'false'"
     data-stx-nav="push"
   >
-    <span class="badge" :text="here()?.badge"></span>
-    <span class="location-text">
-      <span class="location-kicker" :text="connected() ? 'Location · disconnect to change' : 'Location'"></span>
-      <span class="location-name" :text="here()?.country"></span>
-      <span class="location-city" :text="here()?.city"></span>
-    </span>
-    <span class="chevron" aria-hidden="true">›</span>
+    <span class="text-xl" :text="here()?.badge"></span>
+    <!--
+      One level of spans, not two. Inline elements nested inside another are
+      flattened into their parent's text — the compiler says so as
+      `flattened-text` — and the bindings inside them are lost with the
+      structure. That is why the country and city were missing while the badge
+      beside them rendered.
+    -->
+    <span class="flex-1 text-xs font-semibold uppercase text-gray-400" :text="connected() ? 'Location · disconnect to change' : 'Location'"></span>
+    <span class="text-base font-medium text-gray-900 dark:text-gray-100" :text="here()?.country"></span>
+    <span class="text-sm text-gray-500 dark:text-gray-400" :text="here()?.city"></span>
   </StxLink>
 
   @if(native())
-    <p class="host-note">Running in a native shell.</p>
+    <p class="text-center text-xs text-gray-400">Running in a native shell.</p>
   @endif
 </div>
