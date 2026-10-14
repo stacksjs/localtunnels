@@ -123,10 +123,7 @@ export function parseNetworkServices(output: string): string[] {
 /** `networksetup -getdnsservers` prints a sentence when there are none set. */
 export function parseDnsServers(output: string): string[] | null {
   const lines = output.split('\n').map(line => line.trim()).filter(Boolean)
-  // The apostrophe is matched as "any character": pickier's parser treats a
-  // literal one inside a regex as the start of a string and loses the rest of
-  // the file, reporting the surrounding function as unused.
-  if (lines.length === 0 || lines.some(line => /there aren.t any/i.test(line)))
+  if (lines.length === 0 || lines.some(line => /there aren't any/i.test(line)))
     return null
   return lines.filter(line => /^[0-9a-f.:]+$/i.test(line))
 }

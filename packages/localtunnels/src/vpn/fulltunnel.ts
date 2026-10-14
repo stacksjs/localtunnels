@@ -226,9 +226,9 @@ export function pfRules(config: KillSwitchConfig): string {
      * `block drop out all` followed by `pass out quick on lo0 all` reads as
      * equivalent and is not worth relying on: a machine that blocks its own
      * loopback loses every local service at once, and on this app that
-     * includes the connection the window makes to its own agent — which is
-     * the thing you would use to turn the kill switch off. The failure mode
-     * is a user with no network and no way back, which is what happened.
+     * includes the window's connection to its own agent — which is the thing
+     * you would use to turn the kill switch off. The failure mode is a user
+     * with no network and no way back, which is what happened.
      *
      * `on ! lo0` means no loopback packet is ever a candidate for the block,
      * whatever the ordering semantics do. The explicit pass below stays as a
