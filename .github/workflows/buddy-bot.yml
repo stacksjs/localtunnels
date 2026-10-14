@@ -1,0 +1,199 @@
+name: Buddy Bot
+
+# Dependency updates, as CLAUDE.md specifies for this project — buddy-bot
+# rather than renovate.
+#
+# Three jobs, one workflow, because they share a trigger and nothing else:
+#
+#   check      acts on `@buddy-bot rebase` and closes PRs that are done with
+#   update     opens or refreshes the update PRs
+#   dashboard  keeps the dependency issue current
+#
+# The cadence is deliberately slower than the system-cleaner app this is
+# modelled on, which checks every minute — 1440 runs a day for a repository
+# whose dependency set changes a few times a week. GitHub throttles scheduled
+# runs on public repositories anyway, so a minute is not a minute; it is a
+# queue. Half-hourly is still well inside the time it takes someone to notice
+# a rebase has not happened.
+
+on:
+  schedule:
+    # Rebase requests and PR housekeeping.
+    - cron: '*/30 * * * *'
+    # Look for new versions, once a day.
+    - cron: '0 3 * * *'
+    # And summarise them, after the run above has had time to finish.
+    - cron: '20 3 * * *'
+
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        required: false
+        default: all
+        type: choice
+        options: [all, check, update, dashboard]
+      strategy:
+        description: Update strategy
+        required: false
+        default: patch
+        type: choice
+        options: [all, major, minor, patch]
+      packages:
+        description: Specific packages (comma-separated)
+        required: false
+        type: string
+      dry_run:
+        description: Preview only, change nothing
+        required: false
+        default: false
+        type: boolean
+
+# `bunx buddy-bot` is deliberately unpinned, which is the opposite of what
+# the rest of this repository now does — and for the opposite reason. A pin
+# protects the thing being built; this is the tool that proposes changes to
+# it, and everything it produces arrives as a pull request somebody reads
+# before merging. Pinning it would mean hand-bumping the thing whose whole
+# job is to stop hand-bumping.
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  # BUDDY_BOT_TOKEN is a Personal Access Token with `repo` and `workflow`
+  # scopes. Without it this falls back to GITHUB_TOKEN, which GitHub forbids
+  # from writing anything under .github/workflows — so the action pins in
+  # these files are the one kind of dependency that will NOT be updated.
+  # Everything in package.json and deps.yaml still is.
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  BUDDY_BOT_TOKEN: ${{ secrets.BUDDY_BOT_TOKEN }}
+
+jobs:
+  # Which of the three the trigger actually asked for. A dispatch names one
+  # (or all); a schedule is identified by the cron line that fired.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      check: ${{ steps.pick.outputs.check }}
+      update: ${{ steps.pick.outputs.update }}
+      dashboard: ${{ steps.pick.outputs.dashboard }}
+    steps:
+      - name: Decide
+        id: pick
+        run: |
+          check=false; update=false; dashboard=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ github.event.inputs.job }}" in
+              all|'') check=true; update=true; dashboard=true ;;
+              check) check=true ;;
+              update) update=true ;;
+              dashboard) dashboard=true ;;
+            esac
+          else
+            case "${{ github.event.schedule }}" in
+              '*/30 * * * *') check=true ;;
+              '0 3 * * *') update=true ;;
+              '20 3 * * *') dashboard=true ;;
+            esac
+          fi
+
+          {
+            echo "check=$check"
+            echo "update=$update"
+            echo "dashboard=$dashboard"
+          } >> "$GITHUB_OUTPUT"
+          echo "check=$check update=$update dashboard=$dashboard"
+
+  check:
+    needs: plan
+    if: ${{ needs.plan.outputs.check == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history: rebasing a PR branch needs the commits it is being
+          # rebased onto.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: oven-sh/setup-bun@v2.1.3
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Report which token is in use
+        run: |
+          if [ -z "${{ secrets.BUDDY_BOT_TOKEN }}" ]; then
+            echo "::notice::Using GITHUB_TOKEN. Action pins under .github/workflows will not be updated — that needs BUDDY_BOT_TOKEN, a PAT with repo and workflow scopes."
+          else
+            echo "Using BUDDY_BOT_TOKEN."
+          fi
+
+      - name: Handle rebase requests and finished PRs
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            bunx buddy-bot update-check --dry-run --verbose
+          else
+            bunx buddy-bot update-check --verbose
+          fi
+
+  update:
+    needs: plan
+    if: ${{ needs.plan.outputs.update == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: oven-sh/setup-bun@v2.1.3
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Open or refresh update PRs
+        run: |
+          strategy="${{ github.event.inputs.strategy || 'patch' }}"
+          packages="${{ github.event.inputs.packages }}"
+
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            bunx buddy-bot scan --verbose
+          elif [ -n "$packages" ]; then
+            bunx buddy-bot update --packages "$packages" --verbose
+          else
+            bunx buddy-bot update --strategy "$strategy" --verbose
+          fi
+
+  dashboard:
+    needs: plan
+    if: ${{ needs.plan.outputs.dashboard == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2.1.3
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Update the dependency dashboard
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            bunx buddy-bot scan --verbose
+          else
+            bunx buddy-bot dashboard --verbose
+          fi
