@@ -1,0 +1,65 @@
+<script client>
+import { haptics } from '../src/native'
+import { REGIONS } from '../src/regions'
+import { tunnel } from '../src/tunnel'
+
+const snapshot = state(tunnel.snapshot())
+onMount(() => tunnel.subscribe(next => snapshot.set(next)))
+
+// Changing location while connected would mean tearing the tunnel down and
+// building another, so the whole list is inert instead of offering taps that
+// quietly do that.
+const locked = () => snapshot().phase !== 'idle'
+
+const choose = (id: string) => {
+  if (locked()) return
+  const region = REGIONS.find(entry => entry.id === id)
+  if (!region?.exitIp) return
+  haptics.selection()
+  try {
+    window.localStorage?.setItem('buddyvpn.region', id)
+  }
+  catch {
+    // The choice still applies to this session; it just will not outlive it.
+  }
+  history.back()
+}
+</script>
+
+<div class="screen screen-list">
+  <h1 class="list-title">Location</h1>
+
+  @if(locked())
+    <p class="list-note" role="status">Disconnect to change location.</p>
+  @endif
+
+  <ul class="locations">
+    @foreach(REGIONS as region)
+      <li>
+        <button
+          type="button"
+          class="location-option"
+          data-deployed="{{ region.exitIp ? 'true' : 'false' }}"
+          disabled="{{ locked() || !region.exitIp }}"
+          @click="choose(region.id)"
+        >
+          <span class="badge">{{ region.badge }}</span>
+          <span class="location-text">
+            <span class="location-name">{{ region.country }}</span>
+            <span class="location-city">{{ region.city }}</span>
+          </span>
+          <!-- A location with no server says so here, rather than looking
+               available and failing on tap. -->
+          @if(!region.exitIp)
+            <span class="pill">No server yet</span>
+          @endif
+        </button>
+      </li>
+    @endforeach
+  </ul>
+
+  <p class="list-foot">
+    A location appears here once <code>bun run deploy:vpn --region &lt;id&gt;</code> has
+    put a server behind it.
+  </p>
+</div>

@@ -1,0 +1,123 @@
+<script client>
+import { haptics, whenNativeHost } from '../src/native'
+import { DEFAULT_REGION, regionById } from '../src/regions'
+import { formatUptime, tunnel } from '../src/tunnel'
+
+// The chosen location outlives a screen, so it is read back rather than
+// defaulted on every mount — otherwise walking to the picker and back would
+// silently reset it.
+const stored = (() => {
+  try {
+    return window.localStorage?.getItem('buddyvpn.region')
+  }
+  catch {
+    // Private windows and cleared site data both throw rather than return
+    // null. A missing preference is not an error.
+    return null
+  }
+})()
+
+const region = state(regionById(stored) ? stored : DEFAULT_REGION)
+const snapshot = state(tunnel.snapshot())
+const native = state(false)
+
+onMount(() => {
+  const stop = tunnel.subscribe(next => snapshot.set(next))
+  // Asked here rather than at setup: Craft installs its bridge after the
+  // document starts, so the answer at setup is "no" even on a phone.
+  void whenNativeHost().then(value => native.set(value))
+  return stop
+})
+
+const here = () => regionById(region()) 
+const phase = () => snapshot().phase
+const connected = () => phase() === 'connected'
+const busy = () => phase() === 'connecting' || phase() === 'disconnecting'
+// A location with no server behind it is not connectable, and the button says
+// so by being unavailable rather than by failing after a tap.
+const deployed = () => Boolean(here()?.exitIp)
+
+const statusLabel = () => {
+  if (snapshot().error) return 'Something went wrong'
+  if (phase() === 'connecting') return 'Connecting…'
+  if (phase() === 'disconnecting') return 'Disconnecting…'
+  return connected() ? 'Connected' : 'Not connected'
+}
+
+const toggle = () => {
+  if (busy() || !deployed()) return
+  haptics.impact('medium')
+  if (connected()) void tunnel.disconnect()
+  else void tunnel.connect(region())
+}
+</script>
+
+<div class="screen" data-phase="{{ phase() }}">
+  <!--
+    Said at the top, permanently, and not as a dismissible notice.
+
+    This build has no Network Extension entitlement, so there is no tunnel
+    behind the button — it walks the states and moves nothing. The desktop app
+    shipped a demo mode once and the whole risk it carried was somebody
+    believing it, so this is the first thing on the screen rather than a
+    footnote under the fold.
+  -->
+  @if(snapshot().simulated)
+    <p class="sim-banner" role="status">
+      Simulated — this build has no VPN entitlement, so nothing is routed.
+    </p>
+  @endif
+
+  <header class="status">
+    <h1 class="status-label" data-tone="{{ connected() ? 'on' : '' }}">{{ statusLabel() }}</h1>
+    @if(connected())
+      <p class="status-clock">{{ formatUptime(snapshot().uptimeSeconds) }}</p>
+    @endif
+  </header>
+
+  <!--
+    Where the traffic would leave from. The desktop app asks the internet what
+    address it sees, which is evidence; the phone has no tunnel to ask
+    through, so this is the location's claim and is worded as one.
+  -->
+  @if(connected())
+    <p class="egress">
+      <span class="egress-kicker">Would leave from</span>
+      <span class="egress-where">{{ here()?.city }}</span>
+      <span class="egress-ip">{{ here()?.exitIp }}</span>
+    </p>
+  @endif
+
+  <div class="power-wrap">
+    <ConnectButton phase="{{ phase() }}" enabled="{{ deployed() }}" @click="toggle" />
+    <p class="caption">
+      @if(!deployed())
+        No server in {{ here()?.country }} yet
+      @else
+        {{ connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}` }}
+      @endif
+    </p>
+  </div>
+
+  <!-- Locked while a tunnel is up, for the same reason the desktop app locks
+       it: changing location mid-connection is a disconnect and a fresh
+       handshake, and a row that silently means that is a row that lies. -->
+  <StxLink
+    to="/locations"
+    class="location-row"
+    aria-disabled="{{ connected() ? 'true' : 'false' }}"
+    data-stx-nav="push"
+  >
+    <span class="badge">{{ here()?.badge }}</span>
+    <span class="location-text">
+      <span class="location-kicker">{{ connected() ? 'Location · disconnect to change' : 'Location' }}</span>
+      <span class="location-name">{{ here()?.country }}</span>
+      <span class="location-city">{{ here()?.city }}</span>
+    </span>
+    <span class="chevron" aria-hidden="true">›</span>
+  </StxLink>
+
+  @if(native())
+    <p class="host-note">Running in a native shell.</p>
+  @endif
+</div>

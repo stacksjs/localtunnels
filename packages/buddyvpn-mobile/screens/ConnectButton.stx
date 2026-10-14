@@ -1,0 +1,45 @@
+<script>
+interface ConnectButtonProps {
+  /** 'idle' | 'connecting' | 'connected' | 'disconnecting' */
+  phase: string
+  /** False when the chosen location has no server behind it. */
+  enabled?: boolean
+}
+
+const { phase, enabled = true } = defineProps<ConnectButtonProps>()
+const busy = phase === 'connecting' || phase === 'disconnecting'
+const on = phase === 'connected'
+</script>
+
+<!--
+  One button, and it says what pressing it does rather than what the state is.
+  The label above it already reads "Connected"; a power glyph on a live
+  connection would leave the only question this control should answer
+  unanswered, so it becomes a stop square instead.
+
+  `aria-busy` rather than a disabled attribute while connecting: disabling it
+  removes it from the accessibility tree mid-transition, and a screen reader
+  loses the element it was describing.
+-->
+<button
+  type="button"
+  class="connect-button"
+  data-phase="{{ phase }}"
+  aria-busy="{{ busy ? 'true' : 'false' }}"
+  aria-label="{{ on ? 'Disconnect' : 'Connect' }}"
+  disabled="{{ !enabled || busy }}"
+>
+  <span class="connect-ring" aria-hidden="true"></span>
+
+  @if(on)
+    <svg class="connect-glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="6.5" y="6.5" width="11" height="11" rx="2.5"></rect>
+    </svg>
+  @else
+    <svg class="connect-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M12 3v9"></path>
+      <path d="M6.3 6.3a8.5 8.5 0 1 0 11.4 0"></path>
+    </svg>
+  @endif
+</button>
