@@ -95,8 +95,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Pinned, and pinned to the same version the system-cleaner app uses.
+      #
+      # This was `home-lang/pantry/packages/action@main` — the same repository
+      # under its old name, so the move is a rename, not a change of action.
+      # The pin is the point: that repository is a package catalog whose main
+      # branch moves many times a day, so `@main` meant two runs an hour apart
+      # could execute different code, and a release pipeline that changes
+      # under you is one that cannot be bisected when it breaks.
+      #
+      # v0.11.80 exists and its action is byte-identical in behaviour — every
+      # commit between the two is a catalog update, and the only file touched
+      # under packages/action is its own package.json. Held here so both
+      # repositories move together.
       - name: Setup Pantry
-        uses: home-lang/pantry/packages/action@main
+        uses: pantry-pm/pantry/packages/action@v0.11.74
 
       - name: Install Dependencies
         run: bun install
