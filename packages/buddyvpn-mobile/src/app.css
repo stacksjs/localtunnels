@@ -1,0 +1,236 @@
+/*
+ * BuddyVPN on a phone.
+ *
+ * Written against the safe area rather than against device sizes: the insets
+ * differ on every iPhone and in both orientations, and a layout built from
+ * guessed padding is one that collides with the notch on a model nobody
+ * tested. `env()` answers zero in a browser, so the same stylesheet is also
+ * how the screens are developed on a desktop.
+ */
+
+:root {
+  --bg: #f2f2f7;
+  --surface: #fff;
+  --line: rgba(60, 60, 67, .14);
+  --ink: #1d1d1f;
+  --secondary: #6e6e73;
+  --tertiary: #8e8e93;
+  --green: #248a3d;
+  --orange: #c45d00;
+  --red: #d70015;
+  --hover: rgba(0, 0, 0, .04);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+
+  /* The smallest thing a thumb reliably hits. Apple's own floor, and the
+     reason every control below has a minimum height rather than only
+     padding. */
+  --tap: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000;
+    --surface: #1c1c1e;
+    --line: rgba(84, 84, 88, .36);
+    --ink: #f5f5f7;
+    --secondary: #aeaeb2;
+    --tertiary: #8e8e93;
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --hover: rgba(255, 255, 255, .06);
+  }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 16px/1.4 -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  /* A rubber-band scroll at the top of a fixed app screen reads as the page
+     coming loose from the frame. */
+  overscroll-behavior: none;
+}
+
+/* Only inside a native host. In a browser these make the page feel broken:
+   text that cannot be selected and links that never highlight are correct for
+   an app and wrong for a web page. */
+.native-host body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* The whole reason for viewport-fit=cover. Top clears the notch or the
+     Dynamic Island; bottom clears the home indicator, which otherwise sits
+     over the last control on the screen. */
+  padding:
+    env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-5) var(--space-5);
+}
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ── The thing the user must not miss ─────────────────────────────────── */
+
+.sim-banner {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+  color: var(--orange);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+/* ── Status ───────────────────────────────────────────────────────────── */
+
+.status { text-align: center; padding-top: var(--space-4); }
+.status-label { font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+.status-label[data-tone="on"] { color: var(--green); }
+.status-clock {
+  margin-top: 2px;
+  font: 500 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--secondary);
+}
+
+.egress { text-align: center; display: flex; flex-direction: column; gap: 2px; }
+.egress-kicker {
+  font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--tertiary);
+}
+.egress-where { font-size: 14px; font-weight: 500; }
+.egress-ip {
+  font: 500 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--secondary);
+}
+
+/* ── The button ───────────────────────────────────────────────────────── */
+
+.power-wrap {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-4);
+}
+
+.connect-button {
+  position: relative;
+  width: 190px; height: 190px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  /* The press is the feedback on a phone — there is no hover to rely on. */
+  transition: transform .12s ease, background .2s ease, color .2s ease;
+}
+.connect-button:active:not(:disabled) { transform: scale(.96); }
+.connect-button:disabled { opacity: .4; cursor: default; }
+
+.connect-ring {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  transition: border-color .2s ease;
+}
+.connect-button[data-phase="connected"] { color: var(--red); }
+.connect-button[data-phase="connected"] .connect-ring { border-color: var(--red); }
+.connect-button[data-phase="connecting"] .connect-ring,
+.connect-button[data-phase="disconnecting"] .connect-ring {
+  border-color: var(--orange);
+  /* A spinner would claim progress it cannot measure; a pulse only says
+     something is happening, which is all that is known. */
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+
+/* Respecting the setting rather than animating regardless: a pulsing ring is
+   exactly the kind of motion this preference exists to stop. */
+@media (prefers-reduced-motion: reduce) {
+  .connect-button[data-phase="connecting"] .connect-ring,
+  .connect-button[data-phase="disconnecting"] .connect-ring { animation: none; }
+  .connect-button { transition: none; }
+}
+
+.connect-glyph { width: 56px; height: 56px; }
+.caption { font-size: 13px; color: var(--tertiary); text-align: center; }
+
+/* ── Location ─────────────────────────────────────────────────────────── */
+
+.location-row, .location-option {
+  width: 100%;
+  min-height: var(--tap);
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: inherit;
+  font: inherit; text-align: left; text-decoration: none;
+  cursor: pointer;
+}
+.location-row[aria-disabled="true"], .location-option:disabled {
+  opacity: .5; pointer-events: none;
+}
+
+.badge {
+  flex: none; width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border-radius: 9px; background: var(--bg);
+  font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  color: var(--secondary);
+}
+
+.location-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.location-kicker { font-size: 11px; color: var(--tertiary); }
+.location-name { font-size: 15px; font-weight: 500; }
+.location-city { font-size: 12px; color: var(--secondary); }
+.chevron { color: var(--tertiary); font-size: 20px; line-height: 1; }
+
+.pill {
+  flex: none; padding: 3px 8px; border-radius: 999px;
+  background: var(--bg); color: var(--tertiary);
+  font-size: 10px; font-weight: 600;
+}
+
+/* ── The list screen ──────────────────────────────────────────────────── */
+
+.screen-list { gap: var(--space-3); }
+.list-title { padding-top: var(--space-4); font-size: 28px; font-weight: 700; letter-spacing: -.02em; }
+.list-note { font-size: 12px; color: var(--orange); }
+.locations { list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.list-foot { margin-top: auto; font-size: 11px; line-height: 1.5; color: var(--tertiary); }
+.list-foot code {
+  font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--secondary);
+}
+
+.host-note { font-size: 10px; color: var(--tertiary); text-align: center; }

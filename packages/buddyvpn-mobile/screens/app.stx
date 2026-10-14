@@ -1,0 +1,38 @@
+<!--
+  The phone app's frame.
+
+  `viewport-fit=cover` lets the page draw into the notch and the home
+  indicator area; without it iOS letterboxes the content and the screen reads
+  as a web page in a wrapper. Everything inside then has to respect the safe
+  area itself, which `app.css` does with env() rather than with guessed
+  padding — the insets differ between every device and both orientations.
+
+  Two theme-colors rather than one: iOS tints the status bar from whichever
+  matches, and a single light value leaves white text on a white bar in Dark
+  Mode.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BuddyVPN</title>
+<link rel="stylesheet" href="/app.css">
+
+<script client>
+import { whenNativeHost } from '../src/native'
+
+// A class rather than a media query: "is this a phone app" is not a question
+// about viewport width, and a narrow browser window is not a native host.
+onMount(() => {
+  void whenNativeHost().then((native) => {
+    if (native) document.documentElement.classList.add('native-host')
+  })
+})
+</script>
+
+<div class="app">
+  <main class="app-body">
+    <slot />
+  </main>
+</div>
