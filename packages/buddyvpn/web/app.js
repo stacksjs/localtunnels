@@ -578,6 +578,11 @@
     if (event.button !== 0) return
     const target = event.target
     if (!(target instanceof Element) || !target.closest('[data-window-drag]')) return
+    // A control inside the drag strip is a control first. Both strips carry
+    // one — the gear, and the back arrow — and handing their press to a
+    // window drag is how a button becomes unreliable rather than dead:
+    // it works when the pointer does not move and does nothing when it does.
+    if (target.closest('button, a, input, select, textarea')) return
     if (window.craft?.window?.startDrag) window.craft.window.startDrag()
   })
 

@@ -298,6 +298,13 @@ html, body {
 .settings[hidden] { display: none; }
 
 .settings-head {
+  /* Where AppKit's window buttons end. Craft publishes the geometry; the
+     inner fallbacks are the older names for the same thing, matching the
+     chain `.chrome` already uses for the vertical axis. */
+  --buttons-end: calc(
+    var(--craft-window-buttons-x, var(--craft-window-controls-inset-x, 0px))
+    + var(--craft-window-buttons-width, var(--craft-window-controls-width, 0px))
+  );
   flex: none; position: relative;
   height: max(44px, var(--band, 44px));
   display: flex; align-items: center; justify-content: center;
@@ -306,7 +313,18 @@ html, body {
 }
 
 .back {
-  position: absolute; left: var(--space-3); top: 50%; transform: translateY(-50%);
+  /*
+   * Clear of the traffic lights.
+   *
+   * This panel covers the whole window, including the strip AppKit draws its
+   * buttons over — and unlike the main screen, it puts a control on the left,
+   * which landed underneath them. The `max` keeps a sane inset in a plain
+   * browser, where the geometry resolves to zero and there are no buttons to
+   * avoid.
+   */
+  position: absolute;
+  left: max(var(--space-3), calc(var(--buttons-end) + var(--space-2)));
+  top: 50%; transform: translateY(-50%);
   width: 26px; height: 26px; padding: 0;
   display: grid; place-items: center;
   border: 0; border-radius: 7px; background: transparent;
