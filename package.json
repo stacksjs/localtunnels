@@ -57,10 +57,10 @@
   },
   "devDependencies": {
     "@stacksjs/bunpress": "^0.2.19",
-    "@stacksjs/ts-cloud": "^0.7.127",
+    "@stacksjs/ts-cloud": "^0.16.52",
     "better-dx": "^0.2.38",
     "mitata": "^1.0.34",
-    "pickier": "^0.1.71"
+    "pickier": "0.1.67"
   },
   "git-hooks": {
     "pre-commit": {
