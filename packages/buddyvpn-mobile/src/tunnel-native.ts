@@ -46,11 +46,22 @@ export class NativeTunnel implements Tunnel {
   }
 
   subscribe(listener: (snapshot: TunnelSnapshot) => void): () => void {
-    this.listeners.add(listener)
-    // The first subscriber starts the watch, so a screen that is never shown
-    // costs nothing and an app with no VPN screen open is not listening.
-    if (this.listeners.size === 1)
+    /*
+     * The watch starts before the listener is added, not after.
+     *
+     * `watch` reads the current status and applies it, which emits — so a
+     * listener added first would be called by that, and then again by the
+     * explicit call below. The first subscriber got two snapshots for one
+     * subscription, which re-renders a screen on mount and double-fires
+     * anything wired to the subscription. Starting the watch while there is
+     * nobody to notify makes the call below the only one.
+     *
+     * The first subscriber is also what starts it at all, so a screen that
+     * is never shown costs nothing.
+     */
+    if (this.listeners.size === 0)
       this.watch()
+    this.listeners.add(listener)
     listener(this.snapshot())
     return () => {
       this.listeners.delete(listener)
