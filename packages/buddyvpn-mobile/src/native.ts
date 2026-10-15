@@ -14,6 +14,25 @@
 
 interface CraftBridge {
   haptics?: { impact?: (style: string) => void, selection?: () => void }
+  /**
+   * Craft's key/value store, which is `UserDefaults.standard` under a prefix
+   * of its own. The screens use it to leave a request for the Swift half,
+   * which watches that key — see `tunnel-bridge.ts` for why this is the
+   * channel rather than a native module of our own.
+   */
+  storage?: {
+    get?: (key: string) => Promise<unknown>
+    set?: (key: string, value: unknown) => Promise<unknown>
+  }
+  /**
+   * Craft's push channel. Swift writes one, every screen is told its name,
+   * and `get` reads back the JSON text — which is how tunnel state reaches a
+   * screen that was not the one that asked for it.
+   */
+  snapshots?: {
+    get?: (name: string) => string | null
+    onChange?: (callback: (name: string) => void) => (() => void) | undefined
+  }
   window?: { startDrag?: () => void }
   navigation?: {
     push?: (screen: string, params?: Record<string, unknown>) => void
