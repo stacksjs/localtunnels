@@ -42,6 +42,18 @@ export interface VpnNodeEvents {
   link: (info: { peerPublicKey: string }) => void
   /** An application message arrived from a peer. */
   message: (data: Uint8Array, from: string) => void
+  /**
+   * The coordinator has gone quiet and this node is about to be forgotten.
+   *
+   * Forwarded rather than handled, because what to do about it is not the
+   * node's call: a long-lived tunnel wants to say so and keep going, and a
+   * one-shot command may want to fail. What matters is that it is no longer
+   * invisible — a dropped node keeps linking, keeps handshaking and keeps
+   * reporting a healthy tunnel while its return route is withdrawn.
+   */
+  stale: (info: { reason: string, silentForMs: number }) => void
+  /** The coordinator is answering again. */
+  resumed: (info: { silentForMs: number }) => void
   error: (error: Error) => void
 }
 
@@ -114,6 +126,8 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     this.peer.setRelay((toPub, frame) => this.client?.sendRelay(toPub, frame))
     this.client.on('relayFrame', (from, frame) => this.peer.receiveRelayFrame(from, frame))
     this.client.on('error', err => this.emit('error', err))
+    this.client.on('stale', info => this.emit('stale', info))
+    this.client.on('resumed', info => this.emit('resumed', info))
 
     const info = await this.client.connect()
     this.assignedIp = info.assignedIp

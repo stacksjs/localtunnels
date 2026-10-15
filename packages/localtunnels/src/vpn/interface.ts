@@ -118,6 +118,14 @@ export interface VpnInterfaceEvents {
   }) => void
   /** An encrypted link to a peer completed its handshake. */
   link: (info: { peerPublicKey: string }) => void
+  /**
+   * The coordinator has gone quiet, and the exit is about to stop routing
+   * here. The interface stays up and the links stay established through all
+   * of it, which is why this has to be said out loud.
+   */
+  stale: (info: { reason: string, silentForMs: number }) => void
+  /** The coordinator is answering again. */
+  resumed: (info: { silentForMs: number }) => void
   error: (error: Error) => void
 }
 
@@ -204,6 +212,8 @@ export class VpnInterface extends TypedEventEmitter<VpnInterfaceEvents> {
       this.node = node
       node.on('error', err => this.emit('error', err))
       node.on('link', l => this.emit('link', l))
+      node.on('stale', info => this.emit('stale', info))
+      node.on('resumed', info => this.emit('resumed', info))
       // Routes follow the directory, so they are wired before registration
       // completes and the first directory arrives.
       node.on('peers', records => this.applyDirectory(records))

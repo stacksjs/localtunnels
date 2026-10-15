@@ -185,6 +185,11 @@ export interface KillSwitchConfig {
    * interface up, handshakes still succeeding and both ends printing
    * `link up`, which is the most misleading shape this failure could take.
    *
+   * The client now notices that silence for itself and says so, so a rule
+   * missed some other way is reported rather than discovered. That is a
+   * second line of defence, not a replacement for this one: being told the
+   * tunnel is about to break is worse than it not breaking.
+   *
    * It opens no new exposure: this is the same host the rule above already
    * passes UDP to, so anyone watching the wire already sees the association.
    *

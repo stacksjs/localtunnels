@@ -932,6 +932,16 @@ cli
       vpn.on('peerAdded', p => console.log(`  + peer ${p.publicKey.slice(0, 16)}\u2026 \u2192 ${p.allowedIps.join(', ')}`))
       vpn.on('peerRemoved', p => console.log(`  - peer ${p.publicKey.slice(0, 16)}\u2026 left`))
       vpn.on('link', l => console.log(`  \u2713 link up to ${l.peerPublicKey.slice(0, 16)}\u2026`))
+      /*
+       * Said loudly, because every other line on this screen will disagree
+       * with it. The interface is up, the links are established and the
+       * handshakes keep succeeding; what has stopped is the coordinator
+       * hearing from us, and a node it stops hearing from is dropped — after
+       * which the exit withdraws the route and the tunnel carries traffic one
+       * way while still looking perfect.
+       */
+      vpn.on('stale', s => console.warn(`  ! coordinator silent for ${Math.round(s.silentForMs / 1000)}s — ${s.reason}. This node will be dropped from the directory and the exit will stop routing to it.`))
+      vpn.on('resumed', s => console.log(`  \u2713 coordinator answering again (silent for ${Math.round(s.silentForMs / 1000)}s)`))
       vpn.on('exitChanged', e => console.log(e.publicKey
         ? `  \u2192 exit node: ${e.publicKey.slice(0, 16)}\u2026 (all non-tunnel traffic)`
         : '  \u2192 no exit node; non-tunnel traffic has no route and is dropped'))
