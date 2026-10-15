@@ -31,6 +31,19 @@ const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const TUNNEL_SUFFIX = 'Tunnel'
 
 /**
+ * Where the app-target half goes: the code that asks iOS for a tunnel.
+ *
+ * A second directory rather than more files in `Tunnel/`, because these
+ * belong to a different process. `NETunnelProviderManager` lives in the
+ * container app and the provider lives in the extension, and compiling
+ * either into the other's target is a mistake that builds.
+ */
+export const BRIDGE_DIR = 'Bridge'
+
+/** The app-target sources copied from `native/ios/`, in build order. */
+const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m']
+
+/**
  * The extension point iOS starts a packet tunnel through. Not a name we
  * choose: the system matches on this string to decide what this process is.
  */
@@ -102,6 +115,10 @@ export function withTunnelTarget(project: any, plan: TunnelPlan): any {
   // nothing to start.
   const dependencies = (app.dependencies ?? []).filter((entry: any) => entry?.target !== plan.tunnelTarget)
   app.dependencies = [...dependencies, { target: plan.tunnelTarget, embed: true }]
+
+  // The app's own half compiles into the app, not the extension.
+  const sources = (app.sources ?? []).filter((entry: any) => entry !== BRIDGE_DIR)
+  app.sources = [...sources, BRIDGE_DIR]
   return next
 }
 
@@ -172,6 +189,8 @@ export function withoutTunnelTarget(project: any, plan: TunnelPlan): any {
     if (app.dependencies.length === 0)
       delete app.dependencies
   }
+  if (app?.sources)
+    app.sources = app.sources.filter((entry: any) => entry !== BRIDGE_DIR)
   return next
 }
 
@@ -225,11 +244,25 @@ export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] 
   const tunnelDir = join(output, TUNNEL_SUFFIX)
   mkdirSync(tunnelDir, { recursive: true })
 
-  const source = join(PACKAGE_DIR, 'native', 'ios', 'PacketTunnelProvider.swift')
-  if (!existsSync(source))
-    throw new Error(`the provider source is missing at ${source}`)
-  copyFileSync(source, join(tunnelDir, 'PacketTunnelProvider.swift'))
+  /** Copy one tracked source into a generated directory. */
+  function copyNative(name: string, into: string): void {
+    const source = join(PACKAGE_DIR, 'native', 'ios', name)
+    if (!existsSync(source))
+      throw new Error(`the native source ${name} is missing at ${source}`)
+    copyFileSync(source, join(into, name))
+  }
+
+  copyNative('PacketTunnelProvider.swift', tunnelDir)
   done.push(`${TUNNEL_SUFFIX}/PacketTunnelProvider.swift`)
+
+  // The app's half: the manager that asks iOS for a tunnel, and the one hook
+  // there is to start it from.
+  const bridgeDir = join(output, BRIDGE_DIR)
+  mkdirSync(bridgeDir, { recursive: true })
+  for (const file of BRIDGE_SOURCES) {
+    copyNative(file, bridgeDir)
+    done.push(`${BRIDGE_DIR}/${file}`)
+  }
 
   writePlist(join(tunnelDir, 'Info.plist'), tunnelInfoPlist(plan))
   done.push(`${TUNNEL_SUFFIX}/Info.plist`)
@@ -260,10 +293,12 @@ export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] 
 export function removeTunnelExtension(output: string, plan: TunnelPlan): string[] {
   const removed: string[] = []
 
-  const tunnelDir = join(output, TUNNEL_SUFFIX)
-  if (existsSync(tunnelDir)) {
-    rmSync(tunnelDir, { recursive: true, force: true })
-    removed.push(`${TUNNEL_SUFFIX}/`)
+  for (const directory of [TUNNEL_SUFFIX, BRIDGE_DIR]) {
+    const path = join(output, directory)
+    if (existsSync(path)) {
+      rmSync(path, { recursive: true, force: true })
+      removed.push(`${directory}/`)
+    }
   }
 
   const appEntitlements = join(output, 'Craft.entitlements')

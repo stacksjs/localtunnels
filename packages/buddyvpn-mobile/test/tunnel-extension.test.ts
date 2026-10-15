@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'bun:test'
 import {
+  BRIDGE_DIR,
   EXTENSION_POINT,
   planTunnel,
   tunnelEntitlements,
@@ -79,10 +80,21 @@ describe('the project', () => {
     expect(withTunnelTarget(once, PLAN)).toEqual(once)
   })
 
+  /*
+   * The app's half of the tunnel compiles into the app, not the extension:
+   * NETunnelProviderManager lives in the container app and the provider lives
+   * in the extension, and putting either in the other's target is a mistake
+   * that builds cleanly.
+   */
+  it('adds the bridge sources to the app target', () => {
+    const app = withTunnelTarget(craftProject(), PLAN).targets.BuddyVPN
+    expect(app.sources).toEqual(['Sources', 'Shared', BRIDGE_DIR])
+  })
+
   it('leaves the app target otherwise alone', () => {
     const app = withTunnelTarget(craftProject(), PLAN).targets.BuddyVPN
-    expect(app.sources).toEqual(['Sources', 'Shared'])
     expect(app.settings.PRODUCT_BUNDLE_IDENTIFIER).toBe('org.localtunnels.buddyvpn')
+    expect(app.type).toBe('application')
   })
 
   it('refuses a project whose app target it cannot find', () => {
@@ -153,11 +165,12 @@ describe('entitlements', () => {
  * the config says the feature is off.
  */
 describe('turning it back off', () => {
-  it('removes the target and the dependency', () => {
+  it('removes the target, the dependency and the bridge sources', () => {
     const on = withTunnelTarget(craftProject(), PLAN)
     const off = withoutTunnelTarget(on, PLAN)
     expect(off.targets.BuddyVPNTunnel).toBeUndefined()
     expect(off.targets.BuddyVPN.dependencies).toBeUndefined()
+    expect(off.targets.BuddyVPN.sources).toEqual(['Sources', 'Shared'])
   })
 
   it('leaves a project that never had one untouched', () => {
