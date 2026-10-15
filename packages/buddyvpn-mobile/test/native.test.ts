@@ -111,6 +111,29 @@ describe('navigation.onAppear', () => {
   })
 })
 
+/*
+ * The bug these cover: the picker's bar read `locations` — the host titles a
+ * screen with its route name, and a route name is a filename.
+ */
+describe('navigation.setOptions', () => {
+  it('hands the host the options it was given', () => {
+    const seen: unknown[] = []
+    withHost({ navigation: { setOptions: (options: unknown) => seen.push(options) } })
+    navigation.setOptions({ title: 'Location', largeTitle: true })
+    expect(seen).toEqual([{ title: 'Location', largeTitle: true }])
+  })
+
+  it('does nothing off a host rather than reaching for the document title', () => {
+    withHost(undefined)
+    expect(() => navigation.setOptions({ title: 'Location' })).not.toThrow()
+  })
+
+  it('does not throw when the host refuses the options', () => {
+    withHost({ navigation: { setOptions: () => { throw new Error('no bar') } } })
+    expect(() => navigation.setOptions({ title: 'Location' })).not.toThrow()
+  })
+})
+
 describe('the remembered region', () => {
   const store = (value: string | null) => {
     ;(globalThis as any).localStorage = {

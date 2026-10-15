@@ -19,6 +19,7 @@ interface CraftBridge {
     push?: (screen: string, params?: Record<string, unknown>) => void
     back?: () => void
     onAppear?: (callback: () => void) => () => void
+    setOptions?: (options: Record<string, unknown>) => void
   }
 }
 
@@ -26,6 +27,18 @@ declare global {
   interface Window {
     craft?: CraftBridge
   }
+}
+
+/** The parts of the host's bar these screens set. The host takes more. */
+export interface NavigationOptions {
+  /** What the bar says. Set it, or the bar says the screen's filename. */
+  title?: string
+  /** A large title that collapses into the bar as the screen scrolls. */
+  largeTitle?: boolean
+  /** What the *next* screen's back button says. Defaults to this title. */
+  backTitle?: string
+  /** No bar at all. */
+  hidden?: boolean
 }
 
 /** How long to wait for Craft to install itself before concluding it will not. */
@@ -151,6 +164,28 @@ export const navigation = {
       // A screen that cannot hear the event still has to render.
     }
     return () => {}
+  },
+  /**
+   * Describe this screen's navigation bar.
+   *
+   * Without this the bar is titled with the route name, which is a filename:
+   * the picker's bar read `locations`, lowercase, above a screen that drew
+   * its own heading underneath. The bar is the title on iOS — a large one
+   * that collapses into the bar as the screen scrolls — so a heading in the
+   * content is a second title, not a substitute for setting this one.
+   *
+   * Every key is optional and only the keys given change. Silent off a host,
+   * where there is no bar to describe.
+   */
+  setOptions(options: NavigationOptions): void {
+    try {
+      const native = window.craft?.navigation?.setOptions
+      if (native)
+        native.call(window.craft!.navigation, options as Record<string, unknown>)
+    }
+    catch {
+      // A bar that cannot be titled is not worth losing the screen over.
+    }
   },
   /** Return to the screen underneath. */
   back(): void {

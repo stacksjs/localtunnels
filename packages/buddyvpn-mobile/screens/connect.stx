@@ -9,6 +9,9 @@ const snapshot = state(tunnel.snapshot())
 const native = state(false)
 
 onMount(() => {
+  // The app's name, rather than `connect` — the host titles a screen with its
+  // route name, and a route name is a filename.
+  navigation.setOptions({ title: 'BuddyVPN', largeTitle: true })
   const stop = tunnel.subscribe(next => snapshot.set(next))
   /*
    * Re-read the choice each time this screen comes back to the front.
