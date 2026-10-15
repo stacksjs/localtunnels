@@ -42,3 +42,42 @@ export function regionById(id: string | null): Region | null {
 export function isDeployed(region: Region): boolean {
   return region.exitIp !== null
 }
+
+/** Where the choice is kept, so both screens name it once. */
+const STORAGE_KEY = 'buddyvpn.region'
+
+/**
+ * The chosen region, read back rather than defaulted.
+ *
+ * Deliberately a read rather than a value held in a module: the two screens
+ * may not share a JavaScript context, and even where they do, the connect
+ * screen is still mounted underneath while the picker is open — its setup
+ * does not run again when it comes back. Reading on every call, from the
+ * place the choice actually lives, is the only version of this that cannot
+ * go stale.
+ */
+export function readRegion(): string {
+  try {
+    const stored = globalThis.localStorage?.getItem(STORAGE_KEY)
+    return stored && regionById(stored) ? stored : DEFAULT_REGION
+  }
+  catch {
+    // Private windows and cleared site data throw rather than return null.
+    // A missing preference is not an error.
+    return DEFAULT_REGION
+  }
+}
+
+/** Remember a region. Returns false when the choice could not be kept. */
+export function writeRegion(id: string): boolean {
+  if (!regionById(id))
+    return false
+  try {
+    globalThis.localStorage?.setItem(STORAGE_KEY, id)
+    return true
+  }
+  catch {
+    // The choice still applies to this session; it just will not outlive it.
+    return false
+  }
+}

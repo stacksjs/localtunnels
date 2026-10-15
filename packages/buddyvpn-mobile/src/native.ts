@@ -18,6 +18,7 @@ interface CraftBridge {
   navigation?: {
     push?: (screen: string, params?: Record<string, unknown>) => void
     back?: () => void
+    onAppear?: (callback: () => void) => () => void
   }
 }
 
@@ -126,6 +127,30 @@ export const navigation = {
     catch {
       // A screen that cannot be opened should not take the current one down.
     }
+  },
+  /**
+   * Run something each time this screen comes back to the front.
+   *
+   * A pushed screen does not replace the one beneath it — that screen stays
+   * mounted, so its setup does not run again when the stack pops back to it.
+   * Anything it read once at mount is stale from then on, which is how
+   * picking a different location changed nothing: the choice was saved, and
+   * the screen showing it had already read the old value.
+   *
+   * Returns an unsubscribe. Off a native host there is no stack and nothing
+   * to hear, so it is a no-op that still returns one, letting a caller
+   * dispose unconditionally.
+   */
+  onAppear(callback: () => void): () => void {
+    try {
+      const native = window.craft?.navigation?.onAppear
+      if (native)
+        return native.call(window.craft!.navigation, callback) ?? (() => {})
+    }
+    catch {
+      // A screen that cannot hear the event still has to render.
+    }
+    return () => {}
   },
   /** Return to the screen underneath. */
   back(): void {

@@ -13,7 +13,7 @@
  * bindings for the parts that do change — whether a tunnel is up, and whether
  * a region has a server behind it.
  */
-import { REGIONS } from '../src/regions'
+import { REGIONS, writeRegion } from '../src/regions'
 </script>
 
 <script client>
@@ -34,12 +34,7 @@ const choose = (id: string) => {
   const region = REGIONS.find(entry => entry.id === id)
   if (!region?.exitIp) return
   haptics.selection()
-  try {
-    window.localStorage?.setItem('buddyvpn.region', id)
-  }
-  catch {
-    // The choice still applies to this session; it just will not outlive it.
-  }
+  writeRegion(id)
   navigation.back()
 }
 </script>

@@ -1,32 +1,31 @@
 <script client>
 import { haptics, navigation, whenNativeHost } from '../src/native'
-import { DEFAULT_REGION, regionById } from '../src/regions'
+import { readRegion, regionById } from '../src/regions'
 import { formatUptime, tunnel } from '../src/tunnel'
 
-// The chosen location outlives a screen, so it is read back rather than
-// defaulted on every mount — otherwise walking to the picker and back would
-// silently reset it.
-const stored = (() => {
-  try {
-    return window.localStorage?.getItem('buddyvpn.region')
-  }
-  catch {
-    // Private windows and cleared site data both throw rather than return
-    // null. A missing preference is not an error.
-    return null
-  }
-})()
+const region = state(readRegion())
 
-const region = state(regionById(stored) ? stored : DEFAULT_REGION)
 const snapshot = state(tunnel.snapshot())
 const native = state(false)
 
 onMount(() => {
   const stop = tunnel.subscribe(next => snapshot.set(next))
+  /*
+   * Re-read the choice each time this screen comes back to the front.
+   *
+   * Pushing the picker does not unmount this screen, so its setup does not
+   * run again when the stack pops back — the region read at mount would stay
+   * whatever it was when the app started, and picking a different location
+   * would change the stored value and nothing on screen.
+   */
+  const unwatch = navigation.onAppear(() => region.set(readRegion()))
   // Asked here rather than at setup: Craft installs its bridge after the
   // document starts, so the answer at setup is "no" even on a phone.
   void whenNativeHost().then(value => native.set(value))
-  return stop
+  return () => {
+    unwatch()
+    stop()
+  }
 })
 
 const here = () => regionById(region()) 
