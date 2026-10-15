@@ -18,7 +18,7 @@ import { REGIONS } from '../src/regions'
 
 <script client>
 import { haptics, navigation } from '../src/native'
-import { REGIONS } from '../src/regions'
+import { REGIONS, writeRegion } from '../src/regions'
 import { tunnel } from '../src/tunnel'
 
 const snapshot = state(tunnel.snapshot())
@@ -47,25 +47,20 @@ const choose = (id: string) => {
   if (!region?.exitIp) return
   haptics.selection()
   /*
-   * Written here rather than through `writeRegion` in regions.ts, which
-   * cannot be reached from this screen.
+   * The tap that once did nothing at all.
    *
-   * A named import used only inside a handler does not survive into the
-   * compiled setup: `writeRegion` was `undefined` at the tap and threw
-   * `ReferenceError: Can't find variable: writeRegion`, which the event
-   * dispatcher swallows — the row did nothing, with no error anywhere.
-   * Referencing it at the top level instead moves the same failure to setup
-   * and blanks the screen. `REGIONS` from the same module resolves fine,
-   * because the template uses it and that keeps it in the bundle.
+   * The row saved no choice and went nowhere, and `writeRegion` was
+   * `undefined` when the handler reached it — a `ReferenceError` the event
+   * dispatcher swallows, so there was no error anywhere to find. The cause
+   * was never established; this exact code now compiles into the setup
+   * (`writeRegion` is in the bundle's binding map) and works on a device.
    *
-   * The key is duplicated from regions.ts, which is the cost of this.
+   * What is worth keeping from it: a handler that throws fails in complete
+   * silence, so a control that does nothing is the symptom of an exception
+   * you will never be shown. Log either side of a statement rather than
+   * trusting that a clean compile means a bound name.
    */
-  try {
-    window.localStorage?.setItem('buddyvpn.region', id)
-  }
-  catch {
-    // The choice still applies to this session; it just will not outlive it.
-  }
+  writeRegion(id)
   navigation.back()
 }
 </script>
