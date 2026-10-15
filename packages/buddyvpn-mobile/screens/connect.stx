@@ -62,147 +62,120 @@ const toggle = () => {
 </script>
 
 <!--
-  Styling is utility classes, not a stylesheet.
-
-  A native screen has no CSS: the renderer compiles the class list into Yoga
-  styles through its own Tailwind-shaped mapping, and a class it does not
-  recognise is dropped in silence. `app.css` therefore styled nothing here —
-  which is why this screen first rendered as unstyled text with no button
-  visible, and why nothing warned about it.
-
-  `dark:` is the one variant that survives, because the host knows the
-  appearance. Hover, focus and breakpoints have no meaning on a phone and are
-  discarded.
+  Native primitives by name, not HTML tags that happen to map.
+  
+  `<view>`, `<text>`, `<scrollview>` and `<icon>` are stx's native components;
+  `<a>` is the one exception kept, because it is what maps to TouchableOpacity
+  — a container that holds children and takes a tap, which a native Button
+  cannot do.
+  
+  This replaces markup that rendered as native views arranged like a web page:
+  `<header>` maps to SafeAreaView and was being used mid-screen, text sat where
+  iOS uses a glyph, and the rows were loose cards rather than a grouped list.
+  
+  Styling is the class list, which the renderer compiles into Yoga styles.
+  `dark:` survives; hover, focus and breakpoints do not.
 -->
-<div class="flex flex-1 flex-col gap-4 bg-gray-100 px-5 pb-5 dark:bg-black" :data-phase="phase()">
-  <!--
-    Said at the top, permanently, and not as a dismissible notice.
-
-    This build has no Network Extension entitlement, so there is no tunnel
-    behind the button — it walks the states and moves nothing. The desktop app
-    shipped a demo mode once and the whole risk it carried was somebody
-    believing it, so this is the first thing on the screen rather than a
-    footnote under the fold.
-  -->
-  @if(snapshot().simulated)
-    <p
-      class="mt-3 rounded-xl border border-orange-300 bg-orange-100 p-3 text-center text-xs text-orange-700 dark:border-orange-700 dark:bg-orange-950 dark:text-orange-300"
-      role="status"
-    >
-      Simulated — this build has no VPN entitlement, so nothing is routed.
-    </p>
-  @endif
-
-  <header class="items-center pt-4">
+<view class="flex-1 bg-gray-100 dark:bg-black">
+  <scrollview class="flex-1 px-4">
     <!--
-      The colour is a bound class, not an attribute a stylesheet would have
-      read: `data-tone` selects nothing when there is no CSS. The runtime
-      recompiles this class list when the expression changes.
+      Said at the top, permanently, and not as a dismissible notice. This
+      build has no Network Extension entitlement, so there is no tunnel behind
+      the control — it walks the states and moves nothing. The desktop app
+      shipped a demo mode once and the whole risk it carried was somebody
+      believing it.
     -->
-    <h1
-      class="text-2xl font-bold text-gray-900 dark:text-gray-50"
-      :class="connected() ? 'text-2xl font-bold text-green-700 dark:text-green-400' : 'text-2xl font-bold text-gray-900 dark:text-gray-50'"
-      :text="statusLabel()"
-    ></h1>
+    @if(snapshot().simulated)
+      <view class="mt-3 flex-row items-center gap-2 rounded-2xl border border-orange-300 bg-orange-100 p-3 dark:border-orange-700 dark:bg-orange-950">
+        <icon class="i-lucide-triangle-alert shrink-0 text-base text-orange-700 dark:text-orange-300"></icon>
+        <text class="flex-1 text-xs text-orange-700 dark:text-orange-300">
+          Simulated — this build has no VPN entitlement, so nothing is routed.
+        </text>
+      </view>
+    @endif
+
+    <view class="items-center pt-8">
+      <!--
+        A bound class rather than a `data-tone` attribute: there is no CSS to
+        read an attribute, and the host recompiles this class list when the
+        expression changes.
+      -->
+      <text
+        class="text-3xl font-bold text-gray-900 dark:text-gray-50"
+        :class="connected() ? 'text-3xl font-bold text-green-700 dark:text-green-400' : 'text-3xl font-bold text-gray-900 dark:text-gray-50'"
+        :text="statusLabel()"
+      ></text>
+      @if(connected())
+        <text class="pt-1 text-base text-gray-500 dark:text-gray-400" :text="formatUptime(snapshot().uptimeSeconds)"></text>
+      @endif
+    </view>
+
+    <!--
+      Where the traffic would leave from. The desktop app asks the internet
+      what address it sees, which is evidence; the phone has no tunnel to ask
+      through, so this is the location's claim and is worded as one.
+    -->
     @if(connected())
-      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400" :text="formatUptime(snapshot().uptimeSeconds)"></p>
+      <view class="items-center gap-1 pt-4">
+        <text class="text-xs uppercase tracking-wide text-gray-400">Would leave from</text>
+        <text class="text-sm font-medium text-gray-900 dark:text-gray-100" :text="here()?.city"></text>
+        <text class="text-xs text-gray-500 dark:text-gray-400" :text="here()?.exitIp"></text>
+      </view>
     @endif
-  </header>
 
-  <!--
-    Where the traffic would leave from. The desktop app asks the internet what
-    address it sees, which is evidence; the phone has no tunnel to ask
-    through, so this is the location's claim and is worded as one.
-  -->
-  @if(connected())
-    <div class="items-center gap-1">
-      <span class="text-xs font-semibold uppercase text-gray-400">Would leave from</span>
-      <span class="text-sm font-medium text-gray-900 dark:text-gray-100" :text="here()?.city"></span>
-      <span class="text-xs text-gray-500 dark:text-gray-400" :text="here()?.exitIp"></span>
-    </div>
-  @endif
+    <view class="items-center justify-center gap-5 py-12">
+      <!--
+        A circle holding an SF Symbol. The symbol is most of what makes this
+        read as an iOS control rather than a styled div: `i-lucide-shield`
+        resolves to the system `shield` glyph, and swapping the class swaps the
+        glyph, because the host re-resolves it when the class list changes.
+      -->
+      <a
+        class="h-44 w-44 items-center justify-center rounded-full bg-blue-600"
+        :class="!deployed() ? 'h-44 w-44 items-center justify-center rounded-full bg-gray-300 dark:bg-gray-700' : busy() ? 'h-44 w-44 items-center justify-center rounded-full bg-gray-400' : connected() ? 'h-44 w-44 items-center justify-center rounded-full bg-red-600' : 'h-44 w-44 items-center justify-center rounded-full bg-blue-600'"
+        :aria-label="connected() ? 'Disconnect' : 'Connect'"
+        @click="toggle"
+      >
+        <icon
+          class="i-lucide-shield text-6xl text-white"
+          :class="connected() ? 'i-lucide-shield-check text-6xl text-white' : 'i-lucide-shield text-6xl text-white'"
+        ></icon>
+      </a>
 
-  <div class="flex flex-1 flex-col items-center justify-center gap-4">
-    <!--
-      The button is markup here rather than a component.
-
-      A component's props are evaluated once, server-side, while the page is
-      rendered — `phase="{{ phase() }}"` reaches it as the empty string and
-      never changes again. Anything that has to react must read the screen's
-      own signals, and a component file that silently depends on its caller's
-      scope is harder to trust than the markup being where its state is.
-
-      It says what pressing it does rather than what the state is: the label
-      above already reads "Connected", so a power glyph on a live connection
-      would leave the only question this control answers unanswered.
-    -->
-    <button
-      type="button"
-      class="h-48 w-48 items-center justify-center rounded-full bg-blue-600 text-white"
-      :class="!deployed() ? 'h-48 w-48 items-center justify-center rounded-full bg-gray-300 text-white dark:bg-gray-700' : busy() ? 'h-48 w-48 items-center justify-center rounded-full bg-gray-400 text-white' : connected() ? 'h-48 w-48 items-center justify-center rounded-full bg-red-600 text-white' : 'h-48 w-48 items-center justify-center rounded-full bg-blue-600 text-white'"
-      :aria-busy="busy() ? 'true' : 'false'"
-      :aria-label="connected() ? 'Disconnect' : 'Connect'"
-      @click="toggle"
-      :title="connected() ? 'Stop' : 'Start'"
-    ></button>
+      @if(!deployed())
+        <text class="text-center text-sm text-gray-500 dark:text-gray-400" :text="`No server in ${here()?.country ?? 'this location'} yet`"></text>
+      @endif
+      @if(deployed())
+        <text class="text-center text-sm text-gray-500 dark:text-gray-400" :text="connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}`"></text>
+      @endif
+    </view>
 
     <!--
-      Two complementary conditions, not an `@if`/`@else`.
+      An inset grouped list: a section header above a rounded block of rows.
+      That shape is what iOS uses for settings, and it is the difference
+      between a row you can open and a card sitting on a page.
 
-      An `@else` in this position compiles, renders nothing, and takes the
-      whole screen down with it at runtime:
-
-        [stx] effect error (the effect is disposed):
-        undefined is not an object (evaluating 'D.__stx_detached_if')
-
-      The screen went blank — not the missing caption it was meant to fix.
-
-      Two elements under the condition, not two spans inside one paragraph.
-      A `<p>` becomes a Text node, and inline children of a Text node are
-      flattened into its own words — the binding goes with the structure, so
-      the caption rendered as nothing at all.
+      Locked while a tunnel is up, for the same reason the desktop app locks
+      it: changing location mid-connection is a disconnect and a fresh
+      handshake, and a row that silently means that is a row that lies.
     -->
-    @if(!deployed())
-      <p class="text-center text-sm text-gray-500 dark:text-gray-400" :text="`No server in ${here()?.country ?? 'this location'} yet`"></p>
+    <text class="px-1 pb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Location</text>
+    <view class="overflow-hidden rounded-2xl bg-white dark:bg-gray-900">
+      <a
+        class="flex-row items-center gap-3 px-4 py-3"
+        :class="connected() ? 'flex-row items-center gap-3 px-4 py-3 opacity-50' : 'flex-row items-center gap-3 px-4 py-3'"
+        :aria-disabled="connected() ? 'true' : 'false'"
+        @click="openLocations"
+      >
+        <icon class="i-lucide-map-pin shrink-0 text-base text-gray-400"></icon>
+        <text class="shrink-0 text-base text-gray-900 dark:text-gray-100" :text="here()?.country"></text>
+        <text class="flex-1 text-right text-sm text-gray-500 dark:text-gray-400" :text="here()?.city"></text>
+        <icon class="i-lucide-chevron-right shrink-0 text-base text-gray-400"></icon>
+      </a>
+    </view>
+
+    @if(native())
+      <text class="py-6 text-center text-xs text-gray-400">Running in a native shell.</text>
     @endif
-    @if(deployed())
-      <p class="text-center text-sm text-gray-500 dark:text-gray-400" :text="connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}`"></p>
-    @endif
-  </div>
-
-  <!-- Locked while a tunnel is up, for the same reason the desktop app locks
-       it: changing location mid-connection is a disconnect and a fresh
-       handshake, and a row that silently means that is a row that lies. -->
-  <!--
-    A tappable container with a handler, which is two fixes in one place.
-
-    `<StxLink to="/locations">` rendered its contents and did nothing when
-    tapped: a native screen is not a page, and nothing reads an href. A
-    `<button>` is the opposite trap — it becomes a native Button, which takes
-    its label from `title` and drops its children, so the row went blank.
-
-    `<a>` maps to a TouchableOpacity: it keeps what is inside it and it
-    accepts the tap. The handler pushes the route by name.
-  -->
-  <a
-    class="flex flex-row items-center gap-3 rounded-xl bg-white p-4 dark:bg-gray-900"
-    :aria-disabled="connected() ? 'true' : 'false'"
-    @click="openLocations"
-  >
-    <span class="text-xl" :text="here()?.badge"></span>
-    <!--
-      One level of spans, not two. Inline elements nested inside another are
-      flattened into their parent's text — the compiler says so as
-      `flattened-text` — and the bindings inside them are lost with the
-      structure. That is why the country and city were missing while the badge
-      beside them rendered.
-    -->
-    <span class="flex-1 text-xs font-semibold uppercase text-gray-400" :text="connected() ? 'Location · disconnect to change' : 'Location'"></span>
-    <span class="text-base font-medium text-gray-900 dark:text-gray-100" :text="here()?.country"></span>
-    <span class="text-sm text-gray-500 dark:text-gray-400" :text="here()?.city"></span>
-  </a>
-
-  @if(native())
-    <p class="text-center text-xs text-gray-400">Running in a native shell.</p>
-  @endif
-</div>
+  </scrollview>
+</view>
