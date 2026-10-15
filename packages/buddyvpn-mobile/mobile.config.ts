@@ -76,9 +76,20 @@ const config: MobileConfig = {
     urlSchemes: ['buddyvpn'],
     appearance: 'system',
     capabilities: {
-      // Off until the entitlement exists. Declaring a capability the build
-      // cannot satisfy produces an Info.plist promising a permission the app
-      // can never ask for.
+      /*
+       * Off until the entitlement exists, and this is the switch for it.
+       *
+       * On, `build:ios` emits a second target — the packet tunnel provider,
+       * its Info.plist, its entitlements, and the App Group the two
+       * processes share — and embeds it in the app. Off, the project is a
+       * single app target and nothing below is written.
+       *
+       * It stays off because entitlements a provisioning profile does not
+       * carry do not sign: with this on, a device build or an archive fails
+       * outright. Simulator builds are unaffected either way, which is how
+       * the emitted target was checked. Turn it on when Apple grants
+       * com.apple.developer.networking.networkextension.
+       */
       networkExtension: false,
       haptics: true,
       secureStorage: true,

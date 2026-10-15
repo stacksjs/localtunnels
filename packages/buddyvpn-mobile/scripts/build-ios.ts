@@ -22,6 +22,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { build, init } from 'craft-native/ios'
 import config from '../mobile.config'
+import { emitTunnelExtension, planTunnel, removeTunnelExtension } from './ios-tunnel-extension'
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(PACKAGE_DIR, 'ios')
@@ -121,6 +122,43 @@ try {
   if (!existsSync(join(OUT_DIR, 'project.yml'))) {
     console.log(`[mobile] initialising ${ios.appName} (${ios.bundleId})`)
     await init({ name: ios.appName, bundleId: ios.bundleId, output: OUT_DIR, config: craft })
+  }
+
+  /*
+   * The tunnel's own target, added between `init` and `build`.
+   *
+   * `init` writes project.yml and `build` runs xcodegen over it, so this is
+   * the one point where the project can be changed and still be generated
+   * from. Craft produces a single app target; a VPN needs a second process,
+   * and Craft has no notion of one.
+   *
+   * Off by default, and that is not timidity: entitlements a provisioning
+   * profile does not carry fail to sign, so emitting this before Apple grants
+   * the Network Extension entitlement would break every build — including the
+   * simulator builds the screens are checked in.
+   */
+  const plan = planTunnel(ios.appName, ios.bundleId)
+  if (ios.capabilities.networkExtension) {
+    const written = emitTunnelExtension(OUT_DIR, plan)
+    console.log(`[mobile] tunnel extension: ${plan.tunnelBundleId}, sharing ${plan.appGroup}`)
+    for (const file of written)
+      console.log(`[mobile]   ${file}`)
+  }
+  else {
+    /*
+     * Removed, not merely skipped.
+     *
+     * `init` runs once and project.yml persists, so a project generated
+     * while the capability was on would keep its extension — and, worse,
+     * keep the entitlement in Craft.entitlements, which fails to sign
+     * against a profile that does not carry it. Turning the capability off
+     * has to actually take it back out.
+     */
+    const removed = removeTunnelExtension(OUT_DIR, plan)
+    if (removed.length)
+      console.log(`[mobile] removed the tunnel extension (capabilities.networkExtension is off): ${removed.join(', ')}`)
+    else
+      console.log('[mobile] no tunnel extension: capabilities.networkExtension is off, so the app has no VPN target')
   }
 
   await build({ nativeBundlePath: BUNDLE, output: OUT_DIR, generateProject: true })
