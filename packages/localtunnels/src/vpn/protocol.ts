@@ -93,6 +93,25 @@ export interface PunchSignalMessage {
   endpoint: Endpoint
 }
 
+/**
+ * The coordinator's answer to a heartbeat, and the only thing that proves a
+ * session is still live.
+ *
+ * A node that stops heartbeating is dropped from the directory, and the exit
+ * node then withdraws the route to its tunnel address. Nothing about that
+ * reaches the dropped node: its WebSocket is still `OPEN`, its handshakes
+ * still succeed, and its interface is still up, so it goes on reporting a
+ * healthy tunnel that carries traffic one way. An answer the client can miss
+ * is what makes the silence observable.
+ *
+ * An echo rather than a new verb, because the two message unions are
+ * directional and this is a pong. A client built before this ignores it:
+ * `parseMessage` keeps it and the switch has no case for it.
+ */
+export interface HeartbeatAckMessage {
+  t: 'heartbeat'
+}
+
 /** A relayed frame delivered from peer `from`. */
 export interface RelayDeliveryMessage {
   t: 'relay'
@@ -100,7 +119,7 @@ export interface RelayDeliveryMessage {
   data: string
 }
 
-export type ServerMessage = RegisteredMessage | PeersMessage | ErrorMessage | PunchSignalMessage | RelayDeliveryMessage
+export type ServerMessage = RegisteredMessage | PeersMessage | ErrorMessage | PunchSignalMessage | RelayDeliveryMessage | HeartbeatAckMessage
 
 /** Parse a JSON frame into a known message, or return null if malformed. */
 export function parseMessage<T>(raw: string): T | null {

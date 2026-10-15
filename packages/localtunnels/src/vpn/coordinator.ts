@@ -180,6 +180,17 @@ export class VpnCoordinator {
         break
       }
       case 'heartbeat':
+        /*
+         * Answered, not just tolerated.
+         *
+         * The heartbeat keeps this node in the directory; the answer is how
+         * the node learns it is still in it. Without one, a client whose
+         * heartbeats never arrive — a kill switch blocking the port, a dead
+         * path, a wedged send queue — looks identical to a client whose
+         * heartbeats arrive fine, right up until the exit stops routing to
+         * it. Silence is only evidence if something was expected.
+         */
+        send(ws, { t: 'heartbeat' })
         break
       case 'punch': {
         if (!ws.data.publicKey)
