@@ -136,10 +136,24 @@ const toggle = () => {
         :aria-label="connected() ? 'Disconnect' : 'Connect'"
         @click="toggle"
       >
-        <icon
-          class="i-lucide-shield text-6xl text-white"
-          :class="connected() ? 'i-lucide-shield-check text-6xl text-white' : 'i-lucide-shield text-6xl text-white'"
-        ></icon>
+        <!--
+          Two elements, not one with a bound class.
+
+          A `:class` that swaps `i-lucide-shield` for `i-lucide-shield-check`
+          changes nothing on screen: the symbol is resolved from the class
+          list, but a bound class change re-applies colour and size without
+          re-resolving the glyph. It compiled, it bound, and the shield simply
+          never became a checkmark — visible only by looking at the device.
+
+          Complementary conditions rather than `@if`/`@else`, which blanks the
+          screen at hydration on this renderer.
+        -->
+        @if(connected())
+          <icon class="i-lucide-shield-check text-6xl text-white"></icon>
+        @endif
+        @if(!connected())
+          <icon class="i-lucide-shield text-6xl text-white"></icon>
+        @endif
       </a>
 
       @if(!deployed())
