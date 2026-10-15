@@ -54,7 +54,13 @@ export interface MobileConfig {
      *  be turned off when the network is broken. */
     webAssets: string
     deploymentTarget: string
-    orientations: Array<'portrait' | 'landscape'>
+    /**
+     * Craft's own spelling, not a simplification of it. `landscape` is not a
+     * value it accepts — iOS distinguishes the two landscape orientations and
+     * so does the generated Info.plist — and a config that offered it would
+     * have produced a project rejecting a value this file called valid.
+     */
+    orientations: Array<'portrait' | 'portrait-upside-down' | 'landscape-left' | 'landscape-right'>
     urlSchemes: string[]
     /** Follow the phone, rather than pinning a theme the user did not pick. */
     appearance: 'system' | 'light' | 'dark'

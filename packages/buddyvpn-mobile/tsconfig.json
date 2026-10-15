@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // The root's lib is esnext alone, which is right for a server package and
+    // wrong for this one: these screens are written against `window`,
+    // `localStorage` and `setInterval`. That mismatch is why this package was
+    // outside the typechecked program entirely — not a decision, a gap.
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "mobile.config.ts"],
+  "exclude": ["ios/**", "dist/**", "node_modules/**"]
+}
