@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // As with the mobile package: the root's lib is esnext alone, and this
+    // one draws a window and talks to a loopback agent.
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules/**", "dist/**", "build/**"]
+}
