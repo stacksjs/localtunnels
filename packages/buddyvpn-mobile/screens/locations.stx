@@ -13,7 +13,7 @@
  * bindings for the parts that do change — whether a tunnel is up, and whether
  * a region has a server behind it.
  */
-import { REGIONS, writeRegion } from '../src/regions'
+import { REGIONS } from '../src/regions'
 </script>
 
 <script client>
@@ -34,7 +34,26 @@ const choose = (id: string) => {
   const region = REGIONS.find(entry => entry.id === id)
   if (!region?.exitIp) return
   haptics.selection()
-  writeRegion(id)
+  /*
+   * Written here rather than through `writeRegion` in regions.ts, which
+   * cannot be reached from this screen.
+   *
+   * A named import used only inside a handler does not survive into the
+   * compiled setup: `writeRegion` was `undefined` at the tap and threw
+   * `ReferenceError: Can't find variable: writeRegion`, which the event
+   * dispatcher swallows — the row did nothing, with no error anywhere.
+   * Referencing it at the top level instead moves the same failure to setup
+   * and blanks the screen. `REGIONS` from the same module resolves fine,
+   * because the template uses it and that keeps it in the bundle.
+   *
+   * The key is duplicated from regions.ts, which is the cost of this.
+   */
+  try {
+    window.localStorage?.setItem('buddyvpn.region', id)
+  }
+  catch {
+    // The choice still applies to this session; it just will not outlive it.
+  }
   navigation.back()
 }
 </script>
