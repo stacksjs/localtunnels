@@ -13,7 +13,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import process from 'node:process'
 import { DEFAULT_REGION, REGIONS } from './regions'
-import { connect, connectionPid, connectionUptime, disconnect, readServers } from './vpn/control'
+import { connect, connectionPid, connectionUptime, coordinatorHealth, disconnect, readServers } from './vpn/control'
 import { version } from '../package.json'
 import { DNS_LABELS } from './dns'
 import { loginItemEnabled, setLoginItem } from './login-item'
@@ -93,6 +93,7 @@ function status(refresh: boolean): Response {
   const servers = readServers()
   const tunnels = readTunnels()
   const managedPid = connectionPid()
+  const connected = tunnels.some(tunnel => tunnel.localtunnelsRange)
 
   return json({
     success: true,
@@ -100,7 +101,20 @@ function status(refresh: boolean): Response {
     core,
     identity: readIdentity(),
     tunnels,
-    connected: tunnels.some(tunnel => tunnel.localtunnelsRange),
+    connected,
+    /**
+     * Whether the coordinator is still hearing from this tunnel.
+     *
+     * `connected` above cannot answer this, and that is the whole point of
+     * it being separate: it is true whenever a utun with our range exists,
+     * which it is throughout the failure where this node has been dropped
+     * from the directory and the exit has withdrawn the route home. The
+     * interface is up, the handshakes succeed, and nothing comes back.
+     *
+     * Only asked while connected. A warning from the last run reported over
+     * a tunnel that is not even up would be noise.
+     */
+    coordinator: connected ? coordinatorHealth() : { reachable: true, detail: null },
     managedPid,
     /** How long the tunnel has been up. The window shows this as its clock. */
     uptimeSeconds: managedPid === null ? null : connectionUptime(managedPid),

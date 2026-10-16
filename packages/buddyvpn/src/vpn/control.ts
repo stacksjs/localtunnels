@@ -420,15 +420,16 @@ export function connect(regionId: string): ActionResult {
   return { success: true }
 }
 
-/** The most useful line the dead tunnel left behind, for the window to show. */
-function tunnelFailure(): string {
-  /*
-   * Both logs, newest content wins. The helper runs as root and writes to
-   * /var/log, while the fallback path writes into the user's own directory —
-   * reading only the second meant a helper-started tunnel could fail with a
-   * perfectly clear message on disk and the window would say nothing at all,
-   * which is what "waiting for authorization, then nothing happens" was.
-   */
+/**
+ * The tunnel's log, wherever it ended up.
+ *
+ * Both paths, newest content wins. The helper runs as root and writes to
+ * /var/log, while the fallback path writes into the user's own directory —
+ * reading only the second meant a helper-started tunnel could fail with a
+ * perfectly clear message on disk and the window would say nothing at all,
+ * which is what "waiting for authorization, then nothing happens" was.
+ */
+function tunnelLog(): string {
   let log = ''
   for (const candidate of [helperLogPath(), logFile()]) {
     try {
@@ -440,8 +441,65 @@ function tunnelFailure(): string {
       // Missing or unreadable; the other one may still have the answer.
     }
   }
+  return log
+}
 
-  const lines = log.split('\n').map(line => line.trim()).filter(Boolean)
+/** What the log says about the coordinator, for the run that is up now. */
+export interface CoordinatorHealth {
+  /** False once the tunnel has reported the coordinator silent. */
+  reachable: boolean
+  /** The warning as the tunnel wrote it, for the window to show. */
+  detail: string | null
+}
+
+/** Where one run's output begins. Printed once, when the interface comes up. */
+const RUN_START = /^\s*Interface:\s/
+const WENT_QUIET = /^!\s*coordinator silent/i
+const ANSWERING = /^\u2713\s*coordinator answering again/i
+
+/**
+ * Whether this tunnel is still being heard by its coordinator.
+ *
+ * The gap this closes: `connected` is true whenever a utun with our range
+ * exists, and it stays true through the whole one-way-tunnel failure — the
+ * interface is up, the handshakes succeed, and the route home has been
+ * withdrawn. The window said Connected for the entire thing. The tunnel
+ * itself now notices and writes a warning; this is the window reading it.
+ *
+ * Only the current run is considered. The log accumulates across connects,
+ * and a warning from a previous one reported against a healthy tunnel would
+ * be worse than saying nothing — it is the same mistake as tailing a log
+ * that still held a failed run's output.
+ */
+export function readCoordinatorHealth(log: string): CoordinatorHealth {
+  const lines = log.split('\n').map(line => line.trim())
+
+  let start = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (RUN_START.test(lines[i])) {
+      start = i
+      break
+    }
+  }
+
+  // Backwards from the end: whichever came last is the current state.
+  for (let i = lines.length - 1; i >= start; i--) {
+    if (ANSWERING.test(lines[i]))
+      return { reachable: true, detail: null }
+    if (WENT_QUIET.test(lines[i]))
+      return { reachable: false, detail: lines[i].replace(/^!\s*/, '') }
+  }
+  return { reachable: true, detail: null }
+}
+
+/** {@link readCoordinatorHealth} against whichever log this tunnel wrote. */
+export function coordinatorHealth(): CoordinatorHealth {
+  return readCoordinatorHealth(tunnelLog())
+}
+
+/** The most useful line the dead tunnel left behind, for the window to show. */
+function tunnelFailure(): string {
+  const lines = tunnelLog().split('\n').map(line => line.trim()).filter(Boolean)
   // Last first: a stack trace ends with the thing that actually went wrong.
   const blamed = [...lines].reverse().find(line => /error|fail|refus|denied|unable|cannot|can't/i.test(line))
   const detail = blamed ?? lines[lines.length - 1]
