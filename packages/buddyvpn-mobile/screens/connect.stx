@@ -1,6 +1,7 @@
 <script client>
 import { haptics, navigation, whenNativeHost } from '../src/native'
 import { readRegion, regionById } from '../src/regions'
+import { readSettings } from '../src/settings'
 import { formatUptime, tunnel } from '../src/tunnel'
 
 const region = state(readRegion())
@@ -22,6 +23,20 @@ onMount(() => {
    * would change the stored value and nothing on screen.
    */
   const unwatch = navigation.onAppear(() => region.set(readRegion()))
+
+  /*
+   * Connect on open, if that is what was asked for.
+   *
+   * Once per launch, not once per appearance: `onAppear` also fires when the
+   * picker pops back, and reconnecting because somebody looked at the
+   * location list and changed their mind is not what the setting says.
+   *
+   * Guarded on the tunnel being idle and the region having a server, for the
+   * same reason the button is — an automatic attempt that fails at the
+   * prompt is worse than one that was never made.
+   */
+  if (readSettings().autoConnect && phase() === 'idle' && deployed())
+    void tunnel.connect(region())
   // Asked here rather than at setup: Craft installs its bridge after the
   // document starts, so the answer at setup is "no" even on a phone.
   void whenNativeHost().then(value => native.set(value))

@@ -108,7 +108,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let exit = configuration?["exitIp"] as? String ?? "unspecified"
-        log.notice("start requested: region \(region, privacy: .public), exit \(exit, privacy: .public)")
+        // Logged rather than applied: the settings reach this process, and
+        // what is missing is the data path that would honour them.
+        let dns = (configuration?["dns"] as? [String] ?? []).joined(separator: ", ")
+        let allowLan = configuration?["allowLan"] as? Bool ?? false
+        log.notice("start requested: region \(region, privacy: .public), exit \(exit, privacy: .public), dns [\(dns, privacy: .public)], lan \(allowLan, privacy: .public)")
 
         guard coreIsUsable() else {
             completionHandler(TunnelStartFailure.coreUnusable)

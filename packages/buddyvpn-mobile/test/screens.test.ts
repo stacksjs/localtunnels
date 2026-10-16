@@ -206,6 +206,14 @@ function applyOperation(root: Node, operation: any): void {
   if (!target)
     return
   const patch = operation.patch ?? {}
+  /*
+   * Bound text arrives here, not in the document. `:text="statusLabel()"`
+   * leaves the node empty at render and replaces its children at hydration,
+   * so a harness that ignored this would read every bound label as blank —
+   * which is most of the words on these screens.
+   */
+  if (patch.children)
+    target.children = patch.children
   if (patch.events)
     target.events = { ...target.events, ...patch.events }
   if (patch.props)
@@ -319,6 +327,19 @@ describe('the settings screen', () => {
 describe('the connect screen', () => {
   it('says it is simulated while it is', () => {
     expect(render('connect').text).toContain('Simulated')
+  })
+
+  /*
+   * The gap this closes: `autoConnect` was stored by the settings screen and
+   * read by nothing, so the switch changed the stored value and never the
+   * behaviour.
+   */
+  it('connects on open when that is what was asked for', () => {
+    const quiet = render('connect', settings({ autoConnect: false }))
+    expect(quiet.text).toContain('Not connected')
+
+    const eager = render('connect', settings({ autoConnect: true }))
+    expect(eager.text).toContain('Connecting')
   })
 
   it('can be left for either of the other screens', () => {

@@ -121,7 +121,12 @@ final class TunnelControl: NSObject {
                 log.error("connect request with no region")
                 return
             }
-            connect(region: region, exitIp: request["exitIp"] as? String)
+            connect(
+                region: region,
+                exitIp: request["exitIp"] as? String,
+                dns: request["dns"] as? [String] ?? [],
+                allowLan: request["allowLan"] as? Bool ?? false
+            )
         case "disconnect":
             disconnect()
         case let other:
@@ -129,7 +134,7 @@ final class TunnelControl: NSObject {
         }
     }
 
-    private func connect(region: String, exitIp: String?) {
+    private func connect(region: String, exitIp: String?, dns: [String], allowLan: Bool) {
         log.notice("connect requested: \(region, privacy: .public)")
 
         NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
@@ -145,9 +150,19 @@ final class TunnelControl: NSObject {
             // Shown in Settings → VPN. The address, when there is one, is
             // more use to a person than a region slug.
             proto.serverAddress = exitIp ?? region
+            /*
+             * Everything the provider needs, carried in one place.
+             *
+             * It is a separate process with its own bundle: it cannot read
+             * the app's settings, and a resolver named rather than addressed
+             * would mean keeping the preset list in a third copy. So the
+             * addresses travel, not the name.
+             */
             proto.providerConfiguration = [
                 "region": region,
                 "exitIp": exitIp ?? "",
+                "dns": dns,
+                "allowLan": allowLan,
             ]
             manager.protocolConfiguration = proto
             manager.localizedDescription = "BuddyVPN"
