@@ -14,6 +14,8 @@
  */
 import type { TunnelSnapshot } from '../src/tunnel'
 import { afterEach, describe, expect, it } from 'bun:test'
+import config from '../mobile.config'
+import { selectTunnel, StubTunnel, tunnel } from '../src/tunnel'
 import { NativeTunnel } from '../src/tunnel-native'
 
 interface FakeHost {
@@ -259,5 +261,49 @@ describe('subscriptions', () => {
     expect(second.seen[0].phase).toBe('connected')
     first.stop()
     second.stop()
+  })
+})
+
+/*
+ * The selector, which is what makes any of the above reachable at all.
+ *
+ * NativeTunnel was written, tested and then selected by nothing — the
+ * screens held a StubTunnel unconditionally. Tested code that cannot run is
+ * worse than no code, because it reads as working.
+ */
+describe('which tunnel the screens get', () => {
+  it('is the real one when the build shipped a provider', () => {
+    withHost()
+    expect(selectTunnel(true)).toBeInstanceOf(NativeTunnel)
+  })
+
+  it('is the stand-in when it did not', () => {
+    withHost()
+    expect(selectTunnel(false)).toBeInstanceOf(StubTunnel)
+  })
+
+  /*
+   * The one field a screen must never get wrong. A stub that claimed to be
+   * real would put a connection on screen that moves no packets, which is
+   * the demo mode this app was written against.
+   */
+  it('tells the truth about itself either way', () => {
+    withHost()
+    expect(selectTunnel(true).snapshot().simulated).toBe(false)
+    expect(selectTunnel(false).snapshot().simulated).toBe(true)
+    expect(selectTunnel(true).available()).toBe(true)
+    expect(selectTunnel(false).available()).toBe(false)
+  })
+
+  /*
+   * Today's answer, and it is deliberate: the entitlement does not exist, so
+   * the capability is off and the screens show a simulated tunnel that says
+   * it is simulated. This fails the day the flag flips, which is when
+   * someone should look at this file again.
+   */
+  it('is the stand-in today, because the capability is off', () => {
+    withHost()
+    expect(tunnel.snapshot().simulated).toBe(true)
+    expect(config.ios.capabilities.networkExtension).toBe(false)
   })
 })

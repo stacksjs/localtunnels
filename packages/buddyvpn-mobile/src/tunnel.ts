@@ -18,7 +18,9 @@
  * the risk it carried was someone believing it: `simulated` is on every
  * snapshot, and the screens say so where a person can read it.
  */
+import config from '../mobile.config'
 import { REGIONS } from './regions'
+import { NativeTunnel } from './tunnel-native'
 
 export type TunnelPhase = 'idle' | 'connecting' | 'connected' | 'disconnecting'
 
@@ -124,8 +126,36 @@ export class StubTunnel implements Tunnel {
   }
 }
 
-/** The tunnel the screens use. One per app. */
-export const tunnel: Tunnel = new StubTunnel()
+/**
+ * Which tunnel the screens get.
+ *
+ * The capability, not the host. It would seem more careful to ask whether
+ * there is a Craft bridge first, and it would be wrong twice over: the
+ * bridge is installed after the document starts, so the answer at module
+ * load is "no" even on a phone, and the question it answers is not the one
+ * that matters. What decides whether there is a tunnel to talk to is whether
+ * this build shipped a packet tunnel provider, and that is a build-time fact
+ * — the same flag `build:ios` reads when it decides whether to emit the
+ * extension at all. One switch, one answer, in both places.
+ *
+ * Off a host, `NativeTunnel` reports an idle tunnel and does nothing, which
+ * is the honest thing for a VPN screen opened in a browser: it cannot
+ * tunnel, and the stub's pretend connection would be a worse answer than no
+ * connection.
+ */
+export function selectTunnel(capable: boolean): Tunnel {
+  return capable ? new NativeTunnel() : new StubTunnel()
+}
+
+/**
+ * The tunnel the screens use. One per app.
+ *
+ * `StubTunnel` today, because the Network Extension entitlement does not
+ * exist yet and so the capability is off. That is not a placeholder left in
+ * by accident: `simulated` rides on every snapshot and the screens say so
+ * where a person can read it.
+ */
+export const tunnel: Tunnel = selectTunnel(config.ios.capabilities.networkExtension)
 
 /** `01:23:45`, or an empty string when nothing is running. */
 export function formatUptime(seconds: number | null): string {
