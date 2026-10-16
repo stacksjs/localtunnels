@@ -67,14 +67,19 @@ function withResolvedXcodegen(): void {
   const onPath = found.stdout.toString().trim()
   if (!onPath)
     return
+  const presets = (bin: string): string => join(dirname(bin), '..', 'share', 'xcodegen', 'SettingPresets')
+  // Already resolvable where it stands: a prefix whose share/ is linked
+  // beside its bin/ needs nothing from us, and saying otherwise would be a
+  // line of output that is simply false.
+  if (existsSync(presets(onPath)))
+    return
   const real = Bun.spawnSync(['readlink', '-f', onPath], { stdout: 'pipe' }).stdout.toString().trim()
   if (!real || real === onPath)
     return
-  const realDir = dirname(real)
-  if (!existsSync(join(realDir, '..', 'share', 'xcodegen', 'SettingPresets')))
+  if (!existsSync(presets(real)))
     return
   console.log(`[mobile] using ${real} directly — its presets do not resolve through the symlink on PATH`)
-  process.env.PATH = `${realDir}:${process.env.PATH ?? ''}`
+  process.env.PATH = `${dirname(real)}:${process.env.PATH ?? ''}`
 }
 
 withResolvedXcodegen()
