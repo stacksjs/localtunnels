@@ -93,6 +93,7 @@ const { ios } = config
 const nativeScreens: Record<string, string> = {
   '/': 'connect',
   '/locations': 'locations',
+  '/settings': 'settings',
 }
 
 const craft = {

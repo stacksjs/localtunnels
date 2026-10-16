@@ -55,6 +55,13 @@ const openLocations = () => {
   navigation.push('locations')
 }
 
+// Not locked while connected, unlike the location row: nothing on that
+// screen takes effect until the next connect, and it says so.
+const openSettings = () => {
+  haptics.selection()
+  navigation.push('settings')
+}
+
 const toggle = () => {
   if (busy() || !deployed()) return
   haptics.impact('medium')
@@ -186,6 +193,20 @@ const toggle = () => {
         <icon class="i-lucide-map-pin shrink-0 text-base text-gray-400"></icon>
         <text class="shrink-0 text-base text-gray-900 dark:text-gray-100" :text="here()?.country"></text>
         <text class="flex-1 text-right text-sm text-gray-500 dark:text-gray-400" :text="here()?.city"></text>
+        <icon class="i-lucide-chevron-right shrink-0 text-base text-gray-400"></icon>
+      </a>
+    </view>
+
+    <!--
+      Its own block rather than a second row under LOCATION, because that
+      header would then be describing one of the two rows beneath it. A
+      row that pushes a screen is the same control as the one above; only
+      the grouping differs.
+    -->
+    <view class="mt-4 overflow-hidden rounded-2xl bg-white dark:bg-gray-900">
+      <a class="flex-row items-center gap-3 px-4 py-3" @click="openSettings">
+        <icon class="i-lucide-settings shrink-0 text-base text-gray-400"></icon>
+        <text class="flex-1 text-base text-gray-900 dark:text-gray-100">Settings</text>
         <icon class="i-lucide-chevron-right shrink-0 text-base text-gray-400"></icon>
       </a>
     </view>
