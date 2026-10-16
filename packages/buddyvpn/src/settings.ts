@@ -52,34 +52,38 @@ export function settingsPath(): string {
 /**
  * Validate a parsed settings object field by field.
  *
- * Anything unrecognised falls back to the default rather than failing the
- * read. This file is hand-editable and two of its values reach a root
- * command, so "reject the bad field" has to beat "reject the file": a single
- * typo should not leave the app with no settings at all, and must never leave
- * it with a value nobody checked.
+ * Anything unrecognised falls back rather than failing the read. This file is
+ * hand-editable and two of its values reach a root command, so "reject the
+ * bad field" has to beat "reject the file": a single typo should not leave
+ * the app with no settings at all, and must never leave it with a value
+ * nobody checked.
+ *
+ * `fallback` is what an unrecognised field becomes. Reading a file uses the
+ * defaults; writing a patch passes the settings already in force, so a bad
+ * field in the patch drops without taking a good stored value with it.
  */
-export function parseSettings(parsed: unknown): Settings {
+export function parseSettings(parsed: unknown, fallback: Settings = DEFAULTS): Settings {
   if (!parsed || typeof parsed !== 'object')
-    return { ...DEFAULTS }
+    return { ...fallback }
   const raw = parsed as Record<string, unknown>
 
-  const bool = (value: unknown, fallback: boolean): boolean =>
-    typeof value === 'boolean' ? value : fallback
+  const bool = (value: unknown, previous: boolean): boolean =>
+    typeof value === 'boolean' ? value : previous
 
   const region = typeof raw.defaultRegion === 'string'
     && REGIONS.some(entry => entry.id === raw.defaultRegion)
     ? raw.defaultRegion
-    : DEFAULTS.defaultRegion
+    : fallback.defaultRegion
 
-  const dns = isDnsPreset(raw.dns) ? raw.dns : DEFAULTS.dns
+  const dns = isDnsPreset(raw.dns) ? raw.dns : fallback.dns
 
   return {
     defaultRegion: region,
-    autoConnect: bool(raw.autoConnect, DEFAULTS.autoConnect),
-    launchAtLogin: bool(raw.launchAtLogin, DEFAULTS.launchAtLogin),
-    allowLan: bool(raw.allowLan, DEFAULTS.allowLan),
+    autoConnect: bool(raw.autoConnect, fallback.autoConnect),
+    launchAtLogin: bool(raw.launchAtLogin, fallback.launchAtLogin),
+    allowLan: bool(raw.allowLan, fallback.allowLan),
     dns,
-    showLocation: bool(raw.showLocation, DEFAULTS.showLocation),
+    showLocation: bool(raw.showLocation, fallback.showLocation),
   }
 }
 
@@ -94,7 +98,21 @@ export function readSettings(): Settings {
 
 /** Write settings, returning what was actually stored after validation. */
 export function writeSettings(patch: Partial<Settings>): Settings {
-  const next = parseSettings({ ...readSettings(), ...patch })
+  const current = readSettings()
+  /*
+   * Validated against what is already in force, not against the defaults.
+   *
+   * The difference only shows on a bad field, and then it matters: someone
+   * who had chosen Quad9 and hit a patch carrying a resolver this build does
+   * not know would have had their choice replaced by Cloudflare — a setting
+   * silently changed to one they never picked, and a resolver is not a
+   * cosmetic preference. Falling back to the current value drops the bad
+   * field instead of the person's decision.
+   *
+   * `readSettings` still falls back to the defaults, which is right: that is
+   * the case where there is no decision to keep.
+   */
+  const next = parseSettings({ ...current, ...patch }, current)
   fs.mkdirSync(appSupportDir(), { recursive: true })
   fs.writeFileSync(settingsPath(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
   return next

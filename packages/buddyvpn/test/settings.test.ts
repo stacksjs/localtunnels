@@ -85,3 +85,46 @@ describe('loginItemPlist', () => {
     expect(loginItemPlist('/Users/a&b/BuddyVPN.app')).toContain('/Users/a&amp;b/BuddyVPN.app')
   })
 })
+
+/*
+ * What an unrecognised field becomes.
+ *
+ * Reading a file has no decision to keep, so it falls back to the defaults.
+ * Writing a patch does: the settings already in force are the fallback, and
+ * a bad field in the patch drops without taking a good stored value with it.
+ *
+ * The bug this closes: `writeSettings` validated the merged object against
+ * the defaults, so a patch carrying a resolver this build does not know
+ * replaced a chosen Quad9 with Cloudflare. A resolver is not a cosmetic
+ * preference, and a setting silently changed to one nobody picked is worse
+ * than a patch that does nothing.
+ */
+describe('what a bad field falls back to', () => {
+  const inForce = { ...DEFAULTS, dns: 'quad9' as const, allowLan: true, defaultRegion: DEFAULTS.defaultRegion }
+
+  it('is the defaults when there is nothing in force', () => {
+    expect(parseSettings({ dns: 'attacker' }).dns).toBe(DEFAULTS.dns)
+  })
+
+  it('is the settings in force when there are some', () => {
+    const parsed = parseSettings({ ...inForce, dns: 'attacker' }, inForce)
+    expect(parsed.dns).toBe('quad9')
+  })
+
+  it('keeps every other field in force too', () => {
+    const parsed = parseSettings({ ...inForce, allowLan: 'yes', defaultRegion: 'atlantis' }, inForce)
+    expect(parsed.allowLan).toBe(true)
+    expect(parsed.defaultRegion).toBe(inForce.defaultRegion)
+  })
+
+  it('still takes a good field from the patch', () => {
+    const parsed = parseSettings({ ...inForce, autoConnect: true }, inForce)
+    expect(parsed.autoConnect).toBe(true)
+    expect(parsed.dns).toBe('quad9')
+  })
+
+  // An object that is not one at all leaves everything as it was.
+  it('leaves the settings in force alone for a non-object', () => {
+    expect(parseSettings(null, inForce)).toEqual(inForce)
+  })
+})
