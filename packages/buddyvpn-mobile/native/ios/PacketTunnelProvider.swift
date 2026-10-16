@@ -35,12 +35,18 @@
 //  says what is callable, and `startTunnel` below proves the link by asking
 //  the library its ABI version.
 //
-//  What is left is the data path, and it is all on this side: apply
-//  `NEPacketTunnelNetworkSettings` (addresses, routes, and the DNS the
-//  settings screen chose), open a UDP session to the exit, run
-//  `ltvpn_hs_create_initiation` against it, then read `packetFlow` and feed
-//  `ltvpn_session_encrypt` in one direction and `ltvpn_session_decrypt` in
-//  the other until `stopTunnel`.
+//  The data path is here too, in `TunnelSession`: given a session it
+//  encrypts what the system sends and delivers what comes back, and
+//  `networkSettings` below describes the tunnel to iOS, DNS and the LAN rule
+//  included.
+//
+//  What is missing is enrolment. A session needs a static keypair, the
+//  exit's public key and an address the exit will route to, and on the
+//  desktop all three come from the coordinator: the client registers over a
+//  WebSocket, is assigned an address, and reads the exit's key and endpoint
+//  from the directory. That protocol is TypeScript in
+//  `packages/localtunnels`, and an extension cannot run it — a Swift client
+//  for it is the next piece, and the larger one.
 //
 import NetworkExtension
 import os
@@ -49,8 +55,8 @@ import os
 enum TunnelStartFailure: LocalizedError {
     /// The app started the tunnel without saying where to.
     case noConfiguration
-    /// Everything arrived; there is simply no transport behind it yet.
-    case noDataPath(region: String)
+    /// Everything arrived; there is simply no peer to talk to yet.
+    case notEnrolled(region: String)
     /// The linked core is not the one this build was written against.
     case coreUnusable
 
@@ -58,9 +64,9 @@ enum TunnelStartFailure: LocalizedError {
         switch self {
         case .noConfiguration:
             return "This tunnel was started without a configuration, so there is no exit to connect to."
-        case let .noDataPath(region):
-            return "BuddyVPN has no packet transport yet, so the tunnel to \(region) cannot carry traffic. "
-                 + "The extension is in place and received its configuration; the data path is not implemented."
+        case let .notEnrolled(region):
+            return "BuddyVPN cannot reach \(region) yet: this build has no way to enrol with a coordinator, "
+                 + "so it has no key for the exit and no address of its own. The tunnel itself is in place."
         case .coreUnusable:
             return "BuddyVPN's encryption library is not the version this build expects."
         }
@@ -119,11 +125,79 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
-        // Deliberately not `setTunnelNetworkSettings`. Applying settings is
-        // what makes iOS show the VPN badge and route traffic here, and
-        // routing traffic into a provider that cannot forward it is a
-        // blackhole that looks like a working connection.
-        completionHandler(TunnelStartFailure.noDataPath(region: region))
+        /*
+         * Stopping here, one step short of a tunnel.
+         *
+         * `TunnelSession` below carries packets, and it is complete: given a
+         * session it encrypts what the system sends and delivers what comes
+         * back. What it cannot do is produce that session, and neither can
+         * anything else in this build.
+         *
+         * A session needs three things this extension has no way to obtain:
+         * a static keypair of its own, the exit's public key, and a tunnel
+         * address the exit will route to. On the desktop all three come from
+         * the coordinator — the client registers over a WebSocket, is
+         * assigned an address, and reads the exit's key and endpoint out of
+         * the directory it is then sent. None of that exists here: the
+         * coordinator protocol is TypeScript in `packages/localtunnels`, and
+         * an extension cannot run it.
+         *
+         * So this is where the work stops, and it stops *before*
+         * `setTunnelNetworkSettings`. Applying settings is what makes iOS
+         * show the VPN badge and route traffic into this process, and
+         * routing traffic into a provider that cannot forward it is a
+         * blackhole that looks exactly like a working connection.
+         */
+        completionHandler(TunnelStartFailure.notEnrolled(region: region))
+    }
+
+    /**
+     How this tunnel would be described to iOS.
+
+     Unused until there is a session to describe, and written now because
+     every value in it is already decided: the resolvers the settings screen
+     chose, the LAN rule, and a default route for everything else.
+
+     `includedRoutes` is the whole address space. This app has no
+     split-tunnel setting and says so on its settings screen — an app whose
+     purpose is to put your traffic somewhere else has no honest setting for
+     "but not really". `excludedRoutes` carries the local network only when
+     that was asked for, which is what makes a printer reachable while
+     everything else goes through the exit.
+     */
+    func networkSettings(address: String, exit: String, dns: [String], allowLan: Bool) -> NEPacketTunnelNetworkSettings {
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: exit)
+
+        let ipv4 = NEIPv4Settings(addresses: [address], subnetMasks: ["255.255.255.255"])
+        ipv4.includedRoutes = [NEIPv4Route.default()]
+        if allowLan {
+            ipv4.excludedRoutes = [
+                NEIPv4Route(destinationAddress: "10.0.0.0", subnetMask: "255.0.0.0"),
+                NEIPv4Route(destinationAddress: "172.16.0.0", subnetMask: "255.240.0.0"),
+                NEIPv4Route(destinationAddress: "192.168.0.0", subnetMask: "255.255.0.0"),
+                NEIPv4Route(destinationAddress: "169.254.0.0", subnetMask: "255.255.0.0"),
+            ]
+        }
+        settings.ipv4Settings = ipv4
+
+        if !dns.isEmpty {
+            let resolvers = NEDNSSettings(servers: dns)
+            // Every name, not just the ones with no better answer: a resolver
+            // that only sees some queries is a resolver that leaks the rest.
+            resolvers.matchDomains = [""]
+            settings.dnsSettings = resolvers
+        }
+
+        /*
+         * Room for the transport's own overhead.
+         *
+         * The encrypted packet is larger than the one handed over, and the
+         * difference has to come out of the MTU or every full-size packet is
+         * refused by `TunnelSession.send` as over the limit — which reads as
+         * a tunnel that carries small packets and drops large ones.
+         */
+        settings.mtu = NSNumber(value: 1280)
+        return settings
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {

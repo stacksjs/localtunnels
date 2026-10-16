@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'bun:test'
 import {
+  assertEveryNativeSourceIsClaimed,
   BRIDGE_DIR,
   CORE_FRAMEWORK,
   EXTENSION_POINT,
@@ -213,5 +214,22 @@ describe('turning it back off', () => {
     const craft = { 'keychain-access-groups': ['$(AppIdentifierPrefix)$(CFBundleIdentifier)'] }
     const stripped = withoutNetworkEntitlements(withNetworkEntitlements(craft, PLAN))
     expect(stripped).toEqual(craft)
+  })
+})
+
+/*
+ * The mistake this catches, which this package has now made in three
+ * different forms: something is written, it is correct, and nothing
+ * compiles or reaches it. A Swift file added to native/ios/ without being
+ * named in one of the source lists is simply not built — the build
+ * succeeds, the symbol is absent, and nothing says so until a call fails
+ * at runtime on a device, which is the worst place to find out.
+ *
+ * Asserted here as well as in the build so it fails in `bun test`, which
+ * runs far more often than `build:ios` does.
+ */
+describe('every native source belongs to a target', () => {
+  it('leaves nothing in native/ios unclaimed', () => {
+    expect(() => assertEveryNativeSourceIsClaimed()).not.toThrow()
   })
 })

@@ -21,13 +21,36 @@
  * unconditionally would break every build for the sake of a target nobody can
  * run yet.
  */
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { buildCore } from './build-core-ios'
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const NATIVE_DIR = join(PACKAGE_DIR, 'native', 'ios')
+
+/**
+ * Refuse to build while a native source belongs to no target.
+ *
+ * The lists above decide what is copied, and a file added to `native/ios/`
+ * without being named in one of them is simply not compiled — the build
+ * succeeds, the symbol is absent, and nothing says so until something calls
+ * it. That has now happened three times in this package in one form or
+ * another, so it is a build failure rather than a thing to remember.
+ */
+export function assertEveryNativeSourceIsClaimed(): void {
+  const claimed = new Set([...TUNNEL_SOURCES, ...BRIDGE_SOURCES, BRIDGING_HEADER])
+  const present = readdirSync(NATIVE_DIR).filter(name => /\.(?:swift|m|h)$/.test(name))
+  const orphans = present.filter(name => !claimed.has(name))
+  if (orphans.length > 0) {
+    throw new Error(
+      `native/ios/${orphans.join(', ')} belongs to no target. `
+      + `Add it to TUNNEL_SOURCES or BRIDGE_SOURCES in ${'scripts/ios-tunnel-extension.ts'}, `
+      + 'or it will not be compiled and nothing will say so.',
+    )
+  }
+}
 
 /** The suffix that turns the app's names into the extension's. */
 export const TUNNEL_SUFFIX = 'Tunnel'
@@ -44,6 +67,9 @@ export const BRIDGE_DIR = 'Bridge'
 
 /** The app-target sources copied from `native/ios/`, in build order. */
 const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m']
+
+/** The extension-target sources, likewise. */
+const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift']
 
 /** The protocol core, cross-compiled for iOS and linked into the provider. */
 export const CORE_FRAMEWORK = 'libltvpn.xcframework'
@@ -265,16 +291,18 @@ export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] 
 
   /** Copy one tracked source into a generated directory. */
   function copyNative(name: string, into: string): void {
-    const source = join(PACKAGE_DIR, 'native', 'ios', name)
+    const source = join(NATIVE_DIR, name)
     if (!existsSync(source))
       throw new Error(`the native source ${name} is missing at ${source}`)
     copyFileSync(source, join(into, name))
   }
 
-  copyNative('PacketTunnelProvider.swift', tunnelDir)
-  done.push(`${TUNNEL_SUFFIX}/PacketTunnelProvider.swift`)
-  copyNative(BRIDGING_HEADER, tunnelDir)
-  done.push(`${TUNNEL_SUFFIX}/${BRIDGING_HEADER}`)
+  assertEveryNativeSourceIsClaimed()
+
+  for (const file of [...TUNNEL_SOURCES, BRIDGING_HEADER]) {
+    copyNative(file, tunnelDir)
+    done.push(`${TUNNEL_SUFFIX}/${file}`)
+  }
 
   /*
    * The core, built before the project is generated rather than alongside it.
