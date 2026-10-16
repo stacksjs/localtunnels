@@ -21,9 +21,11 @@
  * unconditionally would break every build for the sake of a target nobody can
  * run yet.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { buildCore } from './build-core-ios'
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -42,6 +44,12 @@ export const BRIDGE_DIR = 'Bridge'
 
 /** The app-target sources copied from `native/ios/`, in build order. */
 const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m']
+
+/** The protocol core, cross-compiled for iOS and linked into the provider. */
+export const CORE_FRAMEWORK = 'libltvpn.xcframework'
+
+/** How Swift reaches the C the core exposes. */
+const BRIDGING_HEADER = 'Tunnel-Bridging-Header.h'
 
 /**
  * The extension point iOS starts a packet tunnel through. Not a name we
@@ -97,10 +105,21 @@ export function withTunnelTarget(project: any, plan: TunnelPlan): any {
     type: 'app-extension',
     platform: 'iOS',
     sources: [TUNNEL_SUFFIX],
+    /*
+     * The protocol core, as an XCFramework.
+     *
+     * `embed: false` because the slices hold static archives: the code is
+     * linked into the extension's binary, and an embedded copy would be a
+     * second one the loader never opens. A phone and a simulator are
+     * different platforms rather than different architectures, which is why
+     * this is a framework at all and not a single `.a`.
+     */
+    dependencies: [{ framework: CORE_FRAMEWORK, embed: false }],
     settings: {
       INFOPLIST_FILE: `${TUNNEL_SUFFIX}/Info.plist`,
       CODE_SIGN_ENTITLEMENTS: `${TUNNEL_SUFFIX}/${plan.tunnelTarget}.entitlements`,
       PRODUCT_BUNDLE_IDENTIFIER: plan.tunnelBundleId,
+      SWIFT_OBJC_BRIDGING_HEADER: `${TUNNEL_SUFFIX}/${BRIDGING_HEADER}`,
       // Spelled out rather than inherited. This is the setting whose absence
       // once produced an app bundle named `.app`, because xcodegen could not
       // find its SettingPresets through a symlinked bin directory.
@@ -254,6 +273,20 @@ export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] 
 
   copyNative('PacketTunnelProvider.swift', tunnelDir)
   done.push(`${TUNNEL_SUFFIX}/PacketTunnelProvider.swift`)
+  copyNative(BRIDGING_HEADER, tunnelDir)
+  done.push(`${TUNNEL_SUFFIX}/${BRIDGING_HEADER}`)
+
+  /*
+   * The core, built before the project is generated rather than alongside it.
+   * xcodegen resolves the framework path when it writes the project, so a
+   * framework that does not exist yet produces a project missing its only
+   * dependency — and an extension that compiles and cannot encrypt anything.
+   */
+  const framework = buildCore()
+  const installed = join(output, CORE_FRAMEWORK)
+  rmSync(installed, { recursive: true, force: true })
+  cpSync(framework, installed, { recursive: true })
+  done.push(CORE_FRAMEWORK)
 
   // The app's half: the manager that asks iOS for a tunnel, and the one hook
   // there is to start it from.
@@ -293,11 +326,11 @@ export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] 
 export function removeTunnelExtension(output: string, plan: TunnelPlan): string[] {
   const removed: string[] = []
 
-  for (const directory of [TUNNEL_SUFFIX, BRIDGE_DIR]) {
+  for (const directory of [TUNNEL_SUFFIX, BRIDGE_DIR, CORE_FRAMEWORK]) {
     const path = join(output, directory)
     if (existsSync(path)) {
       rmSync(path, { recursive: true, force: true })
-      removed.push(`${directory}/`)
+      removed.push(`${directory}${directory === CORE_FRAMEWORK ? '' : '/'}`)
     }
   }
 

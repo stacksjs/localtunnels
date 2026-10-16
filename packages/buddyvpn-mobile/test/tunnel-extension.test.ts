@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   BRIDGE_DIR,
+  CORE_FRAMEWORK,
   EXTENSION_POINT,
   planTunnel,
   tunnelEntitlements,
@@ -56,6 +57,24 @@ describe('the plan', () => {
 })
 
 describe('the project', () => {
+  /*
+   * The protocol core, cross-compiled for iOS. `embed: false` because the
+   * slices hold static archives — the code is linked into the extension's
+   * binary, and an embedded copy would be a second one nothing opens.
+   */
+  it('links the VPN core into the provider', () => {
+    const target = withTunnelTarget(craftProject(), PLAN).targets.BuddyVPNTunnel
+    expect(target.dependencies).toEqual([{ framework: CORE_FRAMEWORK, embed: false }])
+    expect(CORE_FRAMEWORK).toBe('libltvpn.xcframework')
+  })
+
+  // Swift reaches C through a bridging header, and without this setting the
+  // provider compiles until the first ltvpn_ call and then does not.
+  it('gives the provider a bridging header', () => {
+    const target = withTunnelTarget(craftProject(), PLAN).targets.BuddyVPNTunnel
+    expect(target.settings.SWIFT_OBJC_BRIDGING_HEADER).toBe('Tunnel/Tunnel-Bridging-Header.h')
+  })
+
   it('adds an app-extension target with its own entitlements and plist', () => {
     const target = withTunnelTarget(craftProject(), PLAN).targets.BuddyVPNTunnel
     expect(target.type).toBe('app-extension')
