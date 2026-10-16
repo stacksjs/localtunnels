@@ -51,6 +51,15 @@ export interface ConnectRequest {
   region: string
   /** Where the screens believe this region exits, for the provider to use. */
   exitIp: string | null
+  /**
+   * The resolvers to use while connected, as addresses rather than a preset
+   * name. The provider has no list to look a name up in — it is a separate
+   * process with its own bundle — and sending the name would mean keeping
+   * that list in a third place.
+   */
+  dns: string[]
+  /** Whether the local network stays reachable while the tunnel is up. */
+  allowLan: boolean
   nonce: string
 }
 

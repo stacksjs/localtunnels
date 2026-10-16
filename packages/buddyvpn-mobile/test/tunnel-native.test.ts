@@ -29,6 +29,13 @@ interface FakeHost {
 
 function withHost(options: { initial?: unknown, failWrites?: boolean } = {}): FakeHost {
   const writes: { key: string, value: any }[] = []
+  // The tunnel reads the stored settings when it builds a request, so the
+  // fake host needs somewhere for them to live.
+  const stored: Record<string, string> = {}
+  ;(globalThis as any).localStorage = {
+    getItem: (key: string) => stored[key] ?? null,
+    setItem: (key: string, value: string) => { stored[key] = value },
+  }
   let current: string | null = options.initial === undefined ? null : JSON.stringify(options.initial)
   const listeners = new Set<(name: string) => void>()
 
@@ -74,6 +81,7 @@ function watch(tunnel: NativeTunnel): { seen: TunnelSnapshot[], stop: () => void
 
 afterEach(() => {
   delete (globalThis as any).window
+  delete (globalThis as any).localStorage
 })
 
 describe('what it reports', () => {
@@ -166,12 +174,50 @@ describe('what it asks for', () => {
   it('leaves a connect request the other process can find', async () => {
     const host = withHost()
     const tunnel = new NativeTunnel()
-    await tunnel.connect('us-west', '5.78.208.190')
+    await tunnel.connect('us-west')
 
     expect(host.writes).toHaveLength(1)
     expect(host.writes[0].key).toBe('vpn.request')
     expect(host.writes[0].value).toMatchObject({ action: 'connect', region: 'us-west', exitIp: '5.78.208.190' })
     expect(typeof host.writes[0].value.nonce).toBe('string')
+  })
+
+  /*
+   * The gap this closes: the settings screen stored a resolver and a LAN
+   * rule that nothing ever read. A person could toggle "Allow local network"
+   * for the life of the app and change nothing at all.
+   */
+  it('carries the stored settings, so they are not write-only', async () => {
+    const host = withHost()
+    ;(globalThis as any).localStorage.setItem('buddyvpn.settings', JSON.stringify({ dns: 'quad9', allowLan: true }))
+    const tunnel = new NativeTunnel()
+    await tunnel.connect('us-west')
+
+    expect(host.writes[0].value).toMatchObject({
+      // Addresses, not a preset name: the provider is a separate process
+      // with no list to look a name up in.
+      dns: ['9.9.9.9', '149.112.112.112'],
+      allowLan: true,
+    })
+  })
+
+  it('falls back to the defaults when nothing has been stored', async () => {
+    const host = withHost()
+    const tunnel = new NativeTunnel()
+    await tunnel.connect('us-west')
+    expect(host.writes[0].value).toMatchObject({ dns: ['1.1.1.1', '1.0.0.1'], allowLan: false })
+  })
+
+  /*
+   * Looked up here rather than passed in. `exitIp` was an argument with a
+   * null default and no caller ever supplied one, so every request named a
+   * region and no address to reach it at.
+   */
+  it('finds the exit address itself rather than trusting the caller', async () => {
+    const host = withHost()
+    const tunnel = new NativeTunnel()
+    await tunnel.connect('eu-central')
+    expect(host.writes[0].value.exitIp).toBeNull()
   })
 
   it('leaves a disconnect request', async () => {
@@ -189,9 +235,9 @@ describe('what it asks for', () => {
   it('makes two identical requests two different writes', async () => {
     const host = withHost()
     const tunnel = new NativeTunnel()
-    await tunnel.connect('us-west', '5.78.208.190')
+    await tunnel.connect('us-west')
     await tunnel.disconnect()
-    await tunnel.connect('us-west', '5.78.208.190')
+    await tunnel.connect('us-west')
 
     expect(host.writes[0].value.nonce).not.toBe(host.writes[2].value.nonce)
   })
@@ -205,7 +251,7 @@ describe('what it asks for', () => {
     const host = withHost()
     const tunnel = new NativeTunnel()
     const { seen, stop } = watch(tunnel)
-    await tunnel.connect('us-west', '5.78.208.190')
+    await tunnel.connect('us-west')
 
     expect(seen.map(s => s.phase)).toEqual(['idle'])
     host.publish({ phase: 'connecting', region: 'us-west' })
@@ -219,7 +265,7 @@ describe('what it asks for', () => {
     withHost({ failWrites: true })
     const tunnel = new NativeTunnel()
     const { seen, stop } = watch(tunnel)
-    await tunnel.connect('us-west', null)
+    await tunnel.connect('us-west')
     expect(seen[seen.length - 1].error).toContain('storage is unavailable')
     stop()
   })
@@ -236,7 +282,7 @@ describe('off a host', () => {
     const tunnel = new NativeTunnel()
     const { seen, stop } = watch(tunnel)
     expect(seen[0].phase).toBe('idle')
-    await tunnel.connect('us-west', null)
+    await tunnel.connect('us-west')
     await tunnel.disconnect()
     stop()
   })

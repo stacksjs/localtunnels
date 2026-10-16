@@ -16,6 +16,8 @@
  */
 import type { Tunnel, TunnelSnapshot } from './tunnel'
 import type { TunnelStatusFrame } from './tunnel-bridge'
+import { regionById } from './regions'
+import { dnsServers, readSettings } from './settings'
 import { nextNonce, parseStatus, REQUEST_KEY, STATUS_SNAPSHOT, uptimeFrom } from './tunnel-bridge'
 
 /** How often the uptime is recomputed while connected. Local, not pushed. */
@@ -167,8 +169,25 @@ export class NativeTunnel implements Tunnel {
    * to be walked back. The Swift half reports `connecting` once iOS has
    * actually accepted the start.
    */
-  async connect(region: string, exitIp: string | null = null): Promise<void> {
-    await this.request({ action: 'connect', region, exitIp, nonce: nextNonce() })
+  async connect(region: string): Promise<void> {
+    /*
+     * The request is assembled here rather than by the caller.
+     *
+     * Everything in it is already knowable from the region and the stored
+     * settings, and an argument for each would be an argument each caller
+     * could forget — `exitIp` was one, defaulted to null, and nothing ever
+     * passed it. A screen asks for a region; what that means is this
+     * object's business.
+     */
+    const settings = readSettings()
+    await this.request({
+      action: 'connect',
+      region,
+      exitIp: regionById(region)?.exitIp ?? null,
+      dns: dnsServers(settings.dns),
+      allowLan: settings.allowLan,
+      nonce: nextNonce(),
+    })
   }
 
   async disconnect(): Promise<void> {
