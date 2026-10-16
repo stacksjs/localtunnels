@@ -44,6 +44,7 @@
   const el = {
     statusLabel: document.querySelector('[data-status-label]'),
     clock: document.querySelector('[data-clock]'),
+    notice: document.querySelector('[data-notice]'),
     power: document.querySelector('[data-power]'),
     caption: document.querySelector('[data-caption]'),
     location: document.querySelector('[data-location]'),
@@ -91,6 +92,17 @@
 
   const regions = () => (status && status.regions) || []
   const realConnected = () => Boolean(status && status.managedPid)
+  /**
+   * Whether the coordinator has stopped hearing from this tunnel.
+   *
+   * Deliberately not folded into `connected`. They answer different
+   * questions, and conflating them is exactly what hid this failure: the
+   * interface is up and the handshakes succeed while the route home is
+   * withdrawn. Demo mode has no coordinator, so only a real connection can
+   * be forgotten by one.
+   */
+  const coordinator = () => (status && status.coordinator) || { reachable: true, message: null, detail: null }
+  const forgotten = () => realConnected() && coordinator().reachable === false
   const connected = () => realConnected() || demoConnected
   /** True when the chosen location has no server and the demo stands in. */
   const demoing = () => DEMO && Boolean(status) && Boolean(current()) && !current().configured
@@ -232,7 +244,10 @@
     if (error) { label = 'Something went wrong'; tone = 'error' }
     else if (phase === 'connecting') { label = 'Connecting…'; tone = 'busy' }
     else if (phase === 'disconnecting') { label = 'Disconnecting…'; tone = 'busy' }
-    else if (connected()) { label = 'Connected'; tone = 'on' }
+    // Still Connected, because it still is — but not in plain green, which
+    // would be the window agreeing with itself while the tunnel is being
+    // dropped. The notice below carries the detail.
+    else if (connected()) { label = 'Connected'; tone = forgotten() ? 'busy' : 'on' }
     else if (!status) { label = 'Checking…' }
 
     el.statusLabel.textContent = label
@@ -240,6 +255,12 @@
     else el.statusLabel.removeAttribute('data-tone')
 
     el.clock.textContent = clockText()
+
+    // The agent's wording, not the tunnel's log line: that one is written
+    // for a terminal and names nodes, directories and exits.
+    const warning = forgotten() ? coordinator().message : ''
+    el.notice.textContent = warning || ''
+    el.notice.hidden = !warning
 
     el.power.setAttribute('data-state', phase || (connected() ? 'on' : (status ? 'off' : 'unknown')))
     el.power.disabled = Boolean(phase) || blocked

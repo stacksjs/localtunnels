@@ -448,8 +448,28 @@ function tunnelLog(): string {
 export interface CoordinatorHealth {
   /** False once the tunnel has reported the coordinator silent. */
   reachable: boolean
-  /** The warning as the tunnel wrote it, for the window to show. */
+  /**
+   * What to tell the person, in this window's voice.
+   *
+   * Not the log line. That one is written for whoever is reading a terminal
+   * and says the node will be dropped from the directory — true, and three
+   * pieces of jargon wide, in a window whose other sentence is "Your traffic
+   * leaves from Hillsboro, Oregon". The distinction it carries is worth
+   * keeping, though: one of these is fixed here and the other is not.
+   */
+  message: string | null
+  /** The tunnel's own line, kept for diagnostics. */
   detail: string | null
+}
+
+/** The two causes, told apart so the person is pointed at the right one. */
+const LOCAL_CAUSE = /leaving this machine/i
+
+const MESSAGES = {
+  local: 'BuddyVPN cannot reach its server from this Mac. Something here is blocking it — '
+    + 'a firewall or network filter. The connection will stop working shortly.',
+  remote: 'BuddyVPN\u2019s server has stopped responding. The connection will stop working shortly '
+    + 'unless it comes back.',
 }
 
 /** Where one run's output begins. Printed once, when the interface comes up. */
@@ -485,11 +505,17 @@ export function readCoordinatorHealth(log: string): CoordinatorHealth {
   // Backwards from the end: whichever came last is the current state.
   for (let i = lines.length - 1; i >= start; i--) {
     if (ANSWERING.test(lines[i]))
-      return { reachable: true, detail: null }
-    if (WENT_QUIET.test(lines[i]))
-      return { reachable: false, detail: lines[i].replace(/^!\s*/, '') }
+      return { reachable: true, message: null, detail: null }
+    if (WENT_QUIET.test(lines[i])) {
+      const detail = lines[i].replace(/^!\s*/, '')
+      return {
+        reachable: false,
+        message: LOCAL_CAUSE.test(detail) ? MESSAGES.local : MESSAGES.remote,
+        detail,
+      }
+    }
   }
-  return { reachable: true, detail: null }
+  return { reachable: true, message: null, detail: null }
 }
 
 /** {@link readCoordinatorHealth} against whichever log this tunnel wrote. */

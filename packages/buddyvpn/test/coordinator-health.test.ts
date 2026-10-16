@@ -35,11 +35,11 @@ function run(...lines: string[]): string {
 
 describe('a healthy tunnel', () => {
   it('is reachable when nothing has gone wrong', () => {
-    expect(readCoordinatorHealth(run())).toEqual({ reachable: true, detail: null })
+    expect(readCoordinatorHealth(run())).toEqual({ reachable: true, message: null, detail: null })
   })
 
   it('is reachable when there is no log at all', () => {
-    expect(readCoordinatorHealth('')).toEqual({ reachable: true, detail: null })
+    expect(readCoordinatorHealth('')).toEqual({ reachable: true, message: null, detail: null })
   })
 
   /*
@@ -63,19 +63,34 @@ describe('a tunnel that has been forgotten', () => {
   })
 
   /*
-   * Two different failures the person fixes differently: a local firewall
-   * rule versus a coordinator that has gone away. The distinction is in the
-   * line, so it has to survive being passed along.
+   * Two different failures the person fixes differently: something on this
+   * Mac blocking the connection, versus a server that has gone away. The
+   * distinction has to survive into the words the window shows, because it
+   * is the only part of this a person can act on.
    */
   it('keeps the distinction between a local and a remote cause', () => {
     expect(readCoordinatorHealth(run(QUIET_LOCAL)).detail).toContain('leaving this machine')
     expect(readCoordinatorHealth(run(QUIET)).detail).toContain('has not answered')
+    expect(readCoordinatorHealth(run(QUIET_LOCAL)).message).toContain('Something here is blocking it')
+    expect(readCoordinatorHealth(run(QUIET)).message).toContain('server has stopped responding')
+  })
+
+  /*
+   * The log line is written for a terminal: it names nodes, a directory and
+   * an exit. This window's other sentence is "Your traffic leaves from
+   * Hillsboro, Oregon", and the warning has to belong in the same app.
+   */
+  it('does not put the log line in front of the person', () => {
+    const health = readCoordinatorHealth(run(QUIET))
+    expect(health.message).not.toContain('node')
+    expect(health.message).not.toContain('directory')
+    expect(health.detail).toContain('dropped from the directory')
   })
 })
 
 describe('recovery', () => {
   it('is reachable again once the tunnel says so', () => {
-    expect(readCoordinatorHealth(run(QUIET, ANSWERING))).toEqual({ reachable: true, detail: null })
+    expect(readCoordinatorHealth(run(QUIET, ANSWERING))).toEqual({ reachable: true, message: null, detail: null })
   })
 
   // A stall, a recovery, then another stall is an ordinary night on a laptop
@@ -94,7 +109,7 @@ describe('across runs', () => {
    */
   it('ignores a warning from a previous run', () => {
     const log = [run(QUIET), run()].join('\n')
-    expect(readCoordinatorHealth(log)).toEqual({ reachable: true, detail: null })
+    expect(readCoordinatorHealth(log)).toEqual({ reachable: true, message: null, detail: null })
   })
 
   it('reports a warning from the current run even after a clean one', () => {

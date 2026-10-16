@@ -107,6 +107,24 @@ html, body {
   font-size: 13px; color: var(--secondary); font-variant-numeric: tabular-nums;
 }
 
+/*
+ * A warning that belongs to the connection rather than to an action.
+ *
+ * It borrows the orange of the connecting state rather than the red of an
+ * error: nothing has failed yet. The tunnel is still up and usually still
+ * carrying traffic — what has stopped is the coordinator hearing from it,
+ * and red would say the connection is gone when it is not.
+ */
+.notice {
+  flex: none; margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border-radius: 10px;
+  font-size: 12px; line-height: 1.4; color: var(--orange);
+}
+.notice[hidden] { display: none; }
+
 /* ---------- The button ---------- */
 /* One target, dead centre. There is exactly one thing to do in this window. */
 /* Button and caption centre together as one group; the slack in a tall

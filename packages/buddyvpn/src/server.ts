@@ -114,7 +114,7 @@ function status(refresh: boolean): Response {
      * Only asked while connected. A warning from the last run reported over
      * a tunnel that is not even up would be noise.
      */
-    coordinator: connected ? coordinatorHealth() : { reachable: true, detail: null },
+    coordinator: connected ? coordinatorHealth() : { reachable: true, message: null, detail: null },
     managedPid,
     /** How long the tunnel has been up. The window shows this as its clock. */
     uptimeSeconds: managedPid === null ? null : connectionUptime(managedPid),
