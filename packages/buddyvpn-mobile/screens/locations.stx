@@ -18,10 +18,20 @@ import { REGIONS } from '../src/regions'
 
 <script client>
 import { haptics, navigation } from '../src/native'
+import { readPairing } from '../src/pairing'
 import { REGIONS, writeRegion } from '../src/regions'
 import { tunnel } from '../src/tunnel'
 
 const snapshot = state(tunnel.snapshot())
+/*
+ * The one network this device holds a key for.
+ *
+ * A pairing is for a single region's coordinator, so every other location in
+ * this list is one this device cannot join however deployed it is. Only true
+ * of a real tunnel: the stand-in joins nothing and needs no key, so a
+ * simulated build must not grey out locations that work perfectly well in it.
+ */
+const pairing = state(null)
 
 onMount(() => {
   /*
@@ -33,6 +43,7 @@ onMount(() => {
    * which is what replaces the heading this screen used to draw itself.
    */
   navigation.setOptions({ title: 'Location', largeTitle: true })
+  void readPairing().then(found => pairing.set(found))
   return tunnel.subscribe(next => snapshot.set(next))
 })
 
@@ -41,8 +52,11 @@ onMount(() => {
 // quietly do that.
 const locked = () => snapshot().phase !== 'idle'
 
+/** Whether this device could join a region at all, key included. */
+const joinable = (id) => !tunnel.available() || pairing()?.region === id
+
 const choose = (id: string) => {
-  if (locked()) return
+  if (locked() || !joinable(id)) return
   const region = REGIONS.find(entry => entry.id === id)
   if (!region?.exitIp) return
   haptics.selection()
@@ -96,7 +110,7 @@ const choose = (id: string) => {
         -->
         <a
           class="flex-row items-center gap-3 border-t border-gray-200 px-4 py-3 dark:border-gray-800"
-          :class="locked() ? 'flex-row items-center gap-3 border-t border-gray-200 px-4 py-3 opacity-50 dark:border-gray-800' : 'flex-row items-center gap-3 border-t border-gray-200 px-4 py-3 dark:border-gray-800'"
+          :class="(locked() || !joinable('{{ region.id }}')) ? 'flex-row items-center gap-3 border-t border-gray-200 px-4 py-3 opacity-50 dark:border-gray-800' : 'flex-row items-center gap-3 border-t border-gray-200 px-4 py-3 dark:border-gray-800'"
           @click="choose('{{ region.id }}')"
         >
           <icon class="i-lucide-map-pin shrink-0 text-base text-gray-400"></icon>
@@ -109,6 +123,26 @@ const choose = (id: string) => {
           @endif
           @if(!region.exitIp)
             <text class="shrink-0 rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">No server yet</text>
+          @endif
+          <!--
+            A deployed location this device holds no key for. Said on the row
+            rather than left to fail at the tap: the server is there, and the
+            reason this phone cannot use it has nothing to do with the server.
+
+            Bound rather than conditioned. `@if(region.exitIp)` is the
+            render-time loop's and bakes away correctly, but a client `@if`
+            nested inside it never becomes a binding on this renderer — the
+            badge compiled as plain text and would have shown on every row,
+            always, which is worse than not showing at all. `:text` and
+            `:class` do bind here, so the badge says nothing and draws
+            nothing when the device can join.
+          -->
+          @if(region.exitIp)
+            <text
+              class="shrink-0"
+              :class="joinable('{{ region.id }}') ? 'shrink-0' : 'shrink-0 rounded-full bg-orange-100 px-2 py-1 text-xs text-orange-700 dark:bg-orange-950 dark:text-orange-300'"
+              :text="joinable('{{ region.id }}') ? '' : 'Not paired'"
+            ></text>
           @endif
         </a>
       @endforeach

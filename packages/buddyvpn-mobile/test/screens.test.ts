@@ -706,3 +706,36 @@ describe('why a tunnel will not come up', () => {
     expect(screen.text).toContain('Simulated')
   })
 })
+
+/*
+ * A pairing is for one region's coordinator, so every other location is one
+ * this device holds no key for — deployed, reachable, and unusable from
+ * here. Saying so on the row beats failing at the tap, because the reason
+ * has nothing to do with the server.
+ *
+ * Dormant on a simulated build, like the other two: the stand-in joins
+ * nothing and needs no key, so greying out locations that work perfectly
+ * well in it would be a lie.
+ */
+describe('a location this device cannot join', () => {
+  it('is marked, and the mark is bound rather than written', () => {
+    expect(source).toContain("joinable('us-west') ? '' : 'Not paired'")
+  })
+
+  it('dims the row it belongs to', () => {
+    expect(source).toContain("!joinable('us-west')")
+  })
+
+  it('marks nothing on a simulated build', () => {
+    expect(render('locations').text).not.toContain('Not paired')
+  })
+
+  // The tap is guarded too: a row that looks unavailable and still works is
+  // worse than one that does neither.
+  it('still lets a simulated build choose any deployed region', () => {
+    const stored: Record<string, string> = {}
+    const screen = render('locations', stored)
+    screen.fire(screen.handlerIds('onPress')[0])
+    expect(stored['buddyvpn.region']).toBe('us-west')
+  })
+})
