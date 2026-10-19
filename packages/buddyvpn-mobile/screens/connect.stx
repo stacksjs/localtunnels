@@ -1,6 +1,6 @@
 <script client>
 import { deepLinks, haptics, navigation, whenNativeHost } from '../src/native'
-import { applyPairingUrl } from '../src/pairing'
+import { applyPairingUrl, readPairing } from '../src/pairing'
 import { readRegion, regionById, writeRegion } from '../src/regions'
 import { readSettings } from '../src/settings'
 import { formatUptime, tunnel } from '../src/tunnel'
@@ -18,6 +18,14 @@ const native = state(false)
  * nothing.
  */
 const paired = state(null)
+/*
+ * Whether this device belongs to a network yet.
+ *
+ * Only ever a problem for a real tunnel: the stand-in needs no coordinator,
+ * so an unpaired device running the simulated build is not broken and must
+ * not be told it is.
+ */
+const network = state(null)
 
 onMount(() => {
   // The app's name, rather than `connect` — the host titles a screen with its
@@ -59,14 +67,18 @@ onMount(() => {
    * case, and the one a listener alone would miss. `onLink` is the same
    * thing arriving while the app is already open.
    */
+  const refreshPairing = () => { void readPairing().then(found => network.set(found)) }
+
   const take = (url) => {
     void applyPairingUrl(url, (id) => {
       writeRegion(id)
       region.set(readRegion())
     }).then((outcome) => {
       if (outcome) paired.set(outcome)
+      refreshPairing()
     })
   }
+  refreshPairing()
   void deepLinks.initial().then(take)
   const unlink = deepLinks.onLink(take)
   return () => {
@@ -83,6 +95,13 @@ const busy = () => phase() === 'connecting' || phase() === 'disconnecting'
 // A location with no server behind it is not connectable, and the button says
 // so by being unavailable rather than by failing after a tap.
 const deployed = () => Boolean(here()?.exitIp)
+
+/*
+ * A device that has a real tunnel but no network to join cannot connect, and
+ * saying so before the tap beats failing after it. The stand-in needs no
+ * coordinator, so this is never true of a simulated build.
+ */
+const unpaired = () => tunnel.available() && network() === null
 
 const statusLabel = () => {
   if (snapshot().error) return 'Something went wrong'
@@ -108,7 +127,7 @@ const openSettings = () => {
 }
 
 const toggle = () => {
-  if (busy() || !deployed()) return
+  if (busy() || !deployed() || unpaired()) return
   haptics.impact('medium')
   if (connected()) void tunnel.disconnect()
   else void tunnel.connect(region())
@@ -199,7 +218,7 @@ const toggle = () => {
       -->
       <a
         class="h-44 w-44 items-center justify-center rounded-full bg-blue-600"
-        :class="!deployed() ? 'h-44 w-44 items-center justify-center rounded-full bg-gray-300 dark:bg-gray-700' : busy() ? 'h-44 w-44 items-center justify-center rounded-full bg-gray-400' : connected() ? 'h-44 w-44 items-center justify-center rounded-full bg-red-600' : 'h-44 w-44 items-center justify-center rounded-full bg-blue-600'"
+        :class="(!deployed() || unpaired()) ? 'h-44 w-44 items-center justify-center rounded-full bg-gray-300 dark:bg-gray-700' : busy() ? 'h-44 w-44 items-center justify-center rounded-full bg-gray-400' : connected() ? 'h-44 w-44 items-center justify-center rounded-full bg-red-600' : 'h-44 w-44 items-center justify-center rounded-full bg-blue-600'"
         :aria-label="connected() ? 'Disconnect' : 'Connect'"
         @click="toggle"
       >
@@ -230,6 +249,32 @@ const toggle = () => {
         <text class="text-center text-sm text-gray-500 dark:text-gray-400" :text="connected() ? 'Tap to disconnect' : `Tap to connect to ${here()?.country}`"></text>
       @endif
     </view>
+
+    <!--
+      The reason, not just that there was one.
+
+      The status line can only say "Something went wrong", and the provider's
+      messages are the useful part: not allowed to add a VPN configuration,
+      no coordinator to join, a server that stopped answering. Dropping them
+      leaves somebody with a button that does not work and nothing to do
+      about it.
+    -->
+    @if(snapshot().error)
+      <view class="mb-3 rounded-2xl border border-red-300 bg-red-100 p-3 dark:border-red-700 dark:bg-red-950">
+        <text class="text-xs text-red-800 dark:text-red-300" :text="snapshot().error"></text>
+      </view>
+    @endif
+
+    <!--
+      Said before the tap rather than after it. A device with a real tunnel
+      and no network to join cannot connect, and a button that fails is a
+      worse way to find that out than a sentence saying what to do.
+    -->
+    @if(unpaired())
+      <view class="mb-3 rounded-2xl border border-orange-300 bg-orange-100 p-3 dark:border-orange-700 dark:bg-orange-950">
+        <text class="text-xs text-orange-700 dark:text-orange-300">This device is not part of a network yet. Open BuddyVPN on your Mac and point this phone's camera at the pairing code in its settings.</text>
+      </view>
+    @endif
 
     <!--
       An inset grouped list: a section header above a rounded block of rows.

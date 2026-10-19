@@ -664,3 +664,45 @@ describe('the paired network', () => {
     expect(screen.text).toContain('removes it from this device only')
   })
 })
+
+/*
+ * Telling somebody why, rather than that.
+ *
+ * The status line can only say "Something went wrong". The useful words are
+ * the provider's — not allowed to add a VPN configuration, no coordinator to
+ * join, a server that stopped answering — and they were being dropped.
+ *
+ * Both of these notices are dormant in a simulated build, and correctly so:
+ * the stand-in has no provider to fail and needs no network to join, so a
+ * device running it is not broken and must not be told it is. They come
+ * alive with `capabilities.networkExtension`, like everything else behind
+ * that flag. What is asserted here is that they are wired to the right
+ * things, which is what would silently stop being true.
+ */
+describe('why a tunnel will not come up', () => {
+  /*
+   * Asserted against the bundle rather than the rendered tree: a condition
+   * lives in the binding manifest, and the branch it guards is removed from
+   * the document at hydration when it does not apply — which, on a
+   * simulated build, is always.
+   */
+  it('binds the error itself, not a summary of it', () => {
+    expect(source).toContain('snapshot().error')
+  })
+
+  it('offers pairing instructions when there is a real tunnel and no network', () => {
+    expect(source).toContain('unpaired()')
+    expect(source).toContain('point this phone')
+  })
+
+  /*
+   * And it stays quiet on a build that cannot tunnel. A simulated app
+   * telling somebody to go and pair a device would be asking them to fix
+   * something that is not wrong.
+   */
+  it('says neither thing on a simulated build', () => {
+    const screen = render('connect')
+    expect(screen.text).not.toContain('not part of a network yet')
+    expect(screen.text).toContain('Simulated')
+  })
+})
