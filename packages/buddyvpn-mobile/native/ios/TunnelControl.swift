@@ -125,7 +125,9 @@ final class TunnelControl: NSObject {
                 region: region,
                 exitIp: request["exitIp"] as? String,
                 dns: request["dns"] as? [String] ?? [],
-                allowLan: request["allowLan"] as? Bool ?? false
+                allowLan: request["allowLan"] as? Bool ?? false,
+                coordinatorUrl: request["coordinatorUrl"] as? String,
+                authKey: request["authKey"] as? String
             )
         case "disconnect":
             disconnect()
@@ -134,7 +136,7 @@ final class TunnelControl: NSObject {
         }
     }
 
-    private func connect(region: String, exitIp: String?, dns: [String], allowLan: Bool) {
+    private func connect(region: String, exitIp: String?, dns: [String], allowLan: Bool, coordinatorUrl: String?, authKey: String?) {
         log.notice("connect requested: \(region, privacy: .public)")
 
         NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
@@ -164,6 +166,14 @@ final class TunnelControl: NSObject {
                 "dns": dns,
                 "allowLan": allowLan,
             ]
+            // Omitted rather than sent empty: the provider checks presence to
+            // decide whether this device has been provisioned at all.
+            if let coordinatorUrl {
+                proto.providerConfiguration?["coordinatorUrl"] = coordinatorUrl
+            }
+            if let authKey {
+                proto.providerConfiguration?["authKey"] = authKey
+            }
             manager.protocolConfiguration = proto
             manager.localizedDescription = "BuddyVPN"
             manager.isEnabled = true

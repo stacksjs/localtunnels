@@ -69,7 +69,7 @@ export const BRIDGE_DIR = 'Bridge'
 const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m']
 
 /** The extension-target sources, likewise. */
-const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift', 'CoordinatorClient.swift']
+const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift', 'CoordinatorClient.swift', 'DeviceIdentity.swift']
 
 /** The protocol core, cross-compiled for iOS and linked into the provider. */
 export const CORE_FRAMEWORK = 'libltvpn.xcframework'

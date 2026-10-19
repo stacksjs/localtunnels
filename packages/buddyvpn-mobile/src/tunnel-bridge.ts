@@ -60,6 +60,16 @@ export interface ConnectRequest {
   dns: string[]
   /** Whether the local network stays reachable while the tunnel is up. */
   allowLan: boolean
+  /**
+   * Where the coordinator for this region lives, and the secret to join it.
+   *
+   * Null until this device has been provisioned, which it has no way to be
+   * yet — see `PROVISIONING.md`. Carried rather than baked into the build on
+   * purpose: `authKey` is a shared secret, and a secret in a shipped binary
+   * belongs to anyone who downloads it.
+   */
+  coordinatorUrl: string | null
+  authKey: string | null
   nonce: string
 }
 

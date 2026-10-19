@@ -186,6 +186,11 @@ export class NativeTunnel implements Tunnel {
       exitIp: regionById(region)?.exitIp ?? null,
       dns: dnsServers(settings.dns),
       allowLan: settings.allowLan,
+      // Nothing fills these in yet. The field exists so the shape the
+      // provider reads is the shape this sends, rather than one growing a
+      // key later that the other half has never seen.
+      coordinatorUrl: null,
+      authKey: null,
       nonce: nextNonce(),
     })
   }

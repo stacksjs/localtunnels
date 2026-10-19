@@ -59,6 +59,10 @@ enum TunnelStartFailure: LocalizedError {
     case notEnrolled(region: String)
     /// The linked core is not the one this build was written against.
     case coreUnusable
+    /// This device has no coordinator to join, so there is nothing to join.
+    case notProvisioned
+    /// Registered, but the network has no exit to route through.
+    case noExit(region: String)
 
     var errorDescription: String? {
         switch self {
@@ -69,6 +73,11 @@ enum TunnelStartFailure: LocalizedError {
                  + "so it has no key for the exit and no address of its own. The tunnel itself is in place."
         case .coreUnusable:
             return "BuddyVPN's encryption library is not the version this build expects."
+        case .notProvisioned:
+            return "This device has not been set up yet: it has no coordinator address to join, "
+                 + "so there is nothing for it to connect to."
+        case let .noExit(region):
+            return "No server in \(region) is offering to carry traffic right now."
         }
     }
 }
@@ -125,30 +134,135 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
-        /*
-         * Stopping here, one step short of a tunnel.
+/*
+         * From here on this device has to become a member of a network.
          *
-         * `TunnelSession` below carries packets, and it is complete: given a
-         * session it encrypts what the system sends and delivers what comes
-         * back. What it cannot do is produce that session, and neither can
-         * anything else in this build.
-         *
-         * A session needs three things this extension has no way to obtain:
-         * a static keypair of its own, the exit's public key, and a tunnel
-         * address the exit will route to. On the desktop all three come from
-         * the coordinator — the client registers over a WebSocket, is
-         * assigned an address, and reads the exit's key and endpoint out of
-         * the directory it is then sent. None of that exists here: the
-         * coordinator protocol is TypeScript in `packages/localtunnels`, and
-         * an extension cannot run it.
-         *
-         * So this is where the work stops, and it stops *before*
-         * `setTunnelNetworkSettings`. Applying settings is what makes iOS
-         * show the VPN badge and route traffic into this process, and
-         * routing traffic into a provider that cannot forward it is a
-         * blackhole that looks exactly like a working connection.
+         * It needs a coordinator to join and, where one is required, the
+         * secret to join it. Neither is baked into this build and neither
+         * should be: `authKey` is shared between every member, and a shared
+         * secret in a shipped binary belongs to anyone who downloads it. The
+         * app is meant to pass them in, and has no way to obtain them yet —
+         * see PROVISIONING.md for what is missing and why it is a decision
+         * rather than an oversight.
          */
-        completionHandler(TunnelStartFailure.notEnrolled(region: region))
+        guard let coordinatorUrl = configuration?["coordinatorUrl"] as? String, !coordinatorUrl.isEmpty else {
+            completionHandler(TunnelStartFailure.notProvisioned)
+            return
+        }
+
+        let identity: DeviceIdentity
+        do {
+            identity = try DeviceIdentity.loadOrCreate()
+        }
+        catch {
+            log.error("this device has no usable key: \(error.localizedDescription, privacy: .public)")
+            completionHandler(error)
+            return
+        }
+
+        join(
+            coordinatorUrl: coordinatorUrl,
+            authKey: configuration?["authKey"] as? String,
+            identity: identity,
+            region: region,
+            completionHandler: completionHandler
+        )
+    }
+
+    /// The coordinator connection, held for as long as the tunnel is up: it
+    /// is what keeps this node in the directory, and dropping it is how a
+    /// node gets forgotten and the exit stops routing to it.
+    private var coordinator: CoordinatorClient?
+    private var tunnel: TunnelSession?
+
+    /**
+     Register, then wait for a directory with an exit in it.
+
+     Registration settles this device's address; the directory settles who it
+     talks to. Both are needed before a single packet can be encrypted, and
+     they arrive separately — `registered` first, then `peers`, which the
+     coordinator sends again whenever the membership changes.
+     */
+    private func join(coordinatorUrl: String,
+                      authKey: String?,
+                      identity: DeviceIdentity,
+                      region: String,
+                      completionHandler: @escaping (Error?) -> Void) {
+        let client: CoordinatorClient
+        do {
+            client = try CoordinatorClient(
+                url: coordinatorUrl,
+                publicKey: identity.publicKeyBase64,
+                // The datapath's port. Reported as 0 until there is a
+                // datapath to report: this device makes outbound UDP and the
+                // exit learns where to answer from the packets themselves.
+                listenPort: 0,
+                authKey: authKey
+            )
+        }
+        catch {
+            completionHandler(error)
+            return
+        }
+        coordinator = client
+
+        /*
+         * Said out loud for the same reason the desktop says it: a node the
+         * coordinator stops hearing from is dropped, and the exit then
+         * withdraws the route to it. The tunnel keeps reporting health
+         * throughout, so nothing else will mention it.
+         */
+        client.onStale = { [weak self] silent in
+            self?.log.error("the coordinator has been silent for \(Int(silent))s; this tunnel is about to stop carrying traffic")
+        }
+        client.onResumed = { [weak self] _ in
+            self?.log.notice("the coordinator is answering again")
+        }
+
+        var settled = false
+        client.onPeers = { [weak self] peers in
+            guard let self, !settled else { return }
+            guard let exit = peers.exit else {
+                // Not a failure yet: an exit may still join, and the
+                // coordinator re-sends the directory when it does.
+                self.log.notice("no exit in the directory yet, \(peers.count) peer(s) known")
+                return
+            }
+            settled = true
+            self.log.notice("exit \(exit.publicKey.prefix(16), privacy: .public)… at \(exit.endpoint.host, privacy: .public):\(exit.endpoint.port)")
+
+            /*
+             * And this is as far as it goes.
+             *
+             * Everything above is settled: the device has a key, an address,
+             * and an exit chosen by the same rule the desktop uses. What
+             * remains is the handshake and the session — open UDP to the
+             * endpoint above, exchange `ltvpn_hs_create_initiation` and
+             * `ltvpn_hs_consume_response`, derive a session with
+             * `ltvpn_session_from_handshake`, apply `networkSettings`, and
+             * hand the session to `TunnelSession`.
+             *
+             * It is not written because none of it can be run. The pieces it
+             * joins have never executed, the entitlement that would let them
+             * does not exist, and writing the retransmit, timeout and
+             * re-handshake behaviour against no feedback would produce code
+             * that looks finished and has never been true. It waits for a
+             * device.
+             */
+            completionHandler(TunnelStartFailure.noExit(region: region))
+        }
+
+        client.connect { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .success(registration):
+                self.log.notice("joined as \(registration.assignedIp, privacy: .public) on \(registration.network, privacy: .public)")
+            case let .failure(error):
+                settled = true
+                self.log.error("could not join: \(error.localizedDescription, privacy: .public)")
+                completionHandler(error)
+            }
+        }
     }
 
     /**
