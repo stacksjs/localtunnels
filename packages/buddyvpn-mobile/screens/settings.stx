@@ -111,7 +111,7 @@ const toggleAutoConnect = () => {
 </script>
 
 <view class="flex-1 bg-gray-100 dark:bg-black">
-  <scrollview class="flex-1 px-4">
+  <scroll-view class="flex-1 px-4">
     <!--
       A resolver is chosen from a list with a checkmark on the current one,
       not from a `<picker>`. A picker on iOS is a spinning wheel, which is
@@ -234,5 +234,5 @@ const toggleAutoConnect = () => {
     </view>
 
     <view class="h-8"></view>
-  </scrollview>
+  </scroll-view>
 </view>

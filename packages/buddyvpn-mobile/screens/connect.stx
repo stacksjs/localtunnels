@@ -137,7 +137,14 @@ const toggle = () => {
 <!--
   Native primitives by name, not HTML tags that happen to map.
   
-  `<view>`, `<text>`, `<scrollview>` and `<icon>` are stx's native components;
+  `<view>`, `<text>`, `<scroll-view>` and `<icon>` are stx's native
+  components. The kebab spelling is not a style choice: stx resolves a tag
+  by trying it as written, its kebab-to-PascalCase form, and its
+  camel-to-kebab form, and the primitive is the file `ScrollView.stx`.
+  `<scrollview>` yields `scrollview.stx` and `Scrollview.stx`, neither of
+  which is that file — which a case-insensitive macOS disk hides and Linux
+  does not, where the component resolved to nothing and took the whole
+  screen with it.
   `<a>` is the one exception kept, because it is what maps to TouchableOpacity
   — a container that holds children and takes a tap, which a native Button
   cannot do.
@@ -150,7 +157,7 @@ const toggle = () => {
   `dark:` survives; hover, focus and breakpoints do not.
 -->
 <view class="flex-1 bg-gray-100 dark:bg-black">
-  <scrollview class="flex-1 px-4">
+  <scroll-view class="flex-1 px-4">
     <!--
       Said at the top, permanently, and not as a dismissible notice. This
       build has no Network Extension entitlement, so there is no tunnel behind
@@ -317,5 +324,5 @@ const toggle = () => {
     @if(native())
       <text class="py-6 text-center text-xs text-gray-400">Running in a native shell.</text>
     @endif
-  </scrollview>
+  </scroll-view>
 </view>
