@@ -167,11 +167,28 @@
           <input class="toggle" type="checkbox" data-set-lan>
         </label>
 
+        <h3 class="group">Devices</h3>
+
         <!--
-          Said plainly rather than left as two toggles that are not there.
-          Someone looking for them should find out why in the place they
-          looked.
+          Hidden until asked for. This draws the coordinator's shared secret
+          as something a camera can read, and a secret that is on screen by
+          default is a secret shown to whoever walks past.
         -->
+        <div class="row row-block">
+          <span class="row-text">
+            <span class="row-name">Pair a phone</span>
+            <span class="row-note">Opens BuddyVPN on a phone and joins it to this location's network.</span>
+          </span>
+          <button class="control" type="button" data-pair-show>Show code</button>
+        </div>
+        <div class="pairing" data-pairing hidden>
+          <div class="pairing-code" data-pairing-code></div>
+          <p class="note pairing-warning" data-pairing-note></p>
+          <button class="control" type="button" data-pair-hide>Hide</button>
+        </div>
+
+        <h3 class="group">Not settings</h3>
+
         <p class="note">
           Full-tunnel mode and the kill switch are always on. An app for putting your
           traffic somewhere else has no honest setting for "but not really", and a kill

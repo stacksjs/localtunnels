@@ -13,6 +13,8 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import process from 'node:process'
 import { DEFAULT_REGION, REGIONS } from './regions'
+import { renderSVG } from 'uqr'
+import { pairingUrl } from './pairing'
 import { connect, connectionPid, connectionUptime, coordinatorHealth, disconnect, readServers } from './vpn/control'
 import { version } from '../package.json'
 import { DNS_LABELS } from './dns'
@@ -86,6 +88,26 @@ function updateSettings(patch: Record<string, unknown>): Record<string, unknown>
   // A changed resolver or LAN rule only takes effect on the next connect;
   // the window says so rather than implying a live change.
   return { ...settingsPayload(), error: loginError }
+}
+
+/**
+ * The pairing code for one region, as a link and as something to point a
+ * camera at.
+ *
+ * The SVG is rendered here rather than in the window because the window has
+ * no encoder and should not grow one: this is the process that already holds
+ * the secret, and handing it a drawing rather than the values keeps the
+ * number of places that can leak it at one.
+ */
+function pairingFor(regionId: string): Record<string, unknown> {
+  const entry = readServers()[regionId]
+  const url = pairingUrl(regionId, entry)
+  if (!url) {
+    // A region with nothing deployed has no coordinator, so there is nothing
+    // to hand over. Saying so beats a code that is scanned and then fails.
+    return { success: false, error: 'No server is deployed in that location yet' }
+  }
+  return { success: true, region: regionId, url, svg: renderSVG(url, { border: 1 }) }
 }
 
 function status(refresh: boolean): Response {
@@ -193,6 +215,20 @@ export async function runAgent(): Promise<void> {
             if (!readSettings().showLocation)
               return json({ success: true, location: null, disabled: true })
             return json({ success: true, location: await lookupLocation() })
+          }
+          /*
+           * The code that hands this network to a phone.
+           *
+           * Asked for rather than included in status, and never drawn until
+           * somebody asks: it carries the coordinator's shared secret, and a
+           * secret that is on screen by default is a secret shown to whoever
+           * walks past.
+           */
+          case '/api/pairing': {
+            const region = (await body(request)).region
+            if (typeof region !== 'string')
+              return json({ success: false, error: 'No location given' })
+            return json(pairingFor(region))
           }
           case '/api/settings':
             return json(settingsPayload())

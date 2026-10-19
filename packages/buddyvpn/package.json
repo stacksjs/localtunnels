@@ -9,5 +9,8 @@
     "typecheck": "bunx tsc --noEmit --project tsconfig.json",
     "build:app": "bun run scripts/build-app.ts",
     "dev": "bun run src/launcher.ts agent"
+  },
+  "dependencies": {
+    "uqr": "^0.1.2"
   }
 }

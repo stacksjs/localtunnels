@@ -125,6 +125,31 @@ html, body {
 }
 .notice[hidden] { display: none; }
 
+/* ---------- Pairing ---------- */
+.row-block { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.pairing {
+  /* The same card as every other row, because it is one: a bare block on
+     the page background reads as something that escaped the panel. */
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--card); border: 1px solid var(--card-line); border-radius: 10px;
+  margin-bottom: var(--space-2);
+  text-align: center;
+}
+.pairing[hidden] { display: none; }
+/*
+ * White behind the code, always, in both themes. A QR drawn dark-on-dark is
+ * not a styling problem, it is a code no camera can read.
+ */
+.pairing-code {
+  display: inline-block; padding: var(--space-3);
+  background: #fff; border-radius: 10px;
+}
+.pairing-code svg { display: block; width: 180px; height: 180px; }
+/* Specific enough to beat `.note`, which the element also carries and which
+   would otherwise grey out the one line here that has to be read. */
+.pairing .pairing-warning { color: var(--orange); margin: 0; }
+
 /* ---------- The button ---------- */
 /* One target, dead centre. There is exactly one thing to do in this window. */
 /* Button and caption centre together as one group; the slack in a tall

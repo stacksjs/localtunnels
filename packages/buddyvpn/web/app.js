@@ -61,6 +61,11 @@
     settings: document.querySelector('[data-settings]'),
     settingsOpen: document.querySelector('[data-settings-open]'),
     settingsClose: document.querySelector('[data-settings-close]'),
+    pairShow: document.querySelector('[data-pair-show]'),
+    pairHide: document.querySelector('[data-pair-hide]'),
+    pairing: document.querySelector('[data-pairing]'),
+    pairingCode: document.querySelector('[data-pairing-code]'),
+    pairingNote: document.querySelector('[data-pairing-note]'),
     setRegion: document.querySelector('[data-set-region]'),
     setAutoconnect: document.querySelector('[data-set-autoconnect]'),
     setLogin: document.querySelector('[data-set-login]'),
@@ -232,6 +237,43 @@
 
     el.picker.textContent = ''
     for (const entry of regions()) el.picker.append(row(entry))
+  }
+
+  /**
+   * Draw the pairing code for the chosen location.
+   *
+   * Asked for every time rather than cached: the answer carries the
+   * coordinator's shared secret, and the fewer places it sits the better.
+   * Hiding the panel drops it again.
+   */
+  const showPairing = () => {
+    const here = current()
+    if (!here) return
+    el.pairShow.disabled = true
+    post('/api/pairing', { region: here.id }).then((data) => {
+      el.pairShow.disabled = false
+      if (!data || data.success !== true) {
+        el.pairingCode.textContent = ''
+        el.pairingNote.textContent = (data && data.error) || 'That code could not be made'
+        el.pairing.hidden = false
+        return
+      }
+      el.pairingCode.innerHTML = data.svg
+      /*
+       * Said every time it is shown. This is the network's shared secret in
+       * a form anyone can photograph, and whoever reads it is a member —
+       * able to join, to see the directory, and to advertise themselves as
+       * an exit, which the coordinator relays without checking.
+       */
+      el.pairingNote.textContent = `Anyone who photographs this joins ${here.country}'s network. Show it to one phone, then hide it.`
+      el.pairing.hidden = false
+    })
+  }
+
+  const hidePairing = () => {
+    el.pairing.hidden = true
+    el.pairingCode.innerHTML = ''
+    el.pairingNote.textContent = ''
   }
 
   const paint = () => {
@@ -555,6 +597,8 @@
 
   el.settingsOpen.addEventListener('click', openSettings)
   el.settingsClose.addEventListener('click', closeSettings)
+  el.pairShow.addEventListener('click', showPairing)
+  el.pairHide.addEventListener('click', hidePairing)
   el.setRegion.addEventListener('change', () => save({ defaultRegion: el.setRegion.value }))
   el.setDns.addEventListener('change', () => save({ dns: el.setDns.value }))
   el.setAutoconnect.addEventListener('change', () => save({ autoConnect: el.setAutoconnect.checked }))
