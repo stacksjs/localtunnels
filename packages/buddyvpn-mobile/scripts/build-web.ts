@@ -30,8 +30,41 @@ const SCREENS_DIR = join(PACKAGE_DIR, 'screens')
 const OUT_DIR = join(PACKAGE_DIR, 'dist')
 const STX = '@stacksjs/stx'
 
+/**
+ * The compiler, resolved rather than looked up.
+ *
+ * This used to run `bunx @stacksjs/stx`, which prefers what is installed and
+ * falls back to fetching from the registry when it is not — so a machine
+ * with a different or missing copy compiles these screens with a different
+ * compiler, silently, and the only sign is that the output is wrong. CI
+ * restores `node_modules` from a cache key, which is exactly the situation
+ * where "whatever bunx finds" and "what this repo pins" can differ.
+ *
+ * Resolved from the installed package instead, and loud when it is absent:
+ * a missing compiler should stop the build, not quietly become a download.
+ */
+function stxCli(): string {
+  try {
+    // The package's own entry, from which its bin sits at a known path.
+    const entry = fileURLToPath(import.meta.resolve(STX))
+    const root = entry.slice(0, entry.lastIndexOf(`${STX}/`) + STX.length + 1)
+    const cli = join(root, 'dist', 'cli.js')
+    if (existsSync(cli))
+      return cli
+    throw new Error(`no cli at ${cli}`)
+  }
+  catch (error) {
+    throw new Error(
+      `${STX} is not installed, so these screens cannot be compiled. `
+      + `It is a devDependency of this package; run \`bun install\`. (${error instanceof Error ? error.message : String(error)})`,
+    )
+  }
+}
+
+const STX_CLI = stxCli()
+
 function run(args: string[], cwd: string): { ok: boolean, stdout: string, stderr: string } {
-  const result = Bun.spawnSync(['bunx', STX, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
+  const result = Bun.spawnSync(['bun', STX_CLI, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' })
   return {
     ok: result.exitCode === 0,
     stdout: result.stdout.toString(),
@@ -79,6 +112,9 @@ if (found.length === 0) {
 
 mkdirSync(OUT_DIR, { recursive: true })
 console.log(`[mobile] screens: ${found.join(', ')}`)
+// Said out loud because which compiler ran is the thing you want to know
+// when the same source produces different output on two machines.
+console.log(`[mobile] compiler: ${STX_CLI}`)
 
 /*
  * The screens config stx reads, generated rather than kept by hand.

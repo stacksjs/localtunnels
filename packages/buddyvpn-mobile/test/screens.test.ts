@@ -107,6 +107,16 @@ beforeAll(async () => {
   for (const route of ['connect', 'locations', 'settings']) {
     if (!source.includes(`"${route}"`))
       throw new Error(`the bundle names no ${route} screen. The build said:\n${output}`)
+    /*
+     * And a named route is not a drawn one. A compile can produce a bundle
+     * with every route in it and a document of one empty node for each,
+     * which fails every assertion below with "expected more than 10 nodes,
+     * received 1" — twenty-five times, none of them mentioning the build.
+     * One failure carrying the build's own words is worth more.
+     */
+    const drawn = render(route).nodes.length
+    if (drawn < 5)
+      throw new Error(`${route} compiled to ${drawn} node(s), so the screens did not really build. The build said:\n${output}`)
   }
 })
 
