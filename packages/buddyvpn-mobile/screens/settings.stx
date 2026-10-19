@@ -20,6 +20,7 @@ const RESOLVERS = Object.keys(DNS_PRESETS).map(id => ({
 import { haptics, navigation } from '../src/native'
 import { describePairing, forgetPairing, readPairing } from '../src/pairing'
 import { readSettings, writeSettings } from '../src/settings'
+import { tunnel } from '../src/tunnel'
 
 const settings = state(readSettings())
 /*
@@ -31,14 +32,28 @@ const settings = state(readSettings())
  * while nothing is known.
  */
 const pairing = state(null)
+/*
+ * What the coordinator calls this device.
+ *
+ * Comes from the tunnel rather than from storage: the key lives in a
+ * Keychain group the extension owns, and the screens learn about it the way
+ * they learn everything else about the tunnel. The stand-in has none,
+ * because it joins nothing and so is known by nobody.
+ */
+const device = state(tunnel.deviceKey())
 
 onMount(() => {
   navigation.setOptions({ title: 'Settings', largeTitle: true })
   void readPairing().then(found => pairing.set(found))
+  const stop = tunnel.subscribe(() => device.set(tunnel.deviceKey()))
   // Re-read when the screen comes back to the front, for the same reason the
   // connect screen does: a pushed screen leaves this one mounted, so setup
   // does not run again and anything read once would be stale from then on.
-  return navigation.onAppear(() => settings.set(readSettings()))
+  const unwatch = navigation.onAppear(() => settings.set(readSettings()))
+  return () => {
+    unwatch()
+    stop()
+  }
 })
 
 const dns = () => settings().dns
@@ -54,6 +69,21 @@ const chooseDns = (id: string) => {
 const toggleLan = () => {
   haptics.selection()
   settings.set(writeSettings({ allowLan: !allowLan() }))
+}
+
+const hasDevice = () => device() !== null
+/** Enough of the key to compare against a server's list, not all of it. */
+const deviceShort = () => `${(device() ?? '').slice(0, 16)}…`
+
+/*
+ * A new key is a new device to the coordinator: a fresh address, and
+ * whatever the old key was allowed stays allowed until somebody removes it
+ * there. The answer to a key that has been somewhere it should not have
+ * been, and nothing smaller — which is why it says so next to the button.
+ */
+const resetDevice = () => {
+  haptics.impact('medium')
+  void tunnel.forgetIdentity()
 }
 
 const paired = () => pairing() !== null
@@ -144,6 +174,35 @@ const toggleAutoConnect = () => {
     <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
       Forgetting a network removes it from this device only. Anyone still holding its code can still join it.
     </text>
+
+    <!--
+      One element, not three siblings behind one `@if`.
+
+      A condition here guards the element it is on; written across a header,
+      a card and a note it removed one of them and left the other two, which
+      is a section that half-appears on a device that has no key at all.
+    -->
+    @if(hasDevice())
+      <view>
+        <text class="px-1 pb-2 pt-4 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">This device</text>
+        <view class="overflow-hidden rounded-2xl bg-white dark:bg-gray-900">
+          <view class="flex-row items-center gap-3 px-4 py-3">
+            <view class="flex-1">
+              <text class="text-base text-gray-900 dark:text-gray-100">Key</text>
+              <!-- Enough to compare against the server's peer list, not all
+                   of it: the whole key is longer than it is useful here. -->
+              <text class="pt-0.5 text-xs text-gray-500 dark:text-gray-400" :text="deviceShort()"></text>
+            </view>
+            <a class="shrink-0 rounded-full bg-red-100 px-3 py-1 dark:bg-red-950" @click="resetDevice">
+              <text class="text-xs text-red-700 dark:text-red-300">Reset</text>
+            </a>
+          </view>
+        </view>
+        <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
+          Resetting makes this a new device to the network. The old key keeps whatever access it had until it is removed on the server.
+        </text>
+      </view>
+    @endif
 
     <text class="px-1 pb-2 pt-4 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Connection</text>
     <view class="overflow-hidden rounded-2xl bg-white dark:bg-gray-900">

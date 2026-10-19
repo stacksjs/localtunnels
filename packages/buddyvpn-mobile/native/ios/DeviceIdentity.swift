@@ -12,28 +12,13 @@
 //  share but which is no more protected than the rest of the sandbox. This
 //  is the one secret this app holds.
 //
-//  `kSecAttrAccessibleAfterFirstUnlock` rather than `WhenUnlocked`: a packet
-//  tunnel is started by the system, including while the phone is in a
-//  pocket, and a key that cannot be read then is a tunnel that cannot
-//  reconnect until somebody looks at their screen.
+//  The Keychain itself is `DeviceIdentityStore`, which both processes
+//  compile. This half makes a key, which takes the crypto core, and only the
+//  extension needs it.
 //
 import Foundation
 import Security
 import os
-
-enum DeviceIdentityFailure: LocalizedError {
-    case generationFailed(Int32)
-    case keychainFailed(OSStatus)
-
-    var errorDescription: String? {
-        switch self {
-        case let .generationFailed(code):
-            return "This device could not generate a VPN key (\(code))."
-        case let .keychainFailed(status):
-            return "This device's VPN key could not be stored or read (\(status))."
-        }
-    }
-}
 
 struct DeviceIdentity {
     /// 32 bytes. Never leaves this struct except into the handshake.
@@ -45,85 +30,20 @@ struct DeviceIdentity {
         publicKey.base64EncodedString()
     }
 
-    private static let service = "org.localtunnels.buddyvpn.identity"
-    private static let account = "static-keypair"
-    private static let log = Logger(subsystem: "org.localtunnels.buddyvpn", category: "identity")
-
     /// The device's key, generated on first use and the same one after.
     static func loadOrCreate() throws -> DeviceIdentity {
-        if let stored = try load() {
-            return stored
+        if let stored = try DeviceIdentityStore.load() {
+            return DeviceIdentity(privateKey: stored.privateKey, publicKey: stored.publicKey)
         }
-        let fresh = try generate()
-        try store(fresh)
-        log.notice("generated this device's static key")
-        return fresh
-    }
-
-    /// Forget this device's key. The next connection is a different device
-    /// to the coordinator, with a different address — which is what signing
-    /// out should mean, and nothing less.
-    static func forget() throws {
-        let status = SecItemDelete(query() as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw DeviceIdentityFailure.keychainFailed(status)
-        }
-    }
-
-    private static func generate() throws -> DeviceIdentity {
-        var priv = [UInt8](repeating: 0, count: Int(LTVPN_KEY_LEN))
-        var pub = [UInt8](repeating: 0, count: Int(LTVPN_KEY_LEN))
+        var priv = [UInt8](repeating: 0, count: DeviceIdentityStore.keyLength)
+        var pub = [UInt8](repeating: 0, count: DeviceIdentityStore.keyLength)
         let result = ltvpn_keypair(&priv, &pub)
         guard result == 0 else {
             throw DeviceIdentityFailure.generationFailed(result)
         }
-        return DeviceIdentity(privateKey: Data(priv), publicKey: Data(pub))
-    }
-
-    private static func query() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-    }
-
-    private static func load() throws -> DeviceIdentity? {
-        var item: CFTypeRef?
-        var lookup = query()
-        lookup[kSecReturnData as String] = true
-        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        let status = SecItemCopyMatching(lookup as CFDictionary, &item)
-        if status == errSecItemNotFound {
-            return nil
-        }
-        guard status == errSecSuccess, let data = item as? Data else {
-            throw DeviceIdentityFailure.keychainFailed(status)
-        }
-        // Both halves in one item, private first. A pair split across two
-        // items can half-survive a restore and leave a key that does not
-        // match the address the coordinator has for it.
-        let length = Int(LTVPN_KEY_LEN)
-        guard data.count == length * 2 else {
-            log.error("the stored key is \(data.count) bytes, not \(length * 2); generating a new one")
-            try forget()
-            return nil
-        }
-        return DeviceIdentity(
-            privateKey: data.prefix(length),
-            publicKey: data.suffix(length)
-        )
-    }
-
-    private static func store(_ identity: DeviceIdentity) throws {
-        var item = query()
-        item[kSecValueData as String] = identity.privateKey + identity.publicKey
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-
-        let status = SecItemAdd(item as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw DeviceIdentityFailure.keychainFailed(status)
-        }
+        let fresh = DeviceIdentity(privateKey: Data(priv), publicKey: Data(pub))
+        try DeviceIdentityStore.store(privateKey: fresh.privateKey, publicKey: fresh.publicKey)
+        DeviceIdentityStore.log.notice("generated this device's static key")
+        return fresh
     }
 }

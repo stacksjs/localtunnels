@@ -739,3 +739,44 @@ describe('a location this device cannot join', () => {
     expect(stored['buddyvpn.region']).toBe('us-west')
   })
 })
+
+/*
+ * What the coordinator calls this device, and how to stop it calling it
+ * that. `DeviceIdentity.forget()` existed and nothing called it — the same
+ * shape as the unpairing that came before it, and it matters for the same
+ * reason: a key that has been somewhere it should not have been needs an
+ * answer, and there was none.
+ */
+describe('this device’s key', () => {
+  it('is shown and resettable, both bound to the tunnel', () => {
+    expect(source).toContain('deviceShort()')
+    expect(source).toContain('resetDevice')
+  })
+
+  /*
+   * Shown shortened. The whole key on a settings screen is longer than it
+   * is useful; sixteen characters is enough to compare against a server's
+   * peer list, which is the only thing anybody does with it.
+   */
+  it('is shortened rather than printed whole', () => {
+    expect(source).toContain('slice(0, 16)')
+  })
+
+  /*
+   * Said next to the button. Resetting reaches this device: the old key
+   * keeps whatever access it had until somebody removes it on the server,
+   * and whoever is resetting because a key leaked needs to know that is not
+   * the end of it.
+   */
+  it('says that resetting does not revoke the old key', () => {
+    expect(source).toContain('until it is removed on the server')
+  })
+
+  // The stand-in joins nothing and so is known by nobody; the section is
+  // absent rather than showing an empty key.
+  it('is absent on a simulated build', async () => {
+    const screen = await render('settings', {}, { keychain: {} }).settle()
+    expect(screen.text).not.toContain('This device')
+    expect(screen.text).toContain('Not paired')
+  })
+})

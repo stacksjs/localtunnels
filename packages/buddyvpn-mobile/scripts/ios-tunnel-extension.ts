@@ -66,13 +66,23 @@ export const TUNNEL_SUFFIX = 'Tunnel'
 export const BRIDGE_DIR = 'Bridge'
 
 /** The app-target sources copied from `native/ios/`, in build order. */
-const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m']
+const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m', 'DeviceIdentityStore.swift']
 
 /** The extension-target sources, likewise. */
-const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift', 'CoordinatorClient.swift', 'DeviceIdentity.swift']
+const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift', 'CoordinatorClient.swift', 'DeviceIdentity.swift', 'DeviceIdentityStore.swift']
 
 /** The protocol core, cross-compiled for iOS and linked into the provider. */
 export const CORE_FRAMEWORK = 'libltvpn.xcframework'
+
+/**
+ * The Keychain group the app and the extension share.
+ *
+ * `$(AppIdentifierPrefix)` is the team prefix, filled in at build time.
+ * Matches `DeviceIdentity.accessGroup` in the Swift; a difference there is
+ * two separate keys under one name and two processes that disagree about
+ * what this device is called.
+ */
+export const SHARED_KEYCHAIN_GROUP = '$(AppIdentifierPrefix)org.localtunnels.buddyvpn.shared'
 
 /** How Swift reaches the C the core exposes. */
 const BRIDGING_HEADER = 'Tunnel-Bridging-Header.h'
@@ -177,6 +187,18 @@ export function withTunnelTarget(project: any, plan: TunnelPlan): any {
 export function withNetworkEntitlements(entitlements: Record<string, unknown>, plan: TunnelPlan): Record<string, unknown> {
   return {
     ...entitlements,
+    /*
+     * The group both processes read the device's key from, added to
+     * whatever is already there rather than replacing it. Craft writes its
+     * own access group into this file, and dropping it would take secure
+     * storage with it.
+     */
+    'keychain-access-groups': [
+      ...new Set([
+        ...(Array.isArray(entitlements['keychain-access-groups']) ? entitlements['keychain-access-groups'] as string[] : []),
+        SHARED_KEYCHAIN_GROUP,
+      ]),
+    ],
     // The entitlement Apple grants by request. `packet-tunnel-provider` is
     // the one that carries a custom protocol; `vpn.api` — the one a paid
     // account gets — only drives IKEv2, IPsec and L2TP, which this is not.
@@ -211,6 +233,10 @@ export function tunnelInfoPlist(plan: TunnelPlan): Record<string, unknown> {
 /** The extension's own entitlements: the same two, for the other process. */
 export function tunnelEntitlements(plan: TunnelPlan): Record<string, unknown> {
   return {
+    'keychain-access-groups': [
+      '$(AppIdentifierPrefix)$(CFBundleIdentifier)',
+      SHARED_KEYCHAIN_GROUP,
+    ],
     'com.apple.developer.networking.networkextension': ['packet-tunnel-provider'],
     'com.apple.security.application-groups': [plan.appGroup],
   }
@@ -251,6 +277,20 @@ export function withoutNetworkEntitlements(entitlements: Record<string, unknown>
   const next = { ...entitlements }
   delete next['com.apple.developer.networking.networkextension']
   delete next['com.apple.security.application-groups']
+
+  /*
+   * Only our group leaves. Craft writes its own access group into this file
+   * and secure storage depends on it, so removing the key outright would
+   * turn a capability being switched off into the Keychain being switched
+   * off.
+   */
+  const groups = Array.isArray(next['keychain-access-groups'])
+    ? (next['keychain-access-groups'] as string[]).filter(group => group !== SHARED_KEYCHAIN_GROUP)
+    : []
+  if (groups.length > 0)
+    next['keychain-access-groups'] = groups
+  else
+    delete next['keychain-access-groups']
   return next
 }
 
@@ -286,7 +326,17 @@ export function writePlist(path: string, value: Record<string, unknown>): void {
  */
 export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] {
   const done: string[] = []
+  /*
+   * Emptied, not merely written into.
+   *
+   * These directories are generated, and copying over them leaves anything
+   * that used to be claimed and no longer is. A source file renamed or
+   * split in two stays behind and is still compiled — which is how a type
+   * that moved between files became `invalid redeclaration` in a build
+   * whose sources were correct.
+   */
   const tunnelDir = join(output, TUNNEL_SUFFIX)
+  rmSync(tunnelDir, { recursive: true, force: true })
   mkdirSync(tunnelDir, { recursive: true })
 
   /** Copy one tracked source into a generated directory. */
@@ -319,6 +369,7 @@ export function emitTunnelExtension(output: string, plan: TunnelPlan): string[] 
   // The app's half: the manager that asks iOS for a tunnel, and the one hook
   // there is to start it from.
   const bridgeDir = join(output, BRIDGE_DIR)
+  rmSync(bridgeDir, { recursive: true, force: true })
   mkdirSync(bridgeDir, { recursive: true })
   for (const file of BRIDGE_SOURCES) {
     copyNative(file, bridgeDir)

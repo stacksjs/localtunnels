@@ -162,10 +162,19 @@ describe('entitlements', () => {
    * into that file, and replacing it rather than merging would drop secure
    * storage without a word.
    */
-  it('keeps what Craft already put in the app’s entitlements', () => {
+  /*
+   * The app and the extension are separate processes with separate
+   * containers. Without a shared group they each get their own Keychain item
+   * under the same name, and the app would show and reset a key the tunnel
+   * never uses — both looking like they worked.
+   */
+  it('adds a shared Keychain group without dropping Craft’s', () => {
     const craft = { 'keychain-access-groups': ['$(AppIdentifierPrefix)$(CFBundleIdentifier)'] }
     const merged = withNetworkEntitlements(craft, PLAN)
-    expect(merged['keychain-access-groups']).toEqual(craft['keychain-access-groups'])
+    expect(merged['keychain-access-groups']).toEqual([
+      '$(AppIdentifierPrefix)$(CFBundleIdentifier)',
+      '$(AppIdentifierPrefix)org.localtunnels.buddyvpn.shared',
+    ])
     expect(merged['com.apple.security.application-groups']).toEqual([PLAN.appGroup])
   })
 
@@ -210,7 +219,12 @@ describe('turning it back off', () => {
     expect(off.targets.BuddyVPN.dependencies).toEqual([{ target: 'SomethingElse' }])
   })
 
-  it('strips both entitlements and keeps Craft’s', () => {
+  /*
+   * Only our group leaves. Craft's own access group is what secure storage
+   * depends on, so removing the key outright would turn a capability being
+   * switched off into the Keychain being switched off.
+   */
+  it('strips what it added and leaves Craft’s Keychain group', () => {
     const craft = { 'keychain-access-groups': ['$(AppIdentifierPrefix)$(CFBundleIdentifier)'] }
     const stripped = withoutNetworkEntitlements(withNetworkEntitlements(craft, PLAN))
     expect(stripped).toEqual(craft)

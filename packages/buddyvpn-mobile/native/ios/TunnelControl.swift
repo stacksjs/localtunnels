@@ -131,6 +131,21 @@ final class TunnelControl: NSObject {
             )
         case "disconnect":
             disconnect()
+        case "forget-identity":
+            /*
+             * A new key is a new device to the coordinator: a fresh address,
+             * and whatever the old key was allowed stays allowed until
+             * somebody removes it there. The answer to a key that has been
+             * somewhere it should not have been, and nothing smaller.
+             */
+            do {
+                try DeviceIdentityStore.forget()
+                log.notice("this device's key was reset")
+            }
+            catch {
+                log.error("could not reset this device's key: \(error.localizedDescription, privacy: .public)")
+            }
+            publish()
         case let other:
             log.error("unknown tunnel request \(other ?? "nil", privacy: .public)")
         }
@@ -251,6 +266,9 @@ final class TunnelControl: NSObject {
 
         var frame: [String: Any] = [
             "phase": phase(for: status),
+            // Read, never generated: asking what this device is called is
+            // not a reason to give it a name.
+            "deviceKey": DeviceIdentityStore.publicKeyBase64IfPresent() ?? NSNull(),
             "region": configuration?["region"] as? String ?? NSNull(),
             "exitIp": configuration?["exitIp"] as? String ?? NSNull(),
             "error": error ?? NSNull(),
