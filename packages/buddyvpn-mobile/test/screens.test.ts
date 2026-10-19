@@ -66,6 +66,16 @@ interface Screen {
   handlerIds: (event: string) => string[]
   /** Send a handler back the way the host does, and re-read the screen. */
   fire: (handlerId: string, nativeEvent?: unknown) => Screen
+  /**
+   * Let anything the screen started finish, then read it again.
+   *
+   * Some of what a screen does on mount is asynchronous — asking the host
+   * for the link it was opened with, writing to the Keychain — and the tree
+   * at the end of hydration is the tree before any of that came back.
+   * Reading without this says a pairing did nothing, which is exactly what
+   * it would look like if it were broken.
+   */
+  settle: () => Promise<Screen>
 }
 
 let source = ''
@@ -101,7 +111,14 @@ beforeAll(async () => {
 })
 
 /** Run one route against a stub host and read back what it drew. */
-function render(route: string, stored: Record<string, string> = {}): Screen {
+interface Host {
+  /** The link the app was launched with, as iOS hands one over. */
+  initialURL?: string
+  /** Pairings already on this device, as the Keychain would hold them. */
+  keychain?: Record<string, string>
+}
+
+function render(route: string, stored: Record<string, string> = {}, host: Host = {}): Screen {
   const posted: Message[] = []
   let deliver: ((raw: string) => void) | null = null
   const globals = globalThis as any
@@ -139,8 +156,39 @@ function render(route: string, stored: Record<string, string> = {}): Screen {
        * error attributed to whichever test happened to be running. A real
        * host always answers; so does this one.
        */
-      if (message.type === 'API_REQUEST')
-        deliver?.(JSON.stringify({ id: `r${message.id}`, type: 'API_RESULT', correlationId: message.id, payload: { data: null } }))
+      if (message.type === 'API_REQUEST') {
+        // Answered as the real host answers: the module and method decide
+        // what comes back, and a screen asking for the link it was opened
+        // with must get one when there is one.
+        const { module, method, args } = message.payload ?? {}
+        const answer = (data: unknown): void => {
+          deliver?.(JSON.stringify({ id: `r${message.id}`, type: 'API_RESULT', correlationId: message.id, payload: { data } }))
+        }
+        /*
+         * A device with no Keychain refuses rather than quietly succeeding.
+         * A stub that always said yes would let a pairing "save" on a host
+         * that cannot keep one, which is the case the screen most needs to
+         * be able to report.
+         */
+        if (module === 'SecureStorage' && !host.keychain) {
+          deliver?.(JSON.stringify({
+            id: `r${message.id}`,
+            type: 'API_ERROR',
+            correlationId: message.id,
+            payload: { code: 'SECURE_STORAGE_ERROR', message: 'no keychain on this device' },
+          }))
+          return
+        }
+        if (module === 'DeepLinks' && method === 'getInitialURL')
+          return answer(host.initialURL ?? null)
+        if (module === 'SecureStorage' && method === 'get')
+          return answer(host.keychain?.[args?.[0]] ?? null)
+        if (module === 'SecureStorage' && method === 'set') {
+          host.keychain![args?.[0]] = args?.[1]
+          return answer(true)
+        }
+        answer(null)
+      }
     },
     onMessage: (callback: (raw: string) => void) => { deliver = callback },
   }
@@ -157,13 +205,16 @@ function render(route: string, stored: Record<string, string> = {}): Screen {
     throw new Error(`${route} rendered no document; it posted [${posted.map(message => message.type).join(', ')}]`)
 
   let applied = 0
+  // Nodes built by `createNode` and not yet attached. They arrive before the
+  // `insertChild` that places them, sometimes in a later batch.
+  const pool = new Map<string, Node>()
   const read = (): Screen => {
     // Mutations are applied cumulatively: each `fire` adds more, and the tree
     // is only true once every one of them has landed.
     const operations = posted
       .filter(message => message.type === 'MUTATE')
       .flatMap(message => message.payload?.operations ?? [])
-    for (const operation of operations.slice(applied)) applyOperation(root, operation)
+    for (const operation of operations.slice(applied)) applyOperation(root, operation, pool)
     applied = operations.length
 
     const nodes: Node[] = []
@@ -195,6 +246,13 @@ function render(route: string, stored: Record<string, string> = {}): Screen {
           throw new Error(`no ${nodeType} with ${event} at index ${nth}; found ${matches.length}`)
         return found
       },
+      settle: async () => {
+        // Two turns of the macrotask queue: one for the host's answer to
+        // land, one for what the screen does with it.
+        await new Promise(resolve => setTimeout(resolve, 0))
+        await new Promise(resolve => setTimeout(resolve, 0))
+        return read()
+      },
       fire: (handlerId, nativeEvent = {}) => {
         if (!deliver)
           throw new Error('the screen never asked to hear from its host')
@@ -206,8 +264,34 @@ function render(route: string, stored: Record<string, string> = {}): Screen {
   return read()
 }
 
-/** Apply one hydration operation to the tree, as the host would. */
-function applyOperation(root: Node, operation: any): void {
+/**
+ * Apply one operation to the tree, as the host would.
+ *
+ * Four kinds matter. `removeNode` and `updateNode` arrive during hydration,
+ * when branches that do not apply are dropped and handlers are given ids.
+ * `createNode` and `insertChild` arrive later, when something that was
+ * dropped comes back — a banner appearing after an answer, a row appearing
+ * when state changes. Ignoring those two made this harness blind to
+ * everything a screen does after it first draws, which is most of what a
+ * reactive screen is for.
+ */
+function applyOperation(root: Node, operation: any, pool: Map<string, Node>): void {
+  if (operation.op === 'createNode') {
+    // Built but not attached: `insertChild` says where it goes, and it may
+    // arrive in the same batch or a later one.
+    pool.set(operation.id, { ...operation.node, id: operation.id })
+    return
+  }
+  if (operation.op === 'insertChild') {
+    const parent = findNode(root, operation.parentId) ?? pool.get(operation.parentId)
+    const child = pool.get(operation.childId) ?? findNode(root, operation.childId)
+    if (!parent || !child)
+      return
+    const children = parent.children ?? (parent.children = [])
+    const at = typeof operation.index === 'number' ? operation.index : children.length
+    children.splice(Math.min(at, children.length), 0, child)
+    return
+  }
   if (operation.op === 'removeNode') {
     const prune = (node: Node): void => {
       if (!node.children)
@@ -220,19 +304,7 @@ function applyOperation(root: Node, operation: any): void {
   }
   if (operation.op !== 'updateNode')
     return
-  const find = (node: Node): Node | null => {
-    if (node.id === operation.id)
-      return node
-    for (const child of node.children ?? []) {
-      if (typeof child === 'string')
-        continue
-      const found = find(child)
-      if (found)
-        return found
-    }
-    return null
-  }
-  const target = find(root)
+  const target = findNode(root, operation.id) ?? pool.get(operation.id)
   if (!target)
     return
   const patch = operation.patch ?? {}
@@ -250,6 +322,20 @@ function applyOperation(root: Node, operation: any): void {
     target.props = { ...target.props, ...patch.props }
   if (patch.style)
     target.props = { ...target.props, __style: { ...(target.props?.__style as object), ...patch.style } }
+}
+
+/** The node with this id, anywhere in the tree. */
+function findNode(node: Node, id: string): Node | null {
+  if (node.id === id)
+    return node
+  for (const child of node.children ?? []) {
+    if (typeof child === 'string')
+      continue
+    const found = findNode(child, id)
+    if (found)
+      return found
+  }
+  return null
 }
 
 const settings = (stored: Record<string, unknown>): Record<string, string> =>
@@ -424,5 +510,68 @@ describe('the locations screen', () => {
     const screen = render('locations', stored)
     screen.fire(screen.handlerIds('onPress')[1])
     expect(stored['buddyvpn.region']).toBeUndefined()
+  })
+})
+
+/*
+ * Opening the app by scanning a code off a desktop screen.
+ *
+ * The whole point of using a link rather than a scanner is that iOS does
+ * the reading and launches the app with a URL — so the moment that matters
+ * is the one where the app was closed, and `getInitialURL` is the only way
+ * it hears about it. A screen that listened for `onLink` alone would work
+ * every time except the first, which is the only time anybody pairs.
+ */
+describe('a scanned pairing code', () => {
+  const link = 'buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example.com%3A51821&r=eu-central&k=a-shared-secret-token'
+
+  it('is acted on when it is what opened the app', async () => {
+    const keychain: Record<string, string> = {}
+    const screen = await render('connect', {}, { initialURL: link, keychain }).settle()
+    expect(screen.text).toContain('Paired')
+    expect(JSON.parse(keychain['vpn.pairing'])).toMatchObject({
+      coordinatorUrl: 'wss://vpn.example.com:51821',
+      region: 'eu-central',
+    })
+  })
+
+  /*
+   * Somebody who scanned a code for Germany meant Germany. Leaving the
+   * picker wherever it was is a quiet way to send their traffic somewhere
+   * they did not choose.
+   */
+  it('selects the region it paired', async () => {
+    const stored: Record<string, string> = {}
+    await render('connect', stored, { initialURL: link, keychain: {} }).settle()
+    expect(stored['buddyvpn.region']).toBe('eu-central')
+  })
+
+  /*
+   * A pairing that silently failed is the worst outcome: the app looks
+   * ready and the first connection fails for a reason nobody can trace
+   * back to a code scanned minutes earlier.
+   */
+  it('says so when the code is not one this build understands', async () => {
+    const screen = await render('connect', {}, { initialURL: link.replace('v=1', 'v=9'), keychain: {} }).settle()
+    expect(screen.text).toContain('not one this app understands')
+  })
+
+  it('says so when it could not be kept', async () => {
+    // A host with no Keychain: `savePairing` reports false rather than
+    // pretending, and the screen has to show that rather than "Paired".
+    const screen = await render('connect', {}, { initialURL: link }).settle()
+    expect(screen.text).toContain('could not be saved')
+  })
+
+  // The app is opened by other links too, and complaining about one it was
+  // not given would be noise on every launch.
+  it('says nothing about a link that is not a pairing', async () => {
+    const screen = await render('connect', {}, { initialURL: 'buddyvpn://connect/us-west', keychain: {} }).settle()
+    expect(screen.text).not.toContain('Paired')
+    expect(screen.text).toContain('Not connected')
+  })
+
+  it('says nothing when the app was opened normally', async () => {
+    expect((await render('connect').settle()).text).not.toContain('Paired')
   })
 })
