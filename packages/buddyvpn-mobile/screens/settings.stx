@@ -18,12 +18,23 @@ const RESOLVERS = Object.keys(DNS_PRESETS).map(id => ({
 
 <script client>
 import { haptics, navigation } from '../src/native'
+import { describePairing, forgetPairing, readPairing } from '../src/pairing'
 import { readSettings, writeSettings } from '../src/settings'
 
 const settings = state(readSettings())
+/*
+ * The network this device belongs to, or null.
+ *
+ * Read asynchronously because it lives in the Keychain, which is where a
+ * shared secret belongs and which has no synchronous read. The screen draws
+ * "not paired" until the answer arrives, which is the honest thing to show
+ * while nothing is known.
+ */
+const pairing = state(null)
 
 onMount(() => {
   navigation.setOptions({ title: 'Settings', largeTitle: true })
+  void readPairing().then(found => pairing.set(found))
   // Re-read when the screen comes back to the front, for the same reason the
   // connect screen does: a pushed screen leaves this one mounted, so setup
   // does not run again and anything read once would be stale from then on.
@@ -43,6 +54,24 @@ const chooseDns = (id: string) => {
 const toggleLan = () => {
   haptics.selection()
   settings.set(writeSettings({ allowLan: !allowLan() }))
+}
+
+const paired = () => pairing() !== null
+const pairedWith = () => describePairing(pairing())
+
+/*
+ * Forgetting a network is what this device can do about a key it should no
+ * longer hold — a phone that was lost, a secret that was rotated, a network
+ * somebody left. Without a coordinator there is nothing to connect to, so
+ * this is the whole of unpairing from the device's side.
+ *
+ * It does not reach the coordinator, which has no notion of revoking one
+ * member: anyone still holding the key can still join. Saying that where
+ * somebody is about to rely on it matters more than the button does.
+ */
+const forget = () => {
+  haptics.selection()
+  void forgetPairing().then(() => pairing.set(null))
 }
 
 const toggleAutoConnect = () => {
@@ -88,6 +117,32 @@ const toggleAutoConnect = () => {
     </view>
     <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
       Used while connected. A change takes effect on the next connect.
+    </text>
+
+    <text class="px-1 pb-2 pt-4 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Network</text>
+    <view class="overflow-hidden rounded-2xl bg-white dark:bg-gray-900">
+      @if(paired())
+        <view class="flex-row items-center gap-3 px-4 py-3">
+          <view class="flex-1">
+            <text class="text-base text-gray-900 dark:text-gray-100">Paired</text>
+            <!-- The host and the region. Never the key: there is no reason
+                 to put a shared secret back on a screen after storing it. -->
+            <text class="pt-0.5 text-xs text-gray-500 dark:text-gray-400" :text="pairedWith()"></text>
+          </view>
+          <a class="shrink-0 rounded-full bg-red-100 px-3 py-1 dark:bg-red-950" @click="forget">
+            <text class="text-xs text-red-700 dark:text-red-300">Forget</text>
+          </a>
+        </view>
+      @endif
+      @if(!paired())
+        <view class="px-4 py-3">
+          <text class="text-base text-gray-900 dark:text-gray-100">Not paired</text>
+          <text class="pt-0.5 text-xs text-gray-500 dark:text-gray-400">Open BuddyVPN on your Mac, go to Settings, and point this phone's camera at the pairing code.</text>
+        </view>
+      @endif
+    </view>
+    <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
+      Forgetting a network removes it from this device only. Anyone still holding its code can still join it.
     </text>
 
     <text class="px-1 pb-2 pt-4 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Connection</text>

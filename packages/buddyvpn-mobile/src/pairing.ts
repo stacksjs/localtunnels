@@ -240,3 +240,25 @@ export async function applyPairingUrl(
   remember(pairing.region)
   return { ok: true, message: `Paired. This device can now connect through ${pairing.region}.` }
 }
+
+/**
+ * A pairing in a form a screen can show.
+ *
+ * The host and the region, and deliberately never the key. There is no
+ * reason to put a shared secret back on a screen after it has been stored,
+ * and a settings panel left open on a desk is a worse place for one than
+ * the code that was shown on purpose and hidden again.
+ */
+export function describePairing(pairing: Pairing | null): string {
+  if (!pairing)
+    return ''
+  let host = pairing.coordinatorUrl
+  try {
+    host = new URL(pairing.coordinatorUrl).host
+  }
+  catch {
+    // Already validated on the way in; if it will not parse, show it whole
+    // rather than nothing.
+  }
+  return `${host} · ${pairing.region}`
+}

@@ -197,6 +197,10 @@ function render(route: string, stored: Record<string, string> = {}, host: Host =
           host.keychain![args?.[0]] = args?.[1]
           return answer(true)
         }
+        if (module === 'SecureStorage' && (method === 'remove' || method === 'delete')) {
+          delete host.keychain![args?.[0]]
+          return answer(true)
+        }
         answer(null)
       }
     },
@@ -583,5 +587,80 @@ describe('a scanned pairing code', () => {
 
   it('says nothing when the app was opened normally', async () => {
     expect((await render('connect').settle()).text).not.toContain('Paired')
+  })
+})
+
+/*
+ * Unpairing: what a device can do about a key it should no longer hold — a
+ * phone that was lost, a secret that was rotated, a network somebody left.
+ * `forgetPairing` was written and tested and reached by nothing, which is
+ * the same shape as a tunnel nothing selected and settings nothing read.
+ */
+/**
+ * The handler on the control that says a given thing.
+ *
+ * Found by its words rather than by its position: `handlerIds(...).at(-1)`
+ * means "whichever control happens to be last", which is true until somebody
+ * adds a row and then quietly taps the wrong one.
+ */
+function control(screen: Screen, text: string): string {
+  const says = (node: Node | string): boolean => {
+    if (typeof node === 'string')
+      return node.includes(text)
+    return (node.children ?? []).some(says)
+  }
+  const found = screen.nodes.find(node => node.events?.onPress && says(node))
+  if (!found?.events?.onPress)
+    throw new Error(`no control saying "${text}"`)
+  return found.events.onPress
+}
+
+describe('the paired network', () => {
+  const paired = {
+    'vpn.pairing': JSON.stringify({
+      coordinatorUrl: 'wss://vpn.example.com:51821',
+      authKey: 'a-shared-secret-token',
+      region: 'eu-central',
+    }),
+  }
+
+  it('is shown by host and region once it is known', async () => {
+    const screen = await render('settings', {}, { keychain: { ...paired } }).settle()
+    expect(screen.text).toContain('Paired')
+    expect(screen.text).toContain('vpn.example.com:51821 · eu-central')
+  })
+
+  /*
+   * Never the key. There is no reason to put a shared secret back on a
+   * screen after storing it, and a settings panel left open on a desk is a
+   * worse place for one than a code shown on purpose and hidden again.
+   */
+  it('never shows the secret it is holding', async () => {
+    const screen = await render('settings', {}, { keychain: { ...paired } }).settle()
+    expect(screen.text).not.toContain('a-shared-secret-token')
+  })
+
+  it('says how to pair when this device has not been', async () => {
+    const screen = await render('settings', {}, { keychain: {} }).settle()
+    expect(screen.text).toContain('Not paired')
+    expect(screen.text).toContain("point this phone's camera")
+  })
+
+  it('can be forgotten, and the key goes with it', async () => {
+    const keychain = { ...paired }
+    const screen = await render('settings', {}, { keychain }).settle()
+    const after = await screen.fire(control(screen, 'Forget')).settle()
+    expect(keychain['vpn.pairing']).toBeUndefined()
+    expect(after.text).toContain('Not paired')
+  })
+
+  /*
+   * Said where somebody is about to rely on it: this reaches the device
+   * only. The coordinator has no notion of revoking one member, so anyone
+   * still holding the code can still join.
+   */
+  it('says that forgetting reaches this device only', async () => {
+    const screen = await render('settings', {}, { keychain: { ...paired } }).settle()
+    expect(screen.text).toContain('removes it from this device only')
   })
 })
