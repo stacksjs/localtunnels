@@ -198,6 +198,29 @@ const bindings = Array.from(compiled.matchAll(/kind:"(if|for|event|attr|text|sho
 const counted = bindings.reduce<Record<string, number>>((all, kind) => ({ ...all, [kind]: (all[kind] ?? 0) + 1 }), {})
 console.log(`[mobile] bindings: ${Object.entries(counted).map(([kind, n]) => `${n} ${kind}`).join(', ') || 'none'}`)
 
+/*
+ * Screens with no bindings are screens that do nothing, and this build has
+ * now shipped them twice without saying so.
+ *
+ * A setup function is not enough on its own: the artifact can carry one and
+ * still have had every binding dropped, which is what a machine without a
+ * working client-script bundler produces. The result compiles, reports
+ * success, and renders a tree that never changes — no taps, no state, no
+ * text that was bound rather than written.
+ *
+ * These screens use `@click` and `:text`, so a build with none of either is
+ * wrong by inspection. Said with the compiler's own output, because the
+ * reason is never in ours.
+ */
+const expected = ['event', 'text'] as const
+const missing = expected.filter(kind => (counted[kind] ?? 0) === 0)
+if (missing.length > 0) {
+  console.error(`[mobile] the screens compiled with no ${missing.join(' or ')} bindings, so nothing on them would react`)
+  console.error('[mobile] the compiler said:')
+  console.error(`${result.stdout}\n${result.stderr}`.trim() || '(nothing)')
+  process.exit(1)
+}
+
 if (unaccounted.length > 0) {
   console.warn(`[mobile] ${unaccounted.length} handler(s) reached no binding: ${[...new Set(unaccounted)].join(', ')}`)
   console.warn('[mobile] those controls will render and not react — see screens/README.md')
