@@ -1,22 +1,56 @@
 # Provisioning
 
-The phone app can do everything a member of a network does except become one.
-This is the gap, and it is a decision rather than an oversight.
+How a phone becomes a member of a network, and what it still cannot do about
+leaving one.
 
 ## What a device needs before it can connect
 
-Three things. Two are solved:
+Three things, and all three now have an answer:
 
 | | where it comes from |
 | --- | --- |
-| A static keypair | generated on first use, kept in the Keychain (`DeviceIdentity.swift`) |
+| A static keypair | generated on first use, kept in a shared Keychain group (`DeviceIdentity.swift`, `DeviceIdentityStore.swift`) |
 | An address, and the exit's key and endpoint | the coordinator, at registration (`CoordinatorClient.swift`) |
-| **The coordinator's address, and the key to join it** | **nothing — this is the gap** |
+| The coordinator's address, and the key to join it | a pairing code shown by the desktop app (`src/pairing.ts`) |
 
-On the desktop both come from
+On the desktop the last of those comes from
 `~/Library/Application Support/BuddyVPN/servers.json`, written by
-`bun run deploy:vpn --region <id>`. A phone has no such file and no way to be
-handed one.
+`bun run deploy:vpn --region <id>`. A phone has no such file, so the desktop
+shows it instead.
+
+## The pairing code
+
+Settings → **Pair a phone** → *Show code*. It encodes a link:
+
+```
+buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west
+```
+
+The app registers the `buddyvpn` scheme, so **the phone's own camera reads
+it** and offers to open the app. There is no scanner in this app and no
+camera permission: iOS does the reading, and the app only ever sees a URL it
+was launched with.
+
+The connect screen takes it from either of the two moments one can arrive —
+`getInitialURL` for a code scanned while the app was closed, which is the
+common case, and `onLink` for one arriving while it is open. A screen
+listening only for the second would work every time except the first, which
+is the only time anybody pairs.
+
+Everything in a link is validated rather than trusted. It comes from outside
+the app — anyone can put a `buddyvpn://` link in front of somebody — and the
+values reach a VPN configuration, so a coordinator URL is a scheme, a host
+and an optional port and nothing else: no path, no query, no credentials. An
+unrecognised version is refused outright rather than read halfway.
+
+The pairing is kept in the Keychain, not `UserDefaults`, and validated again
+on the way out: it outlives app updates, and a format that changed underneath
+must not be acted on.
+
+`packages/buddyvpn/src/pairing.ts` builds the link and
+`packages/buddyvpn-mobile/src/pairing.ts` reads it. Two implementations of
+one format, so the desktop's builder is imported into the phone's tests and
+fed to the phone's parser — the only check that fails if the two drift apart.
 
 ## Why it is not simply baked into the build
 
@@ -28,27 +62,41 @@ shipping a new build to everyone who already had it.
 
 `coordinatorUrl` alone would be harmless to bake. It is not useful alone.
 
-## The shape the code already has
+## What a pairing code is, plainly
 
-`ConnectRequest` carries `coordinatorUrl` and `authKey`, both `null` today,
-and `TunnelControl` passes them to the provider through
-`providerConfiguration` when they are present. The provider refuses to start
-with `notProvisioned` when they are absent. So the channel exists and is
-typed; what is missing is something to put in it.
+A shared secret on a screen. Anyone who photographs it joins the network.
+That is no worse than `servers.json` on a laptop and no better, which is why
+the desktop keeps it behind a button, drops it when the panel closes, and
+names the location in the warning every time it is shown.
 
-## Options, none of them chosen
+## What a device can undo
 
-- **Pair with the desktop app.** It already holds `servers.json`. A QR code
-  on the desktop and a camera on the phone moves both values across without
-  either being typed or sent anywhere. Costs a camera permission and a
-  pairing screen.
-- **A pasted invite.** One opaque token carrying both values, copied from the
-  desktop app or from `deploy:vpn` output. No camera, more typing, and
-  tokens get forwarded in chat.
-- **An account.** The phone signs in and is handed the networks it belongs
-  to. The most familiar, and the only one that makes key rotation and
-  revoking a lost phone possible — and it means running an account service
-  this project does not have.
+- **Forget the network** (Settings → Network → *Forget*). Removes the
+  pairing from this device. With no coordinator there is nothing to connect
+  to, so this is the whole of unpairing from the device's side.
+- **Reset this device's key** (Settings → This device → *Reset*). A new key
+  is a new device to the coordinator: a fresh address, a fresh lease.
 
-The first is the smallest thing that is not a compromise. The third is where
-this ends up if the app ever has more than one user per network.
+Neither reaches the coordinator. It has no notion of revoking one member, so
+**anyone still holding the code can still join, and the old key keeps
+whatever access it had until somebody removes it on the server.** Both
+screens say so next to the button.
+
+## What is still missing
+
+Per-device credentials the coordinator can revoke. Every device on a network
+shares one secret today, which means a lost phone cannot be excluded without
+rotating the key for everyone and re-pairing each remaining device by hand.
+
+An account service would solve it, and is the shape this ends up in if a
+network ever has more than one person on it. It is not built, and nothing
+here pretends otherwise: the wording in the app is careful to say what
+forgetting and resetting actually do rather than implying they revoke
+anything.
+
+## Not yet verified
+
+That a phone's camera reads the code. The payload is tested on both sides,
+the encoder is a library, the rendered code has been looked at — but the scan
+needs a phone, as does everything else past the Network Extension
+entitlement.
