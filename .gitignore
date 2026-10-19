@@ -29,3 +29,9 @@ pantry
 
 # The VPN app bundle and its disk image.
 /packages/buddyvpn/dist/
+
+# stx's own compile cache, keyed by content hash. Tracked by accident, as it
+# was once in packages/buddyvpn-mobile: it is rewritten on every build, so it
+# turns every diff into churn, and a cache that travels between machines is
+# worse than one rebuilt.
+.stx/
