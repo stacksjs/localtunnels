@@ -9,5 +9,9 @@
     "build:web": "bun run scripts/build-web.ts",
     "build:ios": "bun run scripts/build-ios.ts",
     "typecheck": "bunx tsc --noEmit --project tsconfig.json"
+  },
+  "devDependencies": {
+    "@stacksjs/stx": "0.2.518",
+    "craft-native": "0.0.173"
   }
 }

@@ -77,11 +77,27 @@ beforeAll(async () => {
    * passes against last week's screens is worse than one that does not run.
    */
   const built = Bun.spawnSync(['bun', 'run', 'build:web'], { cwd: PACKAGE_DIR, stdout: 'pipe', stderr: 'pipe' })
+  const output = `${built.stdout.toString()}\n${built.stderr.toString()}`.trim()
   if (built.exitCode !== 0)
-    throw new Error(`the screens did not compile:\n${built.stderr.toString()}`)
+    throw new Error(`the screens did not compile:\n${output}`)
   if (!existsSync(BUNDLE))
-    throw new Error(`no bundle at ${BUNDLE}`)
+    throw new Error(`no bundle at ${BUNDLE}\n${output}`)
   source = await Bun.file(BUNDLE).text()
+
+  /*
+   * A bundle that built is not the same as a bundle with screens in it.
+   *
+   * This exists because of a failure that was invisible from here: the
+   * screens compiled on one machine and to empty documents on another, and
+   * every assertion below then failed with "expected more than 10 nodes,
+   * received 1" — true, useless, and nothing about the build in sight. The
+   * build's own output is the thing worth reading, so it is carried to
+   * wherever this is noticed.
+   */
+  for (const route of ['connect', 'locations', 'settings']) {
+    if (!source.includes(`"${route}"`))
+      throw new Error(`the bundle names no ${route} screen. The build said:\n${output}`)
+  }
 })
 
 /** Run one route against a stub host and read back what it drew. */
@@ -111,7 +127,21 @@ function render(route: string, stored: Record<string, string> = {}): Screen {
     colorScheme: 'light',
     capabilityTimeoutMs: 5000,
     capabilities: [],
-    postMessage: (raw: string) => { posted.push(JSON.parse(raw)) },
+    postMessage: (raw: string) => {
+      const message = JSON.parse(raw)
+      posted.push(message)
+      /*
+       * Answer anything that expects an answer.
+       *
+       * A screen asking for haptics is making a correlated request, and a
+       * host that never replies leaves it pending until the protocol times
+       * it out — five seconds later, rejecting into nothing, as an unhandled
+       * error attributed to whichever test happened to be running. A real
+       * host always answers; so does this one.
+       */
+      if (message.type === 'API_REQUEST')
+        deliver?.(JSON.stringify({ id: `r${message.id}`, type: 'API_RESULT', correlationId: message.id, payload: { data: null } }))
+    },
     onMessage: (callback: (raw: string) => void) => { deliver = callback },
   }
   globals.__stxNativeRoute = route

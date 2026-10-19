@@ -16,6 +16,14 @@
       "name": "@localtunnels/buddyvpn",
       "version": "0.2.13",
     },
+    "packages/buddyvpn-mobile": {
+      "name": "@localtunnels/buddyvpn-mobile",
+      "version": "0.2.13",
+      "devDependencies": {
+        "@stacksjs/stx": "0.2.518",
+        "craft-native": "0.0.173",
+      },
+    },
     "packages/localtunnels": {
       "name": "localtunnels",
       "version": "0.2.13",
@@ -47,6 +55,8 @@
     "@cwcss/crosswind": ["@cwcss/crosswind@0.2.19", "", { "dependencies": { "@stacksjs/clapp": "^0.2.0", "bunfig": "^0.15.17" }, "bin": { "crosswind": "./dist/cli.js" } }, "sha512-NswUZPNHbdkW4rxvmwjjIM7jyfQ/rr0X1J1uwjTUwixc3BXQs1Fk7pP5cC7MxkGGnmRTFs2O9J+U9tJ36ZJ7fQ=="],
 
     "@localtunnels/buddyvpn": ["@localtunnels/buddyvpn@workspace:packages/buddyvpn"],
+
+    "@localtunnels/buddyvpn-mobile": ["@localtunnels/buddyvpn-mobile@workspace:packages/buddyvpn-mobile"],
 
     "@localtunnels/vpn-core": ["@localtunnels/vpn-core@workspace:packages/vpn-core"],
 
