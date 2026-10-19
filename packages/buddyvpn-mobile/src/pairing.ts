@@ -192,3 +192,51 @@ export async function forgetPairing(): Promise<boolean> {
     return false
   }
 }
+
+/** What happened when a link was acted on, in words a screen can show. */
+export interface PairingOutcome {
+  ok: boolean
+  message: string
+}
+
+/**
+ * Act on a link this app was opened with.
+ *
+ * Validated, kept, and the paired region selected — somebody who scanned a
+ * code for Germany meant to connect to Germany, and leaving the picker on
+ * wherever it was is a quiet way to send their traffic somewhere they did
+ * not choose.
+ *
+ * Every outcome is a sentence rather than a boolean, because every one of
+ * them has to be shown. A pairing that silently failed is the worst case
+ * here: the app looks ready and the first connection fails with a reason
+ * nobody can trace back to a code scanned minutes earlier.
+ */
+export async function applyPairingUrl(
+  raw: string | null | undefined,
+  remember: (region: string) => void,
+): Promise<PairingOutcome | null> {
+  // Not a pairing link at all. Returning null rather than an error: the app
+  // is opened by other links too, and complaining about one it was not given
+  // would be noise on every launch.
+  if (typeof raw !== 'string' || !raw.startsWith(`${PAIR_SCHEME}//${PAIR_HOST}`))
+    return null
+
+  const pairing = parsePairingUrl(raw)
+  if (!pairing) {
+    return {
+      ok: false,
+      message: 'That code is not one this app understands. It may be for a newer version.',
+    }
+  }
+
+  if (!await savePairing(pairing)) {
+    return {
+      ok: false,
+      message: 'That code could not be saved to this device.',
+    }
+  }
+
+  remember(pairing.region)
+  return { ok: true, message: `Paired. This device can now connect through ${pairing.region}.` }
+}

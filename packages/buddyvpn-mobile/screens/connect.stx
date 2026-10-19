@@ -1,6 +1,7 @@
 <script client>
-import { haptics, navigation, whenNativeHost } from '../src/native'
-import { readRegion, regionById } from '../src/regions'
+import { deepLinks, haptics, navigation, whenNativeHost } from '../src/native'
+import { applyPairingUrl } from '../src/pairing'
+import { readRegion, regionById, writeRegion } from '../src/regions'
 import { readSettings } from '../src/settings'
 import { formatUptime, tunnel } from '../src/tunnel'
 
@@ -8,6 +9,15 @@ const region = state(readRegion())
 
 const snapshot = state(tunnel.snapshot())
 const native = state(false)
+/*
+ * What a scanned code did, if one was scanned.
+ *
+ * Shown until the next thing happens rather than dismissed on a timer: a
+ * pairing is a thing somebody did on purpose, and a confirmation that
+ * vanishes while they are still looking at the desktop screen tells them
+ * nothing.
+ */
+const paired = state(null)
 
 onMount(() => {
   // The app's name, rather than `connect` — the host titles a screen with its
@@ -40,7 +50,27 @@ onMount(() => {
   // Asked here rather than at setup: Craft installs its bridge after the
   // document starts, so the answer at setup is "no" even on a phone.
   void whenNativeHost().then(value => native.set(value))
+
+  /*
+   * A pairing code, from either of the two moments it can arrive.
+   *
+   * `initial` is the link that launched the app, which is what scanning a
+   * code off a desktop screen does when the app was closed — the common
+   * case, and the one a listener alone would miss. `onLink` is the same
+   * thing arriving while the app is already open.
+   */
+  const take = (url) => {
+    void applyPairingUrl(url, (id) => {
+      writeRegion(id)
+      region.set(readRegion())
+    }).then((outcome) => {
+      if (outcome) paired.set(outcome)
+    })
+  }
+  void deepLinks.initial().then(take)
+  const unlink = deepLinks.onLink(take)
   return () => {
+    unlink()
     unwatch()
     stop()
   }
@@ -109,6 +139,19 @@ const toggle = () => {
       shipped a demo mode once and the whole risk it carried was somebody
       believing it.
     -->
+    <!--
+      What a scanned code did. Above everything, because somebody who just
+      pointed a camera at a screen is looking for exactly this.
+    -->
+    @if(paired())
+      <view class="mt-3 flex-row items-center gap-2 rounded-2xl border p-3"
+        :class="paired().ok ? 'mt-3 flex-row items-center gap-2 rounded-2xl border border-green-300 bg-green-100 p-3 dark:border-green-700 dark:bg-green-950' : 'mt-3 flex-row items-center gap-2 rounded-2xl border border-red-300 bg-red-100 p-3 dark:border-red-700 dark:bg-red-950'">
+        <text class="flex-1 text-xs"
+          :class="paired().ok ? 'flex-1 text-xs text-green-800 dark:text-green-300' : 'flex-1 text-xs text-red-800 dark:text-red-300'"
+          :text="paired().message"></text>
+      </view>
+    @endif
+
     @if(snapshot().simulated)
       <view class="mt-3 flex-row items-center gap-2 rounded-2xl border border-orange-300 bg-orange-100 p-3 dark:border-orange-700 dark:bg-orange-950">
         <icon class="i-lucide-triangle-alert shrink-0 text-base text-orange-700 dark:text-orange-300"></icon>
