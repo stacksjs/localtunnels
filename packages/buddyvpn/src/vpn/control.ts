@@ -32,6 +32,7 @@ import { exec, shellEscape } from '../support/shell'
 import { HELPER_CLI, helperDown, helperLogPath, helperReady, helperUp, installHelper } from './helper'
 import type { Settings } from '../settings'
 import { dnsServers } from '../dns'
+import { forgetLocation } from './geo'
 import { regionById } from '../regions'
 import { readSettings } from '../settings'
 
@@ -368,6 +369,17 @@ export function connect(regionId: string): ActionResult {
   if (!region)
     return { success: false, error: 'Unknown location' }
 
+  /*
+   * The cached answer is about the old route, so it is now wrong.
+   *
+   * `geo.ts` says in as many words that connect and disconnect clear this,
+   * and nothing did: the module was written with a `forgetLocation` nobody
+   * called. For up to a minute after connecting, the window showed the
+   * address from before — the home city beside the word Connected, which is
+   * the exact failure that file exists to catch.
+   */
+  forgetLocation()
+
   const entry = readServers()[regionId]
   if (!entry)
     return { success: false, error: `No server configured for ${region.country}` }
@@ -541,6 +553,17 @@ function tunnelFailure(): string {
  * window but is not this app's to kill.
  */
 export function disconnect(): ActionResult {
+  /*
+   * Cleared here too, and this is the direction that matters.
+   *
+   * Stale after connecting shows the home address beside Connected, which
+   * reads as a tunnel that is not working — annoying, and in the safe
+   * direction. Stale after disconnecting shows the *exit's* address beside
+   * Not connected, which reads as traffic still leaving somewhere else when
+   * it is going out plainly. That is a false reassurance about exposure,
+   * and it is worth a cleared cache on a path that is already slow.
+   */
+  forgetLocation()
   const pid = connectionPid()
   if (pid === null) {
     // Nothing of ours is running, which is the state the caller wanted.
