@@ -45,6 +45,13 @@ export interface Tunnel {
   disconnect: () => Promise<void>
   /** Whether a real tunnel is available at all; false drives the banner. */
   available: () => boolean
+  /**
+   * This device's public key, or null. The stand-in has none: it joins
+   * nothing, so there is nothing to be known by.
+   */
+  deviceKey: () => string | null
+  /** Throw this device's key away and make another. */
+  forgetIdentity: () => Promise<void>
 }
 
 /** How long the stand-in spends pretending to shake hands. */
@@ -67,6 +74,14 @@ export class StubTunnel implements Tunnel {
 
   available(): boolean {
     return false
+  }
+
+  deviceKey(): string | null {
+    return null
+  }
+
+  async forgetIdentity(): Promise<void> {
+    // Nothing to forget: the stand-in never had a key.
   }
 
   snapshot(): TunnelSnapshot {

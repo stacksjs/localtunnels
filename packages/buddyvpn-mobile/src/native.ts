@@ -33,6 +33,21 @@ interface CraftBridge {
     get?: (name: string) => string | null
     onChange?: (callback: (name: string) => void) => (() => void) | undefined
   }
+  /** The Keychain. Where a shared secret goes; `storage` is a plist. */
+  secureStorage?: {
+    get?: (key: string) => Promise<unknown>
+    set?: (key: string, value: string) => Promise<unknown>
+    remove?: (key: string) => Promise<unknown>
+  }
+  /**
+   * Links the app was opened with. The phone's camera reads a
+   * `buddyvpn://pair` code and iOS hands it here — there is no scanner in
+   * this app, deliberately.
+   */
+  deepLinks?: {
+    getInitialURL?: () => Promise<unknown>
+    onLink?: (callback: (url: string) => void) => (() => void) | undefined
+  }
   window?: { startDrag?: () => void }
   navigation?: {
     push?: (screen: string, params?: Record<string, unknown>) => void
@@ -122,6 +137,42 @@ export const haptics = {
     catch {
       // As above.
     }
+  },
+}
+
+/**
+ * Links this app was opened with.
+ *
+ * Both halves matter and they are different moments. `getInitialURL` is the
+ * link that launched the app — a code scanned while it was closed, which is
+ * the common case — and `onLink` is one that arrives while it is already
+ * open. A pairing screen that listened for only the second would work every
+ * time except the first.
+ *
+ * Silent off a host, where there are no links and nothing to hear.
+ */
+export const deepLinks = {
+  /** The link the app was opened with, or null. Claimed once by the host. */
+  async initial(): Promise<string | null> {
+    try {
+      const found = await window.craft?.deepLinks?.getInitialURL?.()
+      return typeof found === 'string' && found.length > 0 ? found : null
+    }
+    catch {
+      return null
+    }
+  },
+  /** Links arriving while the app is open. Returns an unsubscribe. */
+  onLink(callback: (url: string) => void): () => void {
+    try {
+      const native = window.craft?.deepLinks?.onLink
+      if (native)
+        return native.call(window.craft!.deepLinks, callback) ?? (() => {})
+    }
+    catch {
+      // A screen that cannot hear links still has to render.
+    }
+    return () => {}
   },
 }
 

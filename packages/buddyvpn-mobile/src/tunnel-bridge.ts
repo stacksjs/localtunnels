@@ -78,7 +78,21 @@ export interface DisconnectRequest {
   nonce: string
 }
 
-export type TunnelRequest = ConnectRequest | DisconnectRequest
+/**
+ * Throw away this device's key and generate another.
+ *
+ * The coordinator identifies a device by its public key and assigns an
+ * address against it, so a new key is a new device: a fresh lease, and
+ * whatever the old one was allowed stays allowed until somebody removes it
+ * there. It is the answer to a key that has been somewhere it should not
+ * have been, and nothing smaller.
+ */
+export interface ForgetIdentityRequest {
+  action: 'forget-identity'
+  nonce: string
+}
+
+export type TunnelRequest = ConnectRequest | DisconnectRequest | ForgetIdentityRequest
 
 /**
  * What Swift reports back.
@@ -96,6 +110,14 @@ export interface TunnelStatusFrame {
   error: string | null
   /** Epoch milliseconds the tunnel came up, or null when it is not up. */
   since: number | null
+  /**
+   * This device's public key, as the coordinator knows it.
+   *
+   * Reported rather than read: the key lives in the Keychain and is the
+   * tunnel's to generate, so the screens learn it the same way they learn
+   * everything else about the tunnel. Null before one has been made.
+   */
+  deviceKey: string | null
 }
 
 /**
@@ -147,6 +169,7 @@ export function parseStatus(raw: string | null | undefined): TunnelStatusFrame |
     error: text(frame.error),
     // A tunnel that is not up has no start time, whatever it claims.
     since: phase === 'connected' ? since : null,
+    deviceKey: text(frame.deviceKey),
   }
 }
 

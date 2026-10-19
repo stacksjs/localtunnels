@@ -16,6 +16,7 @@
  */
 import type { Tunnel, TunnelSnapshot } from './tunnel'
 import type { TunnelStatusFrame } from './tunnel-bridge'
+import { readPairing } from './pairing'
 import { regionById } from './regions'
 import { dnsServers, readSettings } from './settings'
 import { nextNonce, parseStatus, REQUEST_KEY, STATUS_SNAPSHOT, uptimeFrom } from './tunnel-bridge'
@@ -34,6 +35,7 @@ export class NativeTunnel implements Tunnel {
     simulated: false,
   }
 
+  private key: string | null = null
   private listeners = new Set<(snapshot: TunnelSnapshot) => void>()
   private since: number | null = null
   private clock: ReturnType<typeof setInterval> | null = null
@@ -41,6 +43,14 @@ export class NativeTunnel implements Tunnel {
 
   available(): boolean {
     return true
+  }
+
+  deviceKey(): string | null {
+    return this.key
+  }
+
+  async forgetIdentity(): Promise<void> {
+    await this.request({ action: 'forget-identity', nonce: nextNonce() })
   }
 
   snapshot(): TunnelSnapshot {
@@ -117,6 +127,7 @@ export class NativeTunnel implements Tunnel {
 
   /** Take on a status frame, or fall back to idle when there is none. */
   private apply(frame: TunnelStatusFrame | null): void {
+    this.key = frame?.deviceKey ?? null
     if (!frame) {
       this.since = null
       this.stopClock()
@@ -180,17 +191,18 @@ export class NativeTunnel implements Tunnel {
      * object's business.
      */
     const settings = readSettings()
+    // The network this device was paired to, if it has been. Without one
+    // there is no coordinator to join, and the provider says so rather than
+    // starting something that cannot finish.
+    const pairing = await readPairing()
     await this.request({
       action: 'connect',
       region,
       exitIp: regionById(region)?.exitIp ?? null,
       dns: dnsServers(settings.dns),
       allowLan: settings.allowLan,
-      // Nothing fills these in yet. The field exists so the shape the
-      // provider reads is the shape this sends, rather than one growing a
-      // key later that the other half has never seen.
-      coordinatorUrl: null,
-      authKey: null,
+      coordinatorUrl: pairing?.coordinatorUrl ?? null,
+      authKey: pairing?.authKey ?? null,
       nonce: nextNonce(),
     })
   }

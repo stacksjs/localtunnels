@@ -60,6 +60,7 @@ describe('reading a status frame', () => {
       exitIp: '5.78.208.190',
       error: null,
       since: 1_700_000_000_000,
+      deviceKey: null,
     })
   })
 
@@ -95,13 +96,14 @@ describe('reading a status frame', () => {
       exitIp: null,
       error: null,
       since: null,
+      deviceKey: null,
     })
   })
 
   // Empty strings are what a Swift optional often becomes on the way out.
   it('treats an empty string as absent', () => {
     const frame = parseStatus(JSON.stringify({ phase: 'idle', region: '', exitIp: '', error: '' }))
-    expect(frame).toEqual({ phase: 'idle', region: null, exitIp: null, error: null, since: null })
+    expect(frame).toEqual({ phase: 'idle', region: null, exitIp: null, error: null, since: null, deviceKey: null })
   })
 
   /*
@@ -143,5 +145,22 @@ describe('uptime', () => {
    */
   it('never goes negative when the clock moves backwards', () => {
     expect(uptimeFrom(10_000, 5_000)).toBe(0)
+  })
+})
+
+describe('the device key', () => {
+  /*
+   * How the coordinator knows this device. Reported by the tunnel rather
+   * than read by the screens: it lives in the Keychain and is the tunnel's
+   * to generate, so the screens learn it the way they learn everything else.
+   */
+  it('is carried when the tunnel reports one', () => {
+    const frame = parseStatus(JSON.stringify({ phase: 'idle', deviceKey: 'AbC123+/=' }))
+    expect(frame?.deviceKey).toBe('AbC123+/=')
+  })
+
+  it('is nothing before a key has been made', () => {
+    expect(parseStatus(JSON.stringify({ phase: 'idle' }))?.deviceKey).toBeNull()
+    expect(parseStatus(JSON.stringify({ phase: 'idle', deviceKey: '' }))?.deviceKey).toBeNull()
   })
 })
