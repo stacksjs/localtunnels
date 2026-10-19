@@ -6,7 +6,11 @@
     // `localStorage` and `setInterval`. That mismatch is why this package was
     // outside the typechecked program entirely — not a decision, a gap.
     "lib": ["esnext", "dom", "dom.iterable"],
-    "types": ["bun"]
+    "types": ["bun"],
+    // The repo, not this package: the pairing contract test imports the
+    // desktop's builder and feeds it to this app's parser, which is the only
+    // check that would fail if the two formats drifted apart.
+    "rootDir": "../.."
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "mobile.config.ts"],
   "exclude": ["ios/**", "dist/**", "node_modules/**"]
