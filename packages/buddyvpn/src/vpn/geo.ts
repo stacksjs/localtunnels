@@ -101,10 +101,3 @@ export async function lookupLocation(): Promise<Location | null> {
   }
 }
 
-/** "Cebu City, Philippines" — or the most specific part available. */
-export function describeLocation(location: Location | null, countryName?: string | null): string {
-  if (!location)
-    return ''
-  const parts = [location.city, countryName ?? location.country].filter(Boolean)
-  return parts.join(', ')
-}

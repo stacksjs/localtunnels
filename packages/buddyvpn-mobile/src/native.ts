@@ -97,11 +97,6 @@ export function whenNativeHost(): Promise<boolean> {
   return resolved
 }
 
-/** True only once {@link whenNativeHost} has said so. Cheap, and may be stale. */
-export function isNativeHost(): boolean {
-  return typeof window !== 'undefined' && Boolean(window.craft)
-}
-
 /**
  * Physical feedback for the two moments that deserve it.
  *
