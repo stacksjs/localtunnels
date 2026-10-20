@@ -86,6 +86,24 @@ export interface ErrorMessage {
   message: string
 }
 
+/**
+ * The two refusals a client has to tell apart, spelled once.
+ *
+ * There are no error codes in this protocol, so a client deciding whether to
+ * try again is reading English the server wrote — and the two answers could
+ * not be more different. A key held by a live connection becomes available
+ * on its own, after the holder has been silent long enough to be displaced,
+ * so retrying is exactly right. A rejected auth key will never become
+ * correct by being presented again, and a client that retries it forever
+ * loops instead of reporting the one thing somebody could fix.
+ *
+ * Here rather than in either implementation because both have to agree on
+ * the wording, and a message reworded on the server would otherwise turn a
+ * fatal error into an infinite retry with nothing failing anywhere.
+ */
+export const ERROR_UNAUTHORIZED = 'missing or invalid auth key'
+export const ERROR_DUPLICATE_KEY = 'public key is already registered by a live connection'
+
 /** Tells a node to hole-punch toward `from` at `endpoint` (simultaneous open). */
 export interface PunchSignalMessage {
   t: 'punch'
