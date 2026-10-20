@@ -9,7 +9,7 @@
  *
  * So the window shows them, once, as a link the phone's own camera can read:
  *
- *     buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west
+ *     buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west&x=<exit>
  *
  * The phone registers that scheme, so iOS recognises it and offers to open
  * the app. Nothing scans anything here, and the app only ever sees a URL it
@@ -41,6 +41,16 @@
 export interface PairableServer {
   coordinatorUrl: string
   authKey?: string
+  /**
+   * Which peer carries this region's traffic: a pinned base64 public key, or
+   * `'auto'` to take whichever peer advertises itself.
+   *
+   * Handed over because `exitNode` is a claim the coordinator relays without
+   * checking, and the auth key on this screen is what lets anyone make it.
+   * A machine that pins its exit and a phone that does not are on one
+   * network choosing different exits, and only one of them chose.
+   */
+  useExit?: string
 }
 
 /** The format version, carried so an older phone can refuse a newer link. */
@@ -63,5 +73,10 @@ export function pairingUrl(regionId: string, entry: PairableServer | undefined):
   })
   if (entry.authKey)
     query.set('k', entry.authKey)
+  // `'auto'` is the phone's own default, so there is nothing to carry: a
+  // link says who the exit is or says nothing. Sending the word would mean
+  // the phone had to know it meant "decide for yourself".
+  if (entry.useExit && entry.useExit !== 'auto')
+    query.set('x', entry.useExit)
   return `buddyvpn://pair?${query.toString()}`
 }

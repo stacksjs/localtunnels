@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'bun:test'
 import { pairingUrl as desktopPairingUrl } from '../../buddyvpn/src/pairing'
 import {
+  describePairing,
   forgetPairing,
   isPairing,
   PAIR_VERSION,
@@ -25,7 +26,11 @@ const REAL = {
   coordinatorUrl: 'wss://vpn.example.com:51821',
   authKey: 'a-shared-secret-token',
   region: 'us-west',
+  exitKey: null,
 }
+
+/** A base64 32-byte key, the shape `servers.json` pins and this carries. */
+const EXIT_KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8='
 
 /** A Keychain that remembers, as Craft's secureStorage does. */
 function withKeychain(initial: Record<string, string> = {}): Record<string, string> {
@@ -62,6 +67,7 @@ describe('the link the desktop builds', () => {
       coordinatorUrl: 'ws://10.0.0.5:51821',
       authKey: null,
       region: 'eu-central',
+      exitKey: null,
     })
   })
 
@@ -76,6 +82,39 @@ describe('the link the desktop builds', () => {
 
   it('agrees with this app about the format version', () => {
     expect(desktopPairingUrl('us-west', { coordinatorUrl: 'ws://a:1' })).toContain(`v=${PAIR_VERSION}`)
+  })
+
+  /*
+   * The pin, carried across.
+   *
+   * Without it a machine that pins its exit hands a phone a link that does
+   * not, and the two are on one network choosing different exits — only one
+   * of them having chosen. `exitNode` is a claim the coordinator relays
+   * without checking, and the secret in this same link is what lets anyone
+   * make it.
+   */
+  it('carries the exit this region pins', () => {
+    const built = desktopPairingUrl('us-west', {
+      coordinatorUrl: REAL.coordinatorUrl,
+      authKey: REAL.authKey,
+      useExit: EXIT_KEY,
+    })
+    expect(parsePairingUrl(built)).toEqual({ ...REAL, exitKey: EXIT_KEY })
+  })
+
+  /*
+   * `'auto'` is the phone's own behaviour with no pin, so there is nothing
+   * to carry. Sending the word would mean the phone had to know it meant
+   * "decide for yourself" rather than "the exit is called auto".
+   */
+  it('carries nothing when the region pins nothing', () => {
+    const built = desktopPairingUrl('us-west', {
+      coordinatorUrl: REAL.coordinatorUrl,
+      authKey: REAL.authKey,
+      useExit: 'auto',
+    })
+    expect(built).not.toContain('x=')
+    expect(parsePairingUrl(built)).toEqual(REAL)
   })
 })
 
@@ -122,6 +161,71 @@ describe('reading a link', () => {
   it('refuses a region that is not one', () => {
     for (const region of ['../us-west', 'US WEST', ''])
       expect(isPairing({ ...REAL, region })).toBe(false)
+  })
+
+  /*
+   * A mistyped pin is refused rather than dropped.
+   *
+   * Dropping it would leave a pairing that looks complete and quietly
+   * accepts any exit, which is the state somebody pinning a key was trying
+   * to leave. Refusing the link makes it a code that does not work, which is
+   * something a person can see and fix.
+   */
+  it('refuses a pinned exit that is not a key', () => {
+    for (const exitKey of ['', 'not-a-key', EXIT_KEY.slice(0, 20), `${EXIT_KEY}extra`, 'auto'])
+      expect(isPairing({ ...REAL, exitKey })).toBe(false)
+  })
+
+  it('accepts a pinned exit that is one', () => {
+    expect(isPairing({ ...REAL, exitKey: EXIT_KEY })).toBe(true)
+  })
+
+  /*
+   * A pairing kept by a build that predates the field. Refusing these would
+   * unpair every device that updates, so absent reads as "no pin".
+   */
+  it('still reads a pairing written before this field existed', () => {
+    const old: unknown = { coordinatorUrl: REAL.coordinatorUrl, authKey: REAL.authKey, region: REAL.region }
+    expect(isPairing(old)).toBe(true)
+  })
+})
+
+describe('showing a pairing', () => {
+  /*
+   * The shared secret never comes back out. A settings panel left open on a
+   * desk is a worse place for one than the code that was shown on purpose
+   * and hidden again.
+   */
+  it('never puts the secret back on a screen', () => {
+    expect(describePairing(REAL)).not.toContain(REAL.authKey)
+    expect(describePairing({ ...REAL, exitKey: EXIT_KEY })).not.toContain(REAL.authKey)
+  })
+
+  it('is the host and the region, not the whole URL', () => {
+    expect(describePairing(REAL)).toContain('vpn.example.com:51821')
+    expect(describePairing(REAL)).toContain('us-west')
+    expect(describePairing(REAL)).not.toContain('wss://')
+  })
+
+  /*
+   * Whether an exit is pinned changes what a failure means: a pinned device
+   * refuses every other server, so when that one is away the tunnel will not
+   * come up even though the network has exits in it. Somebody reading "no
+   * server is reachable" needs to know their device only accepts one.
+   */
+  it('says whether this device accepts one server or any', () => {
+    expect(describePairing(REAL)).toContain('any server')
+    expect(describePairing({ ...REAL, exitKey: EXIT_KEY })).toContain('one server')
+  })
+
+  // 44 characters nobody can check by eye. That there is one is the useful
+  // part; which one it is belongs in a log, not a settings row.
+  it('does not print the pinned key itself', () => {
+    expect(describePairing({ ...REAL, exitKey: EXIT_KEY })).not.toContain(EXIT_KEY)
+  })
+
+  it('is nothing at all for a device that was never paired', () => {
+    expect(describePairing(null)).toBe('')
   })
 })
 

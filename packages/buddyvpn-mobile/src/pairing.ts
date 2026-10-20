@@ -11,7 +11,7 @@
  *
  * So the desktop shows them and the phone reads them, once, as a link:
  *
- *     buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west
+ *     buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west&x=<exit>
  *
  * ── Why a link and not a scanner ───────────────────────────────────────
  *
@@ -47,6 +47,22 @@ export interface Pairing {
   authKey: string | null
   /** Which region this coordinator serves. */
   region: string
+  /**
+   * The one peer allowed to carry this device's traffic, as a base64 public
+   * key — or null to take whichever peer advertises itself.
+   *
+   * This is the difference between choosing an exit and accepting one.
+   * `exitNode` is a claim the coordinator relays without checking, and the
+   * `authKey` on the same screen as this link is what lets anybody make it,
+   * so a network with one unexpected member has an exit nobody picked. With
+   * a key here the device refuses everything else, including — especially
+   * — a peer that advertises more convincingly.
+   *
+   * Null is not the safe default; it is the only one available to a
+   * coordinator whose operator never pinned anything, and `servers.json`
+   * says `'auto'` for exactly that case.
+   */
+  exitKey: string | null
 }
 
 /**
@@ -58,6 +74,13 @@ const COORDINATOR_URL = /^wss?:\/\/[\w.-]+(?::\d{1,5})?$/
 /** Word characters and dashes, as the desktop's token rule has it. */
 const AUTH_KEY = /^[\w-]{8,128}$/
 const REGION = /^[a-z0-9-]{2,32}$/
+/**
+ * A base64 32-byte public key, by the rule `vpn/control.ts` applies to the
+ * same field in `servers.json`. Deliberately the same rule: a key the
+ * desktop would pin and the phone would refuse is a link that works on one
+ * and not the other.
+ */
+const PUBLIC_KEY = /^[\w+/]{42}[\w+/=]=$/
 
 /** Build the link the desktop shows. Returns null if it would be invalid. */
 export function pairingUrl(pairing: Pairing): string | null {
@@ -70,6 +93,8 @@ export function pairingUrl(pairing: Pairing): string | null {
   })
   if (pairing.authKey)
     query.set('k', pairing.authKey)
+  if (pairing.exitKey)
+    query.set('x', pairing.exitKey)
   return `${PAIR_SCHEME}//${PAIR_HOST}?${query.toString()}`
 }
 
@@ -82,6 +107,22 @@ export function isPairing(value: unknown): value is Pairing {
     return false
   if (typeof raw.region !== 'string' || !REGION.test(raw.region))
     return false
+  /*
+   * A malformed pin is refused rather than dropped.
+   *
+   * Dropping it would leave a pairing that looks complete and silently
+   * accepts any exit — which is the state somebody pinning a key was
+   * trying to leave. Refusing the whole link means a mistyped key is a code
+   * that does not work, which is a thing a person can see.
+   *
+   * Absent is not malformed, and `undefined` has to count as absent: a
+   * pairing stored by a build that predates this field is read back by one
+   * that has it, and refusing those would unpair every device that updates.
+   */
+  if (raw.exitKey !== null && raw.exitKey !== undefined
+    && !(typeof raw.exitKey === 'string' && PUBLIC_KEY.test(raw.exitKey))) {
+    return false
+  }
   if (raw.authKey === null)
     return true
   return typeof raw.authKey === 'string' && AUTH_KEY.test(raw.authKey)
@@ -118,6 +159,7 @@ export function parsePairingUrl(raw: string | null | undefined): Pairing | null 
     coordinatorUrl: url.searchParams.get('c') ?? '',
     authKey: url.searchParams.get('k'),
     region: url.searchParams.get('r') ?? '',
+    exitKey: url.searchParams.get('x'),
   }
   return isPairing(pairing) ? pairing : null
 }
@@ -169,7 +211,12 @@ export async function readPairing(): Promise<Pairing | null> {
     const parsed: unknown = JSON.parse(stored)
     // Validated on the way out as well as in: this survives app updates, and
     // a format that changed underneath must not be acted on.
-    return isPairing(parsed) ? parsed : null
+    if (!isPairing(parsed))
+      return null
+    // A pairing kept before `exitKey` existed has none. Filled in here so
+    // every caller downstream reads one shape, rather than each having to
+    // know which builds wrote which fields.
+    return { ...parsed, exitKey: parsed.exitKey ?? null }
   }
   catch {
     return null
@@ -244,10 +291,18 @@ export async function applyPairingUrl(
 /**
  * A pairing in a form a screen can show.
  *
- * The host and the region, and deliberately never the key. There is no
+ * The host and the region, and deliberately never the `authKey`. There is no
  * reason to put a shared secret back on a screen after it has been stored,
  * and a settings panel left open on a desk is a worse place for one than
  * the code that was shown on purpose and hidden again.
+ *
+ * Whether an exit is pinned *is* shown, because it changes what a failure
+ * means. A device pinned to one server refuses every other one, so when that
+ * server is away the tunnel will not come up even though the network has
+ * exits in it — and somebody reading "no server is reachable" with no idea
+ * their device only accepts one has nothing to act on. The key itself stays
+ * off the screen: it is not a secret, but it is 44 characters nobody can
+ * check by eye, and saying that there is one is the part that helps.
  */
 export function describePairing(pairing: Pairing | null): string {
   if (!pairing)
@@ -260,5 +315,6 @@ export function describePairing(pairing: Pairing | null): string {
     // Already validated on the way in; if it will not parse, show it whole
     // rather than nothing.
   }
-  return `${host} · ${pairing.region}`
+  const scope = pairing.exitKey ? 'one server' : 'any server'
+  return `${host} · ${pairing.region} · ${scope}`
 }
