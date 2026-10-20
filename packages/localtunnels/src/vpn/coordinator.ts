@@ -1,7 +1,7 @@
 import type { Server, ServerWebSocket } from 'bun'
 import type { ClientMessage, PeerRecord, ServerMessage } from './protocol'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { parseMessage } from './protocol'
+import { ERROR_DUPLICATE_KEY, ERROR_UNAUTHORIZED, parseMessage } from './protocol'
 
 interface ConnData {
   publicKey: string | null
@@ -235,7 +235,7 @@ export class VpnCoordinator {
           return
         }
         if (!this.authorized(msg.authKey)) {
-          send(ws, { t: 'error', message: 'missing or invalid auth key' })
+          send(ws, { t: 'error', message: ERROR_UNAUTHORIZED })
           ws.close(1008, 'unauthorized')
           return
         }
@@ -268,7 +268,7 @@ export class VpnCoordinator {
         if (held && held.ws !== ws) {
           const silentForMs = Date.now() - held.lastSeenAt
           if (held.ws.readyState === WebSocket.OPEN && silentForMs < this.staleAfterMs) {
-            send(ws, { t: 'error', message: 'public key is already registered by a live connection' })
+            send(ws, { t: 'error', message: ERROR_DUPLICATE_KEY })
             ws.close(1008, 'duplicate public key')
             return
           }
