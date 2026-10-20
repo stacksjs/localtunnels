@@ -34,7 +34,7 @@
  * happened in this package, and all of them still need a device.
  */
 import { beforeAll, describe, expect, it } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -888,5 +888,95 @@ describe('this device’s key', () => {
     const screen = await render('settings', {}, { keychain: {} }).settle()
     expect(screen.text).not.toContain('This device')
     expect(screen.text).toContain('Not paired')
+  })
+})
+
+/*
+ * The host these screens assume, checked against the host they get.
+ *
+ * `CraftBridge` in `src/native.ts` is a hand-written description of somebody
+ * else's API, and every member of it is optional and every call guarded —
+ * deliberately, because the same screens render in a browser with no bridge
+ * at all. That is also what makes a drift here invisible: a method Craft
+ * renames does not throw, it yields `undefined`, the optional chain takes the
+ * fallback, and the screen goes on working in the way it works with no host.
+ * Native chrome stops applying, a tunnel request is left somewhere nothing is
+ * watching, and nothing anywhere reports it.
+ *
+ * So the declaration is parsed and compared against the bridge the compiled
+ * bundle actually installs. The bundle carries Craft's own browser-side
+ * implementation, which means the *names* are authoritative — they come from
+ * Craft's source — while the behaviour is not: several are `() => null` here
+ * and implemented by the native host on a device. Names are the half that
+ * fails silently, so names are what this checks.
+ */
+describe('the Craft bridge', () => {
+  /** What `CraftBridge` says the host provides, module by module. */
+  function declared(): Map<string, string[]> {
+    const source = readFileSync(join(PACKAGE_DIR, 'src', 'native.ts'), 'utf8')
+    const body = /interface CraftBridge \{([\s\S]*?)\n\}/.exec(source)
+    if (!body)
+      throw new Error('src/native.ts has no CraftBridge interface')
+    // Comments first: they are full of `craft.storage` and method names in
+    // prose, and prose is not a declaration.
+    const text = body[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    const modules = new Map<string, string[]>()
+    for (const match of text.matchAll(/^ {2}(\w+)\?: \{([^}]*)\}/gm)) {
+      // Anchored to a member's own indentation. Unanchored, this also
+      // matches `params?:` inside `push?: (screen, params?) => void` and
+      // then demands a `navigation.params` nobody declared.
+      const methods = [...match[2].matchAll(/^ {4}(\w+)\?:/gm)].map(method => method[1])
+      modules.set(match[1], methods)
+    }
+    if (modules.size === 0)
+      throw new Error('CraftBridge parsed to nothing; the interface shape changed')
+    return modules
+  }
+
+  /** The bridge as Craft installs it, once a screen has run. */
+  async function installed(): Promise<Record<string, any>> {
+    await render('connect', {}, { keychain: {} }).settle()
+    const craft = (globalThis as any).window?.craft
+    if (!craft)
+      throw new Error('no bridge was installed; the bundle did not run')
+    return craft
+  }
+
+  it('provides every module these screens reach for', async () => {
+    const craft = await installed()
+    for (const module of declared().keys())
+      expect({ module, present: craft[module] !== undefined }).toEqual({ module, present: true })
+  })
+
+  /*
+   * And every method. This is the one that would catch a Craft upgrade:
+   * `snapshots.onChange` or `navigation.onAppear` renamed is a screen that
+   * never hears about a tunnel again, or a bar that keeps the filename as its
+   * title, with nothing raised either way.
+   */
+  it('provides every method these screens call', async () => {
+    const craft = await installed()
+    for (const [module, methods] of declared()) {
+      for (const method of methods) {
+        expect({ at: `${module}.${method}`, callable: typeof craft[module]?.[method] === 'function' })
+          .toEqual({ at: `${module}.${method}`, callable: true })
+      }
+    }
+  })
+
+  /*
+   * The other direction, which is how `craft.window` was found: a module
+   * declared here that Craft has never published, with a `startDrag` nothing
+   * called. Harmless to run and not harmless to read — the whole value of
+   * this file is being an accurate account of the host, and a reader has no
+   * way to tell an invented member from a real one.
+   *
+   * Craft publishes far more than these screens use, which is fine and not
+   * checked. Only the fiction is.
+   */
+  it('declares nothing the host does not have', async () => {
+    const craft = await installed()
+    const fictional = [...declared().keys()].filter(module => craft[module] === undefined)
+    expect(fictional).toEqual([])
   })
 })

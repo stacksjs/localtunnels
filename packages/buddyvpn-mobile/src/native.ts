@@ -48,7 +48,6 @@ interface CraftBridge {
     getInitialURL?: () => Promise<unknown>
     onLink?: (callback: (url: string) => void) => (() => void) | undefined
   }
-  window?: { startDrag?: () => void }
   navigation?: {
     push?: (screen: string, params?: Record<string, unknown>) => void
     back?: () => void
