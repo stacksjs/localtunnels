@@ -15,7 +15,48 @@ interface Registered {
   port: number
   /** The node advertised itself as an exit node. Relayed, never verified. */
   exitNode: boolean
+  /**
+   * When this connection last proved it was there.
+   *
+   * Any frame counts, not just a heartbeat. This is the only thing here that
+   * distinguishes a live node from an open socket, and the two are not the
+   * same: a client whose network vanished leaves a connection this process
+   * still believes in for as long as the kernel does.
+   */
+  lastSeenAt: number
 }
+
+/**
+ * How often a node is expected to say something.
+ *
+ * The client's own default, named here because every window below is derived
+ * from it and the two halves have to agree. `vpn/client.ts` sends one every
+ * `heartbeatInterval` seconds and calls the coordinator stale after three.
+ */
+export const HEARTBEAT_SECONDS = 20
+
+/**
+ * Silence after which a registration may be taken over by a new connection.
+ *
+ * Three missed heartbeats, the same count the client uses before it calls
+ * *this* side stale — so both ends give up on each other at the same moment
+ * rather than at two numbers that drifted apart.
+ */
+export const STALE_AFTER_MS: number = HEARTBEAT_SECONDS * 3 * 1000
+
+/**
+ * Silence after which the socket is closed and the node leaves the directory.
+ *
+ * Set rather than inherited. This was Bun's default for `idleTimeout`, which
+ * happens to be 120 seconds, and the entire eviction behaviour the heartbeat
+ * exists to prevent rested on it: the client's 20-second heartbeat and
+ * 60-second stale threshold are tuned against this number, and nothing
+ * anywhere set it or said so. A Bun release changing the default would move
+ * it silently — longer, and a node that is gone stays in the directory while
+ * the exit goes on routing to it; shorter than three heartbeats, and live
+ * nodes are evicted mid-session.
+ */
+export const IDLE_TIMEOUT_SECONDS: number = HEARTBEAT_SECONDS * 6
 
 export interface VpnCoordinatorOptions {
   /** TCP port for the WebSocket coordinator. 0 picks an ephemeral port. */
@@ -33,6 +74,15 @@ export interface VpnCoordinatorOptions {
    * generates a key unless `--insecure-no-auth` is passed.
    */
   authKey?: string
+  /**
+   * Silence after which a registration may be taken over, in milliseconds.
+   *
+   * Defaults to {@link STALE_AFTER_MS}, which is the number both halves of
+   * the protocol are tuned against. A parameter because sixty seconds is not
+   * a thing a test can wait for, and because a deployment whose nodes
+   * heartbeat at a different rate needs a window that matches theirs.
+   */
+  staleAfterMs?: number
 }
 
 /**
@@ -55,6 +105,7 @@ export class VpnCoordinator {
   private readonly baseIp: number
   private readonly prefix: number
   private readonly authKey: string | null
+  private readonly staleAfterMs: number
   /**
    * publicKey → tunnel IP, retained across disconnects so a node that drops
    * and comes back keeps its address. Without this the pool counter climbs on
@@ -67,6 +118,7 @@ export class VpnCoordinator {
     this.bindPort = options.port ?? 0
     this.bindHost = options.host
     this.authKey = options.authKey || null
+    this.staleAfterMs = options.staleAfterMs ?? STALE_AFTER_MS
     this.network = options.network ?? '100.100.0.0/16'
     const [addr, prefixStr] = this.network.split('/')
     this.prefix = Number.parseInt(prefixStr) || 16
@@ -108,12 +160,33 @@ export class VpnCoordinator {
           this.onMessage(ws, msg)
         },
         close: (ws) => {
+          /*
+           * Only if this socket is still the one holding the key.
+           *
+           * A displaced connection closing must not delete the registration
+           * that replaced it — that would turn a reconnect into a node which
+           * registers, is acknowledged, and vanishes from the directory a
+           * moment later, which is worse than the refusal it fixed.
+           *
+           * It cannot happen as the code stands: Bun runs this handler
+           * synchronously inside `ws.close()`, so the displaced entry is
+           * removed before the new one is installed. That ordering is an
+           * implementation detail nothing documents — found by probing, not
+           * by reading — and this check is what keeps the result from
+           * depending on it.
+           */
           if (ws.data.publicKey) {
-            this.peers.delete(ws.data.publicKey)
-            this.broadcastPeers()
+            const held = this.peers.get(ws.data.publicKey)
+            if (held?.ws === ws) {
+              this.peers.delete(ws.data.publicKey)
+              this.broadcastPeers()
+            }
           }
         },
       },
+      // See `IDLE_TIMEOUT_SECONDS`: the eviction window is a decision, not
+      // whatever the framework currently defaults to.
+      idleTimeout: IDLE_TIMEOUT_SECONDS,
     })
   }
 
@@ -142,6 +215,19 @@ export class VpnCoordinator {
   }
 
   private onMessage(ws: ServerWebSocket<ConnData>, msg: ClientMessage): void {
+    /*
+     * Proof of life, before anything else and for every frame.
+     *
+     * A message this coordinator has no case for still shows the connection
+     * is there, which is the only question `lastSeenAt` answers. Guarded on
+     * the socket still being the one that holds the key, so a displaced
+     * connection that keeps talking cannot refresh the liveness of the
+     * registration that replaced it.
+     */
+    const current = ws.data.publicKey ? this.peers.get(ws.data.publicKey) : undefined
+    if (current?.ws === ws)
+      current.lastSeenAt = Date.now()
+
     switch (msg.t) {
       case 'register': {
         if (!msg.publicKey || typeof msg.listenPort !== 'number') {
@@ -153,16 +239,45 @@ export class VpnCoordinator {
           ws.close(1008, 'unauthorized')
           return
         }
-        // A public key is claimed by at most one live connection. Without this
-        // a second node could register someone else's key and take over its
-        // directory record — it still could not decrypt that peer's traffic,
-        // which is end-to-end encrypted, but it could draw the relay frames
-        // addressed to it and strand the real node.
+        /*
+         * A public key is claimed by at most one *live* connection.
+         *
+         * Without the claim at all, a second node could register someone
+         * else's key and take over its directory record — it still could not
+         * decrypt that peer's traffic, which is end-to-end encrypted, but it
+         * could draw the relay frames addressed to it and strand the real
+         * node.
+         *
+         * "Live" used to mean `readyState === OPEN`, and that is the one
+         * thing that lies in the case this matters for. A client whose
+         * network disappeared leaves a socket this process goes on believing
+         * in until the kernel gives up, so a node reconnecting — the normal
+         * event on a phone, which changes network constantly — was refused
+         * its own key for as long as the dead connection lingered. It could
+         * not get back into the directory, the exit had already withdrawn its
+         * route, and the tunnel was dead for the whole window.
+         *
+         * So liveness is measured instead of assumed: a registration whose
+         * connection has not said anything for three heartbeats is displaced
+         * rather than defended. The property that is weakened is narrow — a
+         * member holding the auth key can now take over a key whose holder
+         * has been silent that long, which is a node whose own watchdog has
+         * already fired and which is one idle timeout from eviction anyway.
+         */
         const held = this.peers.get(msg.publicKey)
-        if (held && held.ws !== ws && held.ws.readyState === WebSocket.OPEN) {
-          send(ws, { t: 'error', message: 'public key is already registered by a live connection' })
-          ws.close(1008, 'duplicate public key')
-          return
+        if (held && held.ws !== ws) {
+          const silentForMs = Date.now() - held.lastSeenAt
+          if (held.ws.readyState === WebSocket.OPEN && silentForMs < this.staleAfterMs) {
+            send(ws, { t: 'error', message: 'public key is already registered by a live connection' })
+            ws.close(1008, 'duplicate public key')
+            return
+          }
+          try {
+            held.ws.close(1000, 'replaced by a newer connection')
+          }
+          catch {
+            // Already gone, which is the case this branch is mostly for.
+          }
         }
         const host = ws.remoteAddress || '127.0.0.1'
         const assignedIp = this.assignIp(msg.publicKey)
@@ -174,6 +289,7 @@ export class VpnCoordinator {
           host,
           port: msg.listenPort,
           exitNode: msg.exitNode === true,
+          lastSeenAt: Date.now(),
         })
         send(ws, { t: 'registered', assignedIp, network: this.network })
         this.broadcastPeers()
