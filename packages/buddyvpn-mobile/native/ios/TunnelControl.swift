@@ -62,6 +62,21 @@ final class TunnelControl: NSObject {
     private var manager: NETunnelProviderManager?
     private var started = false
 
+    /**
+     Why the last attempt did not produce a tunnel, until the next one.
+
+     Held rather than passed, because the two halves of a failure arrive
+     separately and neither is complete. This process learns about its own
+     refusals immediately — a configuration it could not save, a Keychain
+     that refused — and about the provider's only after the connection has
+     already gone back to disconnected, which is also when the status change
+     that would overwrite it arrives.
+
+     Cleared when a new attempt starts, which is the only moment the old
+     reason stops being the most useful thing anybody could be told.
+     */
+    private var lastError: String?
+
     /// The extension's bundle id, by the same rule `planTunnel` uses in
     /// `scripts/ios-tunnel-extension.ts`: the app's, plus one component. iOS
     /// requires an extension to live under its container app, so this is not
@@ -189,6 +204,16 @@ final class TunnelControl: NSObject {
                          authKey: String?,
                          exitKey: String?) {
         log.notice("connect requested: \(region, privacy: .public)")
+        /*
+         * Cleared here rather than waiting for the status to reach
+         * `connecting`.
+         *
+         * Everything between this and that — reading the preferences, saving
+         * them, Face ID — takes long enough to read, and the last failure
+         * sitting next to a spinner reads as the failure happening again.
+         */
+        lastError = nil
+        publish()
 
         NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
             guard let self else { return }
@@ -320,17 +345,72 @@ final class TunnelControl: NSObject {
 
     private func fail(_ message: String) {
         log.error("tunnel request failed: \(message, privacy: .public)")
-        publish(error: message)
+        lastError = message
+        publish()
     }
 
     // MARK: Status out
 
     @objc private func vpnStatusChanged() {
-        publish()
+        let status = manager?.connection.status ?? .invalid
+        switch status {
+        case .connecting, .connected:
+            // A new attempt, or one that worked. Whatever went wrong last
+            // time is no longer what is happening, and leaving it on screen
+            // next to a tunnel that is coming up would be worse than saying
+            // nothing.
+            lastError = nil
+            publish()
+        case .disconnected:
+            readDisconnectReason()
+        default:
+            publish()
+        }
+    }
+
+    /**
+     Ask the system why the tunnel stopped, and say so.
+
+     This is the only way the provider's reasons reach a person. A
+     `startTunnel` that calls its completion handler with an error does not
+     put that error anywhere the app can see: the connection's status goes to
+     `disconnected`, exactly as it would after somebody tapped disconnect,
+     and `NEVPNConnection` has no property holding the reason. So every
+     sentence in `TunnelStartFailure` — all of them written for somebody to
+     read, one of them explaining that re-pairing is how you change which
+     server this device trusts — reached the extension's log and stopped
+     there, while the app showed a tunnel that had simply returned to idle.
+
+     `fetchLastDisconnectError` is where iOS keeps it, since 16.0, which is
+     this app's deployment target. Nil is the ordinary case: a tunnel that
+     was asked to stop did not fail, and has nothing to report.
+     */
+    private func readDisconnectReason() {
+        guard let connection = manager?.connection else {
+            publish()
+            return
+        }
+        connection.fetchLastDisconnectError { [weak self] error in
+            guard let self else { return }
+            if let error {
+                /*
+                 * Not overwritten if this process already has a reason. Its
+                 * own are more specific — "was not allowed to add a VPN
+                 * configuration" against the system's account of a tunnel
+                 * that stopped — and they describe something that happened
+                 * before the provider ever ran.
+                 */
+                if self.lastError == nil {
+                    self.lastError = self.describe(error)
+                }
+                self.log.error("the tunnel stopped: \(error.localizedDescription, privacy: .public)")
+            }
+            self.publish()
+        }
     }
 
     /// Write the current state where every screen will be told about it.
-    private func publish(error: String? = nil) {
+    private func publish() {
         let connection = manager?.connection
         let status = connection?.status ?? .invalid
         let proto = manager?.protocolConfiguration as? NETunnelProviderProtocol
@@ -343,7 +423,7 @@ final class TunnelControl: NSObject {
             "deviceKey": DeviceIdentityStore.publicKeyBase64IfPresent() ?? NSNull(),
             "region": configuration?["region"] as? String ?? NSNull(),
             "exitIp": configuration?["exitIp"] as? String ?? NSNull(),
-            "error": error ?? NSNull(),
+            "error": lastError ?? NSNull(),
             "since": NSNull(),
         ]
         // Epoch milliseconds, because that is what JavaScript counts in. The
