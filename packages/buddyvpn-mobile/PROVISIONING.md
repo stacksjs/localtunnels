@@ -22,9 +22,13 @@ shows it instead.
 
 Settings → **Pair a phone** → *Show code*. It encodes a link:
 
+```text
+buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west&x=<exit>
 ```
-buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example%3A51821&k=<secret>&r=us-west
-```
+
+`x` is the public key of the one server this device will accept, taken from
+the region's `useExit` in `servers.json`. It is omitted for `'auto'`, which
+is already what a phone does without it.
 
 The app registers the `buddyvpn` scheme, so **the phone's own camera reads
 it** and offers to open the app. There is no scanner in this app and no
@@ -47,6 +51,26 @@ The pairing is kept in the Keychain, not `UserDefaults`, and validated again
 on the way out: it outlives app updates, and a format that changed underneath
 must not be acted on.
 
+### Where the secret lives
+
+There are two copies of `authKey`, because there are two processes.
+
+The screens keep theirs in Craft's `secureStorage`. The tunnel runs in the
+Network Extension, which cannot read that, so the app also writes it to
+`PairingSecretStore` — the Keychain access group both targets share, where
+the extension reads it. Unpairing clears both; forgetting only the screens'
+copy would leave a device still holding the secret it was told to forget.
+
+Neither copy is in the two places a secret should not come to rest. A
+`providerConfiguration` travels with the saved VPN profile, outside this
+app's Keychain; the dictionary carries the region, the exit address, the
+resolvers and the LAN rule, and nothing else. `UserDefaults` is the only
+channel a screen has for reaching Swift, so a connect request passes through
+it — and `TunnelControl` clears the key before acting on the request, so the
+value lives there for one callback rather than until the next connect
+replaces it. That is a short window and not no window: a crash inside it
+leaves the request on disk, and a plist's freed space is not zeroed.
+
 `packages/buddyvpn/src/pairing.ts` builds the link and
 `packages/buddyvpn-mobile/src/pairing.ts` reads it. Two implementations of
 one format, so the desktop's builder is imported into the phone's tests and
@@ -59,6 +83,14 @@ can register, be handed the directory, and advertise themselves as an exit —
 a claim the coordinator relays without checking. A secret compiled into a
 shipped app belongs to everyone who downloads the app, and rotating it means
 shipping a new build to everyone who already had it.
+
+Pinning is what answers the exit half of that. A link that carries `x` names
+the one server the device will route through, and it refuses every other one
+— including, especially, a peer that advertises more convincingly. When a
+pinned server is away the tunnel does not come up, and says so rather than
+substituting; the settings row reads *one server* or *any server* so that
+refusal is legible. Without a pin, a device takes whichever peer advertises
+and sorts smallest, which is a stable choice and not a safe one.
 
 `coordinatorUrl` alone would be harmless to bake. It is not useful alone.
 
