@@ -67,6 +67,16 @@ interface Screen {
   /** Send a handler back the way the host does, and re-read the screen. */
   fire: (handlerId: string, nativeEvent?: unknown) => Screen
   /**
+   * Hand the screen a link the way iOS hands one to an app already running.
+   *
+   * The other half of `Host.initialURL`, and the only way into a screen that
+   * has already settled: a code scanned while the app is open arrives
+   * through a listener rather than a request, so nothing else here could
+   * reach it. Asynchronous because what a screen does with a link is — it
+   * validates it, writes it to the Keychain, and reads the result back.
+   */
+  deliverLink: (url: string) => Promise<Screen>
+  /**
    * Let anything the screen started finish, then read it again.
    *
    * Some of what a screen does on mount is asynchronous — asking the host
@@ -271,6 +281,31 @@ function render(route: string, stored: Record<string, string> = {}, host: Host =
         if (!deliver)
           throw new Error('the screen never asked to hear from its host')
         deliver(JSON.stringify({ id: `e${Math.random()}`, type: 'EVENT', payload: { handlerId, nativeEvent } }))
+        return read()
+      },
+      deliverLink: async (url) => {
+        if (!deliver)
+          throw new Error('the screen never asked to hear from its host')
+        /*
+         * The host's own channel, not a stub of `onLink`.
+         *
+         * Craft keeps its link listeners in a Set of its own and calls them
+         * when a `DEEP_LINK` message arrives, so this is the message iOS
+         * would send — and it goes through Craft's bridge exactly as a real
+         * one would. Replacing `craft.deepLinks` instead was the first
+         * attempt and it does not work: `installCraftBridge` owns that
+         * module and overwrites a seeded one, silently.
+         *
+         * No `initial` flag: Craft drops an initial link once
+         * `getInitialURL` has been called, which is precisely the case this
+         * is not. This is the other one — a code scanned while the app is
+         * already open.
+         */
+        deliver(JSON.stringify({ id: `l${Math.random()}`, type: 'DEEP_LINK', payload: url }))
+        // Three turns: the link being taken, the Keychain write, and the
+        // read the screen does to show what happened.
+        for (let turn = 0; turn < 3; turn += 1)
+          await new Promise(resolve => setTimeout(resolve, 0))
         return read()
       },
     }
@@ -587,6 +622,81 @@ describe('a scanned pairing code', () => {
 
   it('says nothing when the app was opened normally', async () => {
     expect((await render('connect').settle()).text).not.toContain('Paired')
+  })
+
+  /*
+   * The other moment: a code scanned while the app is already open.
+   *
+   * `getInitialURL` is the one that matters most, because it is the only
+   * time anybody pairs a new device — but re-pairing happens to a device
+   * that is already running, and that path arrives through a listener
+   * instead. Nothing here reached it until the stub host learned to deliver
+   * one.
+   */
+  it('is acted on when it arrives while the app is open', async () => {
+    const keychain: Record<string, string> = {}
+    const screen = await render('connect', {}, { keychain }).settle()
+    expect(screen.text).not.toContain('Paired')
+
+    const after = await screen.deliverLink(link)
+    expect(after.text).toContain('Paired')
+    expect(JSON.parse(keychain['vpn.pairing'])).toMatchObject({ region: 'eu-central' })
+  })
+})
+
+/*
+ * Where the traffic leaves from, which is not where the picker points.
+ *
+ * These are normally the same region and the exception is the one that
+ * matters. A pairing code selects the region it paired — deliberately, since
+ * somebody who scanned a code for Germany meant Germany — and it can arrive
+ * while a tunnel is up, which the picker itself cannot do, because the
+ * location row is inert while connected.
+ *
+ * So the choice moves and the tunnel does not. It is still carrying traffic
+ * through whichever exit it connected to, and a screen reading the picker
+ * puts a city and an address under the words "would leave from" that the
+ * traffic is not using. The status frame has carried the tunnel's own region
+ * across the process boundary the whole time; nothing read it.
+ */
+describe('the location shown while connected', () => {
+  const pairTo = (region: string): string =>
+    `buddyvpn://pair?v=1&c=wss%3A%2F%2Fvpn.example.com%3A51821&r=${region}&k=a-shared-secret-token`
+
+  /** `us-west`'s address, which appears on this screen in exactly one place. */
+  const US_WEST_EXIT = '5.78.208.190'
+
+  /** Pair, tap connect, and wait out the stand-in's pretend handshake. */
+  async function connectedTo(region: string): Promise<Screen> {
+    const screen = await render('connect', {}, { initialURL: pairTo(region), keychain: {} }).settle()
+    screen.fire(screen.handler('TouchableOpacity', 'onPress', 0))
+    // `FAKE_CONNECT_MS` in `src/tunnel.ts`, plus room for the clock to tick.
+    await new Promise(resolve => setTimeout(resolve, 1600))
+    const up = await screen.settle()
+    expect(up.text).toContain('Connected')
+    return up
+  }
+
+  it('is the region the tunnel is on', async () => {
+    const up = await connectedTo('us-west')
+    expect(up.text).toContain('Would leave from')
+    expect(up.text).toContain(US_WEST_EXIT)
+  })
+
+  /*
+   * The regression. Re-pairing to Germany while a tunnel is up through
+   * Oregon used to relabel the exit as Falkenstein, which is the one lie
+   * this screen is built not to tell.
+   */
+  it('does not follow a pairing code to a region the tunnel is not on', async () => {
+    const up = await connectedTo('us-west')
+    const after = await up.deliverLink(pairTo('eu-central'))
+
+    // The code was acted on: the picker moved, which is what it is for.
+    expect(after.text).toContain('Paired')
+    expect(after.text).toContain('Falkenstein')
+    // And the tunnel did not, so the exit is still the one carrying traffic.
+    expect(after.text).toContain(US_WEST_EXIT)
   })
 })
 

@@ -89,6 +89,21 @@ onMount(() => {
 })
 
 const here = () => regionById(region()) 
+/*
+ * Where the tunnel is, as opposed to where the picker points.
+ *
+ * Normally the same thing, and the exception is the one that matters: a
+ * pairing code arriving while a tunnel is up rewrites the choice, because
+ * somebody who scanned a code for Germany meant Germany. The tunnel does not
+ * move — it is still carrying traffic through whichever exit it connected
+ * to — so reading the picker would put a city and an address on screen that
+ * the traffic is not using. Under the words "would leave from".
+ *
+ * `region` is in the status frame for exactly this, and was going unread.
+ * Falling back to the picker covers the frame having none, which is every
+ * phase but connected.
+ */
+const running = () => regionById(snapshot().region) ?? here()
 const phase = () => snapshot().phase
 const connected = () => phase() === 'connected'
 const busy = () => phase() === 'connecting' || phase() === 'disconnecting'
@@ -207,12 +222,17 @@ const toggle = () => {
       Where the traffic would leave from. The desktop app asks the internet
       what address it sees, which is evidence; the phone has no tunnel to ask
       through, so this is the location's claim and is worded as one.
+
+      The claim is about the region the *tunnel* is on, not the one the picker
+      shows. See `running()`: a pairing code can change the picker while a
+      tunnel is up, and this block is the one place that difference would be
+      a lie rather than a mismatch.
     -->
     @if(connected())
       <view class="items-center gap-1 pt-4">
         <text class="text-xs uppercase tracking-wide text-gray-400">Would leave from</text>
-        <text class="text-sm font-medium text-gray-900 dark:text-gray-100" :text="here()?.city"></text>
-        <text class="text-xs text-gray-500 dark:text-gray-400" :text="here()?.exitIp"></text>
+        <text class="text-sm font-medium text-gray-900 dark:text-gray-100" :text="running()?.city"></text>
+        <text class="text-xs text-gray-500 dark:text-gray-400" :text="running()?.exitIp"></text>
       </view>
     @endif
 
