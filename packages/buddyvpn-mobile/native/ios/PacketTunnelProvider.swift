@@ -319,6 +319,38 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
      "but not really". `excludedRoutes` carries the local network only when
      that was asked for, which is what makes a printer reachable while
      everything else goes through the exit.
+
+     ## IPv6, which this tunnel cannot carry
+
+     The tunnel is IPv4-only: the coordinator assigns a v4 address and the
+     exit claims `0.0.0.0/0`, never `::/0`. Describing only `ipv4Settings`
+     leaves v6 on the physical interface, so on a dual-stack network — which
+     a carrier's is more reliably than a home one — every destination with an
+     AAAA record is reached over IPv6, outside the tunnel, with the real
+     address, while iOS shows the VPN badge and this app says Connected.
+     `fulltunnel.ts` calls that the worst failure the desktop has, because
+     nothing about it looks wrong, and the desktop takes two measures against
+     it. Nothing here took any.
+
+     So v6 is claimed and dropped rather than left alone. The interface takes
+     a ULA address it never uses and a `::/0` route, which brings v6 into a
+     tunnel with nowhere to send it; the packets die at this end instead of
+     leaving the phone.
+
+     That is the second-best of the desktop's two answers, chosen because it
+     is the only one an app has. Taking the address away is better — it sends
+     name resolution and connection setup straight to v4 with nothing to fall
+     back from — and it needs `networksetup`, which no app on iOS has. With
+     an address still on the physical interface, applications go on trying v6
+     first, as Happy Eyeballs does, and pay a stall before falling back. A
+     stall is the price; a leak is not a price, it is the thing this exists
+     to stop.
+
+     The real answer is a tunnel that carries v6: a coordinator that assigns
+     a v6 address and an exit that advertises `::/0`. That is a protocol
+     change on both platforms, and `interface.ts` declines it today for a
+     reason that is still good — a `::/0` route would hide that it has
+     nowhere to go. This makes the hiding deliberate and local instead.
      */
     func networkSettings(address: String, exit: String, dns: [String], allowLan: Bool) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: exit)
@@ -335,6 +367,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         settings.ipv4Settings = ipv4
 
+        /*
+         * The address is a fixed ULA, and it does not matter what it is.
+         *
+         * Nothing routes to it: it exists because `NEIPv6Settings` requires
+         * an address before it will accept a route, and the route is the
+         * whole point. Every device using the same one is harmless for the
+         * same reason — no peer learns it, and no packet is addressed to it.
+         */
+        let ipv6 = NEIPv6Settings(addresses: ["fd00::1"], networkPrefixLengths: [128])
+        ipv6.includedRoutes = [NEIPv6Route.default()]
+        if allowLan {
+            // The v6 equivalents of the four v4 blocks below: link-local,
+            // which is how a phone finds a printer at all, and the unique
+            // local range a home router hands out.
+            ipv6.excludedRoutes = [
+                NEIPv6Route(destinationAddress: "fe80::", networkPrefixLength: 10),
+                NEIPv6Route(destinationAddress: "fc00::", networkPrefixLength: 7),
+            ]
+        }
+        settings.ipv6Settings = ipv6
+
         if !dns.isEmpty {
             let resolvers = NEDNSSettings(servers: dns)
             // Every name, not just the ones with no better answer: a resolver
@@ -344,12 +397,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         /*
-         * Room for the transport's own overhead.
+         * Room for the transport's own overhead, with a margin.
          *
-         * The encrypted packet is larger than the one handed over, and the
-         * difference has to come out of the MTU or every full-size packet is
-         * refused by `TunnelSession.send` as over the limit — which reads as
-         * a tunnel that carries small packets and drops large ones.
+         * Not because `TunnelSession.send` would refuse a larger packet: its
+         * limit is `LTVPN_MAX_PLAINTEXT_LEN`, which is 4096, and no MTU worth
+         * setting comes near it. The constraint is the datagram that leaves
+         * the phone. A packet of this size is padded to 16 bytes, gains a
+         * 16-byte header and a 16-byte tag, and then UDP and IP headers on
+         * top — about 1340 bytes on v4 — and anything over the path MTU is
+         * fragmented or dropped by something in the middle that will not say
+         * so.
+         *
+         * 1280 rather than the desktop's 1420 because a phone's path is not a
+         * desktop's: carrier networks, tethering and 464XLAT each take their
+         * own bytes, and 1280 is the floor IPv6 guarantees, so it is the one
+         * number no link is allowed to be below. It costs throughput against
+         * 1420 and buys never having to debug this from a train.
          */
         settings.mtu = NSNumber(value: 1280)
         return settings
