@@ -137,6 +137,11 @@ describe('the fields', () => {
 })
 
 describe('choosing an exit', () => {
+  const DESKTOP = readFileSync(
+    resolve(PACKAGE_DIR, '..', 'localtunnels', 'src', 'vpn', 'interface.ts'),
+    'utf8',
+  )
+
   /*
    * The rule has to match `interface.ts`, not merely be reasonable. A phone
    * and a desktop on one network that disagree about which peer is "the"
@@ -144,14 +149,75 @@ describe('choosing an exit', () => {
    * reports a problem.
    */
   it('is the smallest public key among the exits, as the desktop chooses', () => {
-    const desktop = readFileSync(
-      resolve(PACKAGE_DIR, '..', 'localtunnels', 'src', 'vpn', 'interface.ts'),
-      'utf8',
-    )
     // `records.filter(r => r.exitNode).map(r => r.publicKey).sort()[0]`
-    expect(desktop).toMatch(/filter\(\s*r\s*=>\s*r\.exitNode\s*\)[\s\S]{0,60}\.sort\(\)\[0\]/)
+    expect(DESKTOP).toMatch(/filter\(\s*r\s*=>\s*r\.exitNode\s*\)[\s\S]{0,60}\.sort\(\)\[0\]/)
     expect(SWIFT).toMatch(/filter\s*\{\s*\$0\.exitNode == true\s*\}/)
     expect(SWIFT).toMatch(/sorted\s*\{\s*\$0\.publicKey < \$1\.publicKey\s*\}/)
+  })
+
+  /*
+   * And the desktop has a second branch, which is the one that matters.
+   *
+   * `exitNode` is a claim the coordinator relays without checking, and the
+   * auth key every member holds is what lets anybody make it — so "whichever
+   * peer advertises" means "whichever peer says so and sorts smallest".
+   * `servers.json` can name a key instead, and a phone that cannot be told
+   * the same thing routes its traffic through whoever turns up.
+   */
+  it('can be pinned on the phone, as it can on the desktop', () => {
+    // `records.some(r => r.publicKey === want) ? want : null`
+    expect(DESKTOP).toMatch(/some\(\s*r\s*=>\s*r\.publicKey === want\s*\)\s*\?\s*want\s*:\s*null/)
+    expect(SWIFT).toContain('func exit(pinnedTo wanted: String?)')
+    expect(SWIFT).toMatch(/if let wanted \{[\s\S]{0,400}?return first \{ \$0\.publicKey == wanted \}/)
+  })
+
+  /*
+   * A pin honoured only when the peer also advertises would be no pin at
+   * all: naming a key is the decision. The desktop says so in as many words,
+   * and the phone has to agree or the two differ exactly when a peer stops
+   * advertising.
+   */
+  it('honours a pin whether or not that peer advertises, as the desktop does', () => {
+    expect(DESKTOP).toContain('A pinned key is honoured whenever that peer is present')
+    const pinned = /if let wanted \{([\s\S]*?)\n {8}\}/.exec(SWIFT)
+    expect(pinned).not.toBeNull()
+    // Comments stripped: this branch explains in prose why it does not look
+    // at `exitNode`, and the point is that the code does not.
+    expect(pinned![1].replace(/\/\/.*$/gm, '')).not.toContain('exitNode')
+  })
+
+  /*
+   * The regression: falling back to an unpinned exit because the pinned one
+   * is absent undoes the decision at the one moment it mattered. `nil` is
+   * the answer, and the provider turns it into a refusal a person can read.
+   */
+  it('refuses rather than substituting when a pinned exit is absent', () => {
+    const provider = readFileSync(join(PACKAGE_DIR, 'native', 'ios', 'PacketTunnelProvider.swift'), 'utf8')
+    expect(provider).toContain('case pinnedExitAbsent(region: String)')
+    expect(provider).toContain('peers.exit(pinnedTo: exitKey)')
+    expect(provider).toMatch(/exitKey == nil\s*\n\s*\? TunnelStartFailure\.noExit/)
+  })
+})
+
+describe('reading the directory', () => {
+  /*
+   * One record this build cannot read must not cost the rest.
+   *
+   * Decoding the array in one call is all-or-nothing: a single bad record
+   * discards every other record with it, `onPeers` never fires, and the
+   * tunnel waits for an exit that was in the frame it threw away — silently,
+   * because a nil from `try?` carries no reason. The desktop reads the same
+   * frame field by field and tolerates what it does not understand.
+   */
+  it('keeps the records it can read and counts the ones it cannot', () => {
+    expect(SWIFT).not.toMatch(/decode\(\[CoordinatorPeer\]\.self/)
+    expect(SWIFT).toMatch(/for record in raw \{[\s\S]{0,400}?decode\(CoordinatorPeer\.self/)
+    expect(SWIFT).toContain('undecodable += 1')
+  })
+
+  // Dropped quietly is how this was invisible in the first place.
+  it('says when it has dropped one', () => {
+    expect(SWIFT).toMatch(/if undecodable > 0 \{[\s\S]{0,200}?log\.error/)
   })
 })
 

@@ -203,6 +203,7 @@ export class NativeTunnel implements Tunnel {
       allowLan: settings.allowLan,
       coordinatorUrl: pairing?.coordinatorUrl ?? null,
       authKey: pairing?.authKey ?? null,
+      exitKey: pairing?.exitKey ?? null,
       nonce: nextNonce(),
     })
   }

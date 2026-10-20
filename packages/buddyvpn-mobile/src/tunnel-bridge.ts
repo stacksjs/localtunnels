@@ -70,6 +70,16 @@ export interface ConnectRequest {
    */
   coordinatorUrl: string | null
   authKey: string | null
+  /**
+   * The only peer allowed to carry this device's traffic, or null to accept
+   * whichever peer advertises itself.
+   *
+   * Pinned at pairing time, so it travels with the rest of the pairing.
+   * `exitNode` is a claim the coordinator relays without checking and the
+   * `authKey` above is what lets anybody make it — so with a key here the
+   * provider refuses every other peer rather than preferring this one.
+   */
+  exitKey: string | null
   nonce: string
 }
 

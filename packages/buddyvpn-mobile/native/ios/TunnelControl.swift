@@ -127,7 +127,8 @@ final class TunnelControl: NSObject {
                 dns: request["dns"] as? [String] ?? [],
                 allowLan: request["allowLan"] as? Bool ?? false,
                 coordinatorUrl: request["coordinatorUrl"] as? String,
-                authKey: request["authKey"] as? String
+                authKey: request["authKey"] as? String,
+                exitKey: request["exitKey"] as? String
             )
         case "disconnect":
             disconnect()
@@ -151,7 +152,13 @@ final class TunnelControl: NSObject {
         }
     }
 
-    private func connect(region: String, exitIp: String?, dns: [String], allowLan: Bool, coordinatorUrl: String?, authKey: String?) {
+    private func connect(region: String,
+                         exitIp: String?,
+                         dns: [String],
+                         allowLan: Bool,
+                         coordinatorUrl: String?,
+                         authKey: String?,
+                         exitKey: String?) {
         log.notice("connect requested: \(region, privacy: .public)")
 
         NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
@@ -188,6 +195,18 @@ final class TunnelControl: NSObject {
             }
             if let authKey {
                 proto.providerConfiguration?["authKey"] = authKey
+            }
+            /*
+             * The exit this device will accept, when one was pinned.
+             *
+             * Absent means the provider decides from the directory, which is
+             * what a network whose operator pinned nothing gets. Present
+             * means it refuses everything else — so an empty string must not
+             * be written here, or "pinned to nothing" would read as "pinned"
+             * and no exit would ever match.
+             */
+            if let exitKey, !exitKey.isEmpty {
+                proto.providerConfiguration?["exitKey"] = exitKey
             }
             manager.protocolConfiguration = proto
             manager.localizedDescription = "BuddyVPN"

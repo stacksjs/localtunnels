@@ -226,10 +226,34 @@ final class CoordinatorClient {
             startHeartbeat()
             finish(with: .success(CoordinatorRegistration(assignedIp: assignedIp, network: network)))
         case "peers":
-            guard let raw = frame["peers"],
-                  let encoded = try? JSONSerialization.data(withJSONObject: raw),
-                  let peers = try? JSONDecoder().decode([CoordinatorPeer].self, from: encoded)
-            else { return }
+            guard let raw = frame["peers"] as? [Any] else { return }
+            /*
+             * Decoded one record at a time, on purpose.
+             *
+             * Decoding the array as a whole is all-or-nothing: one record
+             * this build cannot read discards every other record with it,
+             * `onPeers` never fires, and the tunnel waits for an exit that is
+             * sitting in the frame it just threw away — with nothing logged,
+             * because there is no error to log when the answer is simply nil.
+             * The desktop reads the same frame field by field and tolerates a
+             * record it does not understand.
+             *
+             * So a bad record is dropped and counted, and the rest are used.
+             */
+            var peers: [CoordinatorPeer] = []
+            var undecodable = 0
+            for record in raw {
+                guard let encoded = try? JSONSerialization.data(withJSONObject: record),
+                      let peer = try? JSONDecoder().decode(CoordinatorPeer.self, from: encoded)
+                else {
+                    undecodable += 1
+                    continue
+                }
+                peers.append(peer)
+            }
+            if undecodable > 0 {
+                log.error("ignored \(undecodable) peer record(s) this build could not read, of \(raw.count)")
+            }
             onPeers?(peers)
         case "error":
             let reason = frame["message"] as? String ?? "no reason given"
@@ -295,17 +319,35 @@ final class CoordinatorClient {
 
 extension Array where Element == CoordinatorPeer {
     /**
-     The exit to use, chosen the same way the TypeScript client chooses it:
-     the lexicographically smallest public key among the peers advertising
-     themselves as exits.
+     The exit to use, chosen the same way `chooseExit` in `vpn/interface.ts`
+     chooses it.
 
      Matching that rule matters more than the rule itself. A phone and a
      desktop on one network that disagree about which exit is "the" exit send
      their traffic to different places, and nothing anywhere reports a
      problem.
+
+     With `pinnedTo` set, that peer and no other — present or absent, and if
+     absent the answer is nil rather than a substitute. `exitNode` is a claim
+     the coordinator relays without checking, and the auth key every member
+     holds is what lets anybody make it, so "whichever peer advertises" means
+     "whichever peer says so first and sorts smallest". Falling back to that
+     because a pinned peer is offline would quietly undo the decision at the
+     one moment it mattered.
+
+     Without a pin, the smallest public key among the peers that advertise.
+     A stable choice rather than a safe one: nothing here can tell an exit
+     from something claiming to be one.
      */
-    var exit: CoordinatorPeer? {
-        filter { $0.exitNode == true }
+    func exit(pinnedTo wanted: String?) -> CoordinatorPeer? {
+        if let wanted {
+            // Not filtered on `exitNode`: naming a key is already the
+            // decision, and refusing to use it because the peer did not also
+            // advertise would be surprising. `interface.ts` honours a pin the
+            // same way, for the same reason.
+            return first { $0.publicKey == wanted }
+        }
+        return filter { $0.exitNode == true }
             .sorted { $0.publicKey < $1.publicKey }
             .first
     }

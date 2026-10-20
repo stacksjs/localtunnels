@@ -63,6 +63,8 @@ enum TunnelStartFailure: LocalizedError {
     case notProvisioned
     /// Registered, but the network has no exit to route through.
     case noExit(region: String)
+    /// The exit this device was paired to is not in the network right now.
+    case pinnedExitAbsent(region: String)
 
     var errorDescription: String? {
         switch self {
@@ -78,6 +80,9 @@ enum TunnelStartFailure: LocalizedError {
                  + "so there is nothing for it to connect to."
         case let .noExit(region):
             return "No server in \(region) is offering to carry traffic right now."
+        case let .pinnedExitAbsent(region):
+            return "The server this device was paired to in \(region) is not reachable right now. "
+                 + "BuddyVPN will not use a different one — re-pair this device to change which server it trusts."
         }
     }
 }
@@ -163,6 +168,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         join(
             coordinatorUrl: coordinatorUrl,
             authKey: configuration?["authKey"] as? String,
+            // Written only when a pin was carried in the pairing, so absent
+            // and empty both mean "decide from the directory".
+            exitKey: (configuration?["exitKey"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             identity: identity,
             region: region,
             completionHandler: completionHandler
@@ -185,6 +193,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
      */
     private func join(coordinatorUrl: String,
                       authKey: String?,
+                      exitKey: String?,
                       identity: DeviceIdentity,
                       region: String,
                       completionHandler: @escaping (Error?) -> Void) {
@@ -219,13 +228,29 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             self?.log.notice("the coordinator is answering again")
         }
 
+        if let exitKey {
+            log.notice("this device is paired to one exit: \(exitKey.prefix(16), privacy: .public)…")
+        }
+
         var settled = false
         client.onPeers = { [weak self] peers in
             guard let self, !settled else { return }
-            guard let exit = peers.exit else {
-                // Not a failure yet: an exit may still join, and the
-                // coordinator re-sends the directory when it does.
-                self.log.notice("no exit in the directory yet, \(peers.count) peer(s) known")
+            guard let exit = peers.exit(pinnedTo: exitKey) else {
+                /*
+                 * Not a failure yet, in either case: a peer may still join,
+                 * and the coordinator re-sends the directory when one does.
+                 *
+                 * Which case it is matters for what a person would do about
+                 * it, so they are logged apart. A pinned exit that is absent
+                 * is not a network without an exit — there may be several
+                 * offering, and this device will not take any of them.
+                 */
+                if exitKey == nil {
+                    self.log.notice("no exit in the directory yet, \(peers.count) peer(s) known")
+                }
+                else {
+                    self.log.notice("the pinned exit is not in the directory, \(peers.count) peer(s) known")
+                }
                 return
             }
             settled = true
@@ -249,7 +274,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
              * that looks finished and has never been true. It waits for a
              * device.
              */
-            completionHandler(TunnelStartFailure.noExit(region: region))
+            completionHandler(exitKey == nil
+                ? TunnelStartFailure.noExit(region: region)
+                : TunnelStartFailure.pinnedExitAbsent(region: region))
         }
 
         client.connect { [weak self] result in
