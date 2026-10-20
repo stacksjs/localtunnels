@@ -24,6 +24,15 @@
 //  every transport here does. Taking the tunnel down for it would hand
 //  anyone who can reach the port a way to end the session.
 //
+//  ── Padding ─────────────────────────────────────────────────
+//
+//  The transport pads every plaintext up to a 16-byte boundary before
+//  sealing it, so what `ltvpn_session_decrypt` returns is almost never the
+//  length of the packet inside it. The real length is in the IP header, and
+//  `packetLength` below reads it — the same recovery the desktop does in
+//  `vpn/peer.ts`, because a padded packet handed to `writePackets` is not
+//  the packet that was sent. A zero-length plaintext is a keepalive.
+//
 import Foundation
 import Network
 import NetworkExtension
@@ -149,13 +158,33 @@ final class TunnelSession {
             )
         }
         guard written > 0 else {
-            // Noise, a replay, or a truncated send. Dropping it is the whole
+            // Noise, a replay, a truncated send, or a keepalive, which
+            // carries a zero-length plaintext. Dropping it is the whole
             // response: tearing the tunnel down would let anyone who can
             // reach this port end the session.
             return
         }
 
-        let packet = Data(out.prefix(Int(written)))
+        let padded = out.prefix(Int(written))
+        /*
+         * Back to the packet's own length.
+         *
+         * `written` counts the padding the transport added, so these bytes
+         * are an IP packet followed by up to fifteen zeroes. iOS does not
+         * refuse that: `writePackets` takes it and the stack reads the
+         * header's length anyway, which is what makes the mistake expensive.
+         * It is the transport layer that then reads too far — a UDP datagram
+         * arrives longer than it was sent, with zeroes appended — so DNS and
+         * QUIC break while ping and TCP look perfectly healthy.
+         */
+        let length = Self.packetLength(padded)
+        guard length > 0, length <= padded.count else {
+            // A plaintext with no readable IP header. Not ours to interpret,
+            // and not something to pass on as though it were a packet.
+            return
+        }
+
+        let packet = Data(padded.prefix(length))
         // The address family the packet actually carries. Telling the system
         // IPv4 about an IPv6 packet does not fail — it delivers it to the
         // wrong stack, where it is dropped silently much later.
@@ -163,5 +192,28 @@ final class TunnelSession {
             ? AF_INET6
             : AF_INET
         flow.writePackets([packet], withProtocols: [NSNumber(value: family)])
+    }
+
+    /**
+     The length an IP packet declares for itself, or 0 if it declares none.
+
+     The same two header reads as `ipPacketLength` in `vpn/routing.ts`, and
+     they have to stay the same: both ends of this tunnel recover a length by
+     this rule, and an end that disagrees delivers padding into somebody's
+     payload.
+     */
+    static func packetLength(_ packet: ArraySlice<UInt8>) -> Int {
+        let bytes = Array(packet)
+        guard let first = bytes.first else { return 0 }
+        switch first >> 4 {
+        case 4 where bytes.count >= 20:
+            // IPv4 total length, its own header included: bytes 2..4, big-endian.
+            return Int(bytes[2]) << 8 | Int(bytes[3])
+        case 6 where bytes.count >= 40:
+            // IPv6 has a fixed 40-byte header and counts only what follows it.
+            return 40 + (Int(bytes[4]) << 8 | Int(bytes[5]))
+        default:
+            return 0
+        }
     }
 }
