@@ -3,7 +3,7 @@ import { deepLinks, haptics, navigation, whenNativeHost } from '../src/native'
 import { applyPairingUrl, readPairing } from '../src/pairing'
 import { readRegion, regionById, writeRegion } from '../src/regions'
 import { readSettings } from '../src/settings'
-import { formatUptime, tunnel } from '../src/tunnel'
+import { coordinatorNotice, formatUptime, tunnel } from '../src/tunnel'
 
 const region = state(readRegion())
 
@@ -117,6 +117,16 @@ const deployed = () => Boolean(here()?.exitIp)
  * coordinator, so this is never true of a simulated build.
  */
 const unpaired = () => tunnel.available() && network() === null
+
+/*
+ * What the coordinator is doing, when it is worth saying.
+ *
+ * The wording lives in `src/tunnel.ts`, where it can be tested: a bound
+ * expression leaves no trace in the rendered document until its condition
+ * holds, so a sentence written here could only ever be checked by reading
+ * it. This screen decides *where* it goes.
+ */
+const notice = () => coordinatorNotice(snapshot().coordinator, running()?.country ?? null)
 
 const statusLabel = () => {
   if (snapshot().error) return 'Something went wrong'
@@ -289,6 +299,28 @@ const toggle = () => {
     @if(snapshot().error)
       <view class="mb-3 rounded-2xl border border-red-300 bg-red-100 p-3 dark:border-red-700 dark:bg-red-950">
         <text class="text-xs text-red-800 dark:text-red-300" :text="snapshot().error"></text>
+      </view>
+    @endif
+
+    <!--
+      The coordinator, when it has something to say.
+
+      Above the location rows and below the button, where the error banner
+      sits, because it is the same kind of thing: a sentence about why the
+      thing you just looked at is not what it appears to be. Two tones, since
+      one of these is waiting and the other needs somebody to do something.
+
+      Complementary conditions rather than `@if`/`@else`, which blanks the
+      screen at hydration on this renderer.
+    -->
+    @if(notice())
+      <view class="mb-3 flex-row items-center gap-2 rounded-2xl border p-3"
+        :class="notice().tone === 'error' ? 'mb-3 flex-row items-center gap-2 rounded-2xl border border-red-300 bg-red-100 p-3 dark:border-red-700 dark:bg-red-950' : 'mb-3 flex-row items-center gap-2 rounded-2xl border border-amber-300 bg-amber-100 p-3 dark:border-amber-700 dark:bg-amber-950'">
+        <icon class="i-lucide-unplug shrink-0 text-base text-amber-700 dark:text-amber-300"
+          :class="notice().tone === 'error' ? 'i-lucide-octagon-alert shrink-0 text-base text-red-700 dark:text-red-300' : 'i-lucide-unplug shrink-0 text-base text-amber-700 dark:text-amber-300'"></icon>
+        <text class="flex-1 text-xs text-amber-800 dark:text-amber-300"
+          :class="notice().tone === 'error' ? 'flex-1 text-xs text-red-800 dark:text-red-300' : 'flex-1 text-xs text-amber-800 dark:text-amber-300'"
+          :text="notice().message"></text>
       </view>
     @endif
 

@@ -980,3 +980,48 @@ describe('the Craft bridge', () => {
     expect(fictional).toEqual([])
   })
 })
+
+/*
+ * The coordinator banner, as far as this harness can reach it.
+ *
+ * Not far, and the limit is worth stating. The shipped build selects the
+ * stand-in — `capabilities.networkExtension` is off until Apple grants the
+ * entitlement — and the stand-in joins no coordinator, so it can never
+ * report one in trouble. There is no honest way to drive these states from
+ * here: faking them in `StubTunnel` would put a warning about a lost network
+ * on the screen of every simulated build.
+ *
+ * So the wording lives in `coordinatorNotice` and is tested there, the
+ * frame's half is tested in `tunnel-bridge.test.ts`, and what is left for
+ * this file is the join: that the screen asks, and that it says nothing when
+ * there is nothing to say. The last part is not trivia — a banner stuck
+ * visible is the failure a reader of the markup cannot rule out, since an
+ * `@if` that never binds renders its contents unconditionally on this
+ * renderer, which is a thing that has happened here before.
+ */
+describe('the coordinator banner', () => {
+  it('is what the screen asks about', async () => {
+    const bundle = await Bun.file(BUNDLE).text()
+    expect(bundle).toContain('coordinatorNotice')
+  })
+
+  it('says nothing on a tunnel that has no coordinator trouble', async () => {
+    const screen = await render('connect', {}, { keychain: {} }).settle()
+    expect(screen.text).not.toContain('Lost touch')
+    expect(screen.text).not.toContain('Pair it again')
+  })
+
+  /*
+   * And nothing on a connected one either, which is the case that would hide
+   * a stuck banner: the stand-in reports `joined` once it is up, so a banner
+   * that ignored its condition would appear exactly here.
+   */
+  it('says nothing once the stand-in is connected', async () => {
+    const screen = await render('connect', {}, { keychain: {} }).settle()
+    screen.fire(screen.handler('TouchableOpacity', 'onPress', 0))
+    await new Promise(resolve => setTimeout(resolve, 1600))
+    const up = await screen.settle()
+    expect(up.text).toContain('Connected')
+    expect(up.text).not.toContain('Lost touch')
+  })
+})
