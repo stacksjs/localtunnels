@@ -22,7 +22,8 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { build, init } from 'craft-native/ios'
 import config from '../mobile.config'
-import { emitTunnelExtension, planTunnel, removeTunnelExtension } from './ios-tunnel-extension'
+import { unjustifiedUsageDescriptions, withoutUnusedUsageDescriptions } from './ios-privacy'
+import { emitTunnelExtension, planTunnel, readPlist, removeTunnelExtension, writePlist } from './ios-tunnel-extension'
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(PACKAGE_DIR, 'ios')
@@ -146,7 +147,7 @@ try {
   const plan = planTunnel(ios.appName, ios.bundleId)
   if (ios.capabilities.networkExtension) {
     const written = emitTunnelExtension(OUT_DIR, plan)
-    console.log(`[mobile] tunnel extension: ${plan.tunnelBundleId}, sharing ${plan.appGroup}`)
+    console.log(`[mobile] tunnel extension: ${plan.tunnelBundleId}`)
     for (const file of written)
       console.log(`[mobile]   ${file}`)
   }
@@ -168,6 +169,30 @@ try {
   }
 
   await build({ nativeBundlePath: BUNDLE, output: OUT_DIR, generateProject: true })
+
+  /*
+   * After `build`, because Craft owns this file and writes it.
+   *
+   * Craft declares a usage description for every protected API it knows how
+   * to reach, which for this app is eleven strings covering ten capabilities
+   * it does not enable. None of them prompts anybody — a usage description
+   * is read when its API is called and this app calls none — so the only
+   * places it surfaces are App Review, the privacy labels, and somebody
+   * dumping a VPN's plist, which is a thing that happens to VPNs. See
+   * `ios-privacy.ts` for what is kept and why.
+   */
+  const infoPlistPath = join(OUT_DIR, 'Info.plist')
+  if (existsSync(infoPlistPath)) {
+    const plist = readPlist(infoPlistPath)
+    const unjustified = unjustifiedUsageDescriptions(plist)
+    if (unjustified.length > 0) {
+      writePlist(infoPlistPath, withoutUnusedUsageDescriptions(plist))
+      // Named rather than counted: a step that edits a generated file
+      // without saying what it changed is one nobody can audit from a log.
+      console.log(`[mobile] removed ${unjustified.length} unused usage description(s): ${unjustified.join(', ')}`)
+    }
+  }
+
   console.log(`[mobile] ios/ generated — open it with: bunx craft-sdk ios open`)
 }
 catch (error) {
