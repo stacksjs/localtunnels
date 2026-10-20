@@ -342,3 +342,82 @@ describe('reconnecting', () => {
     expect(SWIFT).toMatch(/attempt = 0\n {12}startHeartbeat\(\)/)
   })
 })
+
+/*
+ * The one word that crosses from the extension to the app.
+ *
+ * The coordinator lives in the provider's process; the status the screens
+ * read is written by the container app. `NEVPNConnection` has no push to the
+ * app and no property that could carry this, so the app asks and the
+ * provider answers — `sendProviderMessage` into `handleAppMessage`, which is
+ * Apple's channel for exactly this and the only one here that does not cost
+ * an App Group entitlement.
+ *
+ * Three spellings have to match across two processes and a language. A word
+ * the app does not recognise reads as no banner, which is the right failure
+ * and also a silent one: the screens would simply never mention a network
+ * they had lost.
+ */
+describe('the coordinator phase', () => {
+  const PROVIDER = readFileSync(join(PACKAGE_DIR, 'native', 'ios', 'PacketTunnelProvider.swift'), 'utf8')
+  const CONTROL = readFileSync(join(PACKAGE_DIR, 'native', 'ios', 'TunnelControl.swift'), 'utf8')
+  const TUNNEL = readFileSync(join(PACKAGE_DIR, 'src', 'tunnel.ts'), 'utf8')
+
+  /** The words `CoordinatorPhase` admits, read out of the type. */
+  function phases(): string[] {
+    const union = /export type CoordinatorPhase = (.*)/.exec(TUNNEL)
+    if (!union)
+      throw new Error('src/tunnel.ts has no CoordinatorPhase')
+    return [...union[1].matchAll(/'([a-z]+)'/g)].map(match => match[1])
+  }
+
+  it('is spelled the same in the provider as in the screens', () => {
+    const defined = phases()
+    expect(defined).toEqual(['joined', 'retrying', 'refused'])
+    for (const phase of defined)
+      expect({ phase, written: PROVIDER.includes(`coordinatorPhase = "${phase}"`) }).toEqual({ phase, written: true })
+  })
+
+  // And read back by the same name on the way into the frame.
+  it('reaches the frame under the name the screens parse', () => {
+    expect(CONTROL).toContain('"coordinator": coordinatorPhase ?? NSNull()')
+    expect(readFileSync(join(PACKAGE_DIR, 'src', 'tunnel-bridge.ts'), 'utf8')).toContain('frame.coordinator')
+  })
+
+  /*
+   * The channel itself, in both halves. A provider that answered nil would
+   * leave the app with no phase and the screens with no banner, which is
+   * indistinguishable from a coordinator that is fine.
+   */
+  it('is asked for by the app and answered by the provider', () => {
+    expect(CONTROL).toContain('session.sendProviderMessage(')
+    expect(PROVIDER).toContain('override func handleAppMessage(')
+    expect(PROVIDER).toContain('completionHandler?(Data(coordinatorPhase.utf8))')
+  })
+
+  /*
+   * Asked only while the tunnel is up, and forgotten when it is not. A phase
+   * held across a disconnect would be published beside an idle tunnel —
+   * "lost touch with Germany" under a screen that says Not connected.
+   */
+  it('is polled only while there is a provider to answer', () => {
+    const connected = /case \.connected:([\s\S]*?)\n {8}(?:case|default)/.exec(CONTROL)
+    expect(connected).not.toBeNull()
+    expect(connected![1]).toContain('startCoordinatorPoll()')
+    expect(CONTROL).toMatch(/private func stopCoordinatorPoll\(\)[\s\S]{0,600}?coordinatorPhase = nil/)
+  })
+
+  /*
+   * Both ends of the retry report the same word. `onStale` is a coordinator
+   * that has gone quiet on an open socket and `onReconnecting` is one this
+   * phone is between sockets with — two states, nothing a person would do
+   * differently about either, so one word and the distinction in the log.
+   */
+  it('collapses silence and retrying, as the screens expect', () => {
+    for (const callback of ['onStale', 'onReconnecting']) {
+      const block = new RegExp(`client\\.${callback} = \\{([\\s\\S]*?)\\n {8}\\}`).exec(PROVIDER)
+      expect({ callback, found: block !== null }).toEqual({ callback, found: true })
+      expect({ callback, says: block![1].includes('"retrying"') }).toEqual({ callback, says: true })
+    }
+  })
+})

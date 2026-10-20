@@ -237,9 +237,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
          */
         client.onStale = { [weak self] silent in
             self?.log.error("the coordinator has been silent for \(Int(silent))s; this tunnel is about to stop carrying traffic")
+            /*
+             * Silent-but-open and between-sockets are one word to the
+             * screens. There is nothing a person would do differently about
+             * them, and the distinction is in this log.
+             */
+            self?.coordinatorPhase = "retrying"
         }
         client.onResumed = { [weak self] _ in
             self?.log.notice("the coordinator is answering again")
+            self?.coordinatorPhase = "joined"
         }
         /*
          * Said rather than silently retried.
@@ -253,9 +260,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
          */
         client.onReconnecting = { [weak self] attempt, delay in
             self?.log.notice("coordinator reconnect attempt \(attempt, privacy: .public) in \(delay, privacy: .public)s")
+            self?.coordinatorPhase = "retrying"
         }
         client.onGaveUp = { [weak self] reason in
             self?.log.error("not reconnecting to the coordinator: \(reason, privacy: .public)")
+            // The one that needs a person: an auth key this coordinator does
+            // not accept will not become correct by being presented again.
+            self?.coordinatorPhase = "refused"
         }
 
         if let exitKey {
@@ -314,6 +325,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             switch result {
             case let .success(registration):
                 self.log.notice("joined as \(registration.assignedIp, privacy: .public) on \(registration.network, privacy: .public)")
+                self.coordinatorPhase = "joined"
             case let .failure(error):
                 settled = true
                 self.log.error("could not join: \(error.localizedDescription, privacy: .public)")
@@ -439,9 +451,33 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler()
     }
 
-    /// Messages from the containing app while the tunnel runs. Nothing sends
-    /// one yet; answering nil is the documented way to say "no reply".
+    /**
+     How this device is getting on with its coordinator.
+
+     `joined`, `retrying` or `refused`, spelled as `src/tunnel.ts` spells
+     them. A stored property because the coordinator lives in this process
+     and the status the screens read is written by the other one.
+     */
+    private var coordinatorPhase = "joined"
+
+    /**
+     The app asking how the coordinator is.
+
+     This is the whole channel between the two processes in this direction,
+     and there is no better one. The coordinator's state changes while nobody
+     is asking — a network handover, a few minutes backgrounded — and
+     `NEVPNConnection` has no push to the container app and no property that
+     could carry it. An App Group with a shared `UserDefaults` is the other
+     usual answer and costs an entitlement that must be provisioned before
+     any device build will sign, for a container that would hold one word.
+
+     So the app asks, and only while it is in front of somebody, which is the
+     only time a banner matters. See `TunnelControl.pollCoordinator`.
+
+     The request is not inspected. There is one question to ask, and matching
+     on a body would be a second spelling to keep in step for no gain.
+     */
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
-        completionHandler?(nil)
+        completionHandler?(Data(coordinatorPhase.utf8))
     }
 }

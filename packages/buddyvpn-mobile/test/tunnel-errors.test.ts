@@ -33,7 +33,16 @@ describe('why the tunnel stopped', () => {
    */
   it('is fetched from the system, which is the only place it exists', () => {
     expect(CONTROL).toContain('connection.fetchLastDisconnectError')
-    expect(CONTROL).toMatch(/case \.disconnected:\s*\n\s*readDisconnectReason\(\)/)
+    /*
+     * Asked for in the case that has one, without insisting it be the first
+     * line of it. This assertion used to require the two be adjacent and
+     * broke when the coordinator poll was stopped on the same path — a true
+     * failure about nothing, which is the standing risk of matching on
+     * shape rather than on the property.
+     */
+    const disconnected = /case \.disconnected:([\s\S]*?)\n {8}(?:case|default)/.exec(CONTROL)
+    expect(disconnected).not.toBeNull()
+    expect(disconnected![1]).toContain('readDisconnectReason()')
   })
 
   /*
@@ -63,6 +72,12 @@ describe('why the tunnel stopped', () => {
     const connect = /private func connect\(region: String,[\s\S]*?publish\(\)\n/.exec(CONTROL)
     expect(connect).not.toBeNull()
     expect(connect![0]).toContain('lastError = nil')
-    expect(CONTROL).toMatch(/case \.connecting, \.connected:[\s\S]{0,400}?lastError = nil/)
+    // Both states a new attempt passes through, whether they share a case or
+    // have one each.
+    for (const state of ['connected', 'connecting']) {
+      const block = new RegExp(`case \\.${state}:([\\s\\S]*?)\\n {8}(?:case|default)`).exec(CONTROL)
+      expect({ state, found: block !== null }).toEqual({ state, found: true })
+      expect({ state, cleared: block![1].includes('lastError = nil') }).toEqual({ state, cleared: true })
+    }
   })
 })

@@ -77,6 +77,32 @@ final class TunnelControl: NSObject {
      */
     private var lastError: String?
 
+    /**
+     How the coordinator is, as the extension last reported it.
+
+     Asked for rather than pushed. The coordinator runs in the provider's
+     process and its state changes while nobody is looking — a network
+     handover, a few minutes backgrounded — and `NEVPNConnection` offers no
+     push to this side and no property that could carry it. The alternative
+     is an App Group, which costs an entitlement that has to be provisioned
+     before a device build will sign, for a container holding one word.
+
+     Nil until the first answer, which reads as "no banner": a tunnel coming
+     up has nothing to report yet, and guessing `joined` would put a
+     reassuring word on screen before anything had joined anything.
+     */
+    private var coordinatorPhase: String?
+    private var coordinatorPoll: DispatchSourceTimer?
+    /**
+     How often to ask, while connected.
+
+     Slow on purpose. This is a cross-process round trip in service of a
+     banner, so it only has to be quick enough that somebody looking at the
+     screen sees the change before they give up on it — not quick enough to
+     catch every flap. It runs only while the tunnel is up and stops with it.
+     */
+    private let coordinatorPollSeconds: TimeInterval = 5
+
     /// The extension's bundle id, by the same rule `planTunnel` uses in
     /// `scripts/ios-tunnel-extension.ts`: the app's, plus one component. iOS
     /// requires an extension to live under its container app, so this is not
@@ -354,17 +380,72 @@ final class TunnelControl: NSObject {
     @objc private func vpnStatusChanged() {
         let status = manager?.connection.status ?? .invalid
         switch status {
-        case .connecting, .connected:
-            // A new attempt, or one that worked. Whatever went wrong last
-            // time is no longer what is happening, and leaving it on screen
-            // next to a tunnel that is coming up would be worse than saying
-            // nothing.
+        case .connected:
+            // One that worked, so the last failure is no longer what is
+            // happening. And now there is a provider running to answer.
+            lastError = nil
+            startCoordinatorPoll()
+            publish()
+        case .connecting:
+            // A new attempt. Leaving the last failure on screen next to a
+            // tunnel that is coming up would be worse than saying nothing.
             lastError = nil
             publish()
         case .disconnected:
+            stopCoordinatorPoll()
             readDisconnectReason()
         default:
+            stopCoordinatorPoll()
             publish()
+        }
+    }
+
+    /**
+     Ask the provider how the coordinator is, while the tunnel is up.
+
+     Started when the tunnel connects and stopped when it leaves that state,
+     so nothing is running against a provider that is not there. A failed
+     send is not news: the provider is starting, stopping, or busy, and the
+     next tick asks again.
+     */
+    private func startCoordinatorPoll() {
+        guard coordinatorPoll == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now(), repeating: coordinatorPollSeconds)
+        timer.setEventHandler { [weak self] in
+            self?.askCoordinator()
+        }
+        timer.resume()
+        coordinatorPoll = timer
+    }
+
+    private func stopCoordinatorPoll() {
+        coordinatorPoll?.cancel()
+        coordinatorPoll = nil
+        /*
+         * Forgotten with the poll, not left behind.
+         *
+         * A phase held across a disconnect would be published beside an idle
+         * tunnel — "lost touch with Germany" under a screen that says Not
+         * connected, describing a coordinator nothing is talking to.
+         */
+        coordinatorPhase = nil
+    }
+
+    private func askCoordinator() {
+        guard let session = manager?.connection as? NETunnelProviderSession else { return }
+        do {
+            try session.sendProviderMessage(Data()) { [weak self] reply in
+                guard let self, let reply, let phase = String(data: reply, encoding: .utf8) else { return }
+                guard phase != self.coordinatorPhase else { return }
+                self.coordinatorPhase = phase
+                self.publish()
+            }
+        }
+        catch {
+            // The provider is starting, stopping or busy. The next tick asks
+            // again, and a log line every five seconds would be worse than
+            // the silence.
         }
     }
 
@@ -424,6 +505,9 @@ final class TunnelControl: NSObject {
             "region": configuration?["region"] as? String ?? NSNull(),
             "exitIp": configuration?["exitIp"] as? String ?? NSNull(),
             "error": lastError ?? NSNull(),
+            // Null until the provider has answered, which reads as no
+            // banner. See `coordinatorPhase`.
+            "coordinator": coordinatorPhase ?? NSNull(),
             "since": NSNull(),
         ]
         // Epoch milliseconds, because that is what JavaScript counts in. The
