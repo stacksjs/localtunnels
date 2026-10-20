@@ -244,3 +244,101 @@ describe('staying registered', () => {
     expect(SWIFT).toContain('heartbeatInterval * 3')
   })
 })
+
+/*
+ * Coming back, by the same rules on both platforms.
+ *
+ * A node that stops heart-beating is dropped and the exit withdraws the
+ * route to its address, so a connection that is not re-established is a
+ * tunnel that is dead rather than one that reports an error. A phone loses
+ * this connection constantly, which makes it the platform where the policy
+ * matters most and the one that cannot be tested here.
+ *
+ * Two numbers and one judgement have to match `vpn/client.ts`, and the
+ * judgement is the one worth guarding: which refusals are worth retrying. A
+ * phone that retried a rejected auth key forever would loop while hiding
+ * the only thing anybody could fix; one that gave up on a key still held by
+ * the connection it just lost would refuse to reconnect in precisely the
+ * ordinary case.
+ */
+describe('reconnecting', () => {
+  const CLIENT = readFileSync(
+    resolve(PACKAGE_DIR, '..', 'localtunnels', 'src', 'vpn', 'client.ts'),
+    'utf8',
+  )
+
+  it('is what both halves do at all', () => {
+    expect(CLIENT).toContain('private scheduleReconnect(')
+    expect(SWIFT).toContain('private func scheduleReconnect()')
+  })
+
+  // Doubling from a second to fifteen. Different numbers would mean a phone
+  // and a desktop disagreeing about how long a coordinator has to come back.
+  it('waits the same way', () => {
+    expect(CLIENT).toContain('options.reconnectBaseMs ?? 1000')
+    expect(CLIENT).toContain('options.reconnectMaxMs ?? 15_000')
+    expect(SWIFT).toContain('reconnectBase: TimeInterval = 1')
+    expect(SWIFT).toContain('reconnectMax: TimeInterval = 15')
+  })
+
+  /*
+   * Jitter, in both. Every node on one network loses a coordinator at the
+   * same instant; without it they come back in step and keep colliding.
+   */
+  it('jitters by the same quarter', () => {
+    expect(CLIENT).toMatch(/doubled \* 0\.25/)
+    expect(SWIFT).toMatch(/doubled \* 0\.25/)
+  })
+
+  /*
+   * The judgement. `protocol.ts` names both refusals so the two halves
+   * cannot drift on the wording — a message reworded on the server would
+   * otherwise turn a fatal error into an infinite retry with nothing
+   * failing anywhere.
+   */
+  it('agrees on which refusal is fatal', () => {
+    const protocol = readFileSync(
+      resolve(PACKAGE_DIR, '..', 'localtunnels', 'src', 'vpn', 'protocol.ts'),
+      'utf8',
+    )
+    const unauthorized = /ERROR_UNAUTHORIZED = '(.*?)'/.exec(protocol)
+    const duplicate = /ERROR_DUPLICATE_KEY = '(.*?)'/.exec(protocol)
+    expect(unauthorized).not.toBeNull()
+    expect(duplicate).not.toBeNull()
+    // Spelled identically in the Swift, which has no way to import it.
+    expect(SWIFT).toContain(`static let unauthorized = "${unauthorized![1]}"`)
+    expect(SWIFT).toContain(`static let duplicateKey = "${duplicate![1]}"`)
+    // And it is the auth key, in both, that stops the retrying.
+    expect(CLIENT).toContain('this.lastServerError === ERROR_UNAUTHORIZED')
+    expect(SWIFT).toContain('lastServerError == CoordinatorError.unauthorized')
+  })
+
+  /*
+   * A duplicate key is *not* fatal. It is what the coordinator says while it
+   * still believes in the connection this phone just lost, and it clears
+   * itself once that connection has been silent long enough to be displaced.
+   */
+  it('retries a key the coordinator has not released yet', () => {
+    for (const source of [CLIENT, SWIFT])
+      expect(source).not.toMatch(/ERROR_DUPLICATE_KEY|CoordinatorError\.duplicateKey/)
+  })
+
+  // A client told to stop is stopped, or it is a client that cannot be
+  // turned off. Both guard the retry on it.
+  it('stays stopped when it was stopped on purpose', () => {
+    expect(CLIENT).toContain('this.closedByUs')
+    expect(SWIFT).toContain('closedByUs')
+    expect(CLIENT).toMatch(/if \(this\.closedByUs \|\| !this\.reconnectEnabled/)
+    expect(SWIFT).toMatch(/guard !closedByUs, retry == nil else \{ return \}/)
+  })
+
+  /*
+   * And the backoff resets on success, or a session that dropped once an
+   * hour would eventually be waiting the maximum every time, having last
+   * succeeded immediately.
+   */
+  it('starts over after a registration that worked', () => {
+    expect(CLIENT).toMatch(/this\.attempt = 0/)
+    expect(SWIFT).toMatch(/attempt = 0\n {12}startHeartbeat\(\)/)
+  })
+})

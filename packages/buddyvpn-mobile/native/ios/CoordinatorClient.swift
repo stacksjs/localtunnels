@@ -27,6 +27,22 @@
 //  machine" from "the coordinator has gone away"; `URLSessionWebSocketTask`
 //  exposes no such thing, so this reports the silence without the cause.
 //
+//  ── Coming back ────────────────────────────────────────────────
+//
+//  A phone loses this connection constantly: Wi-Fi to cellular, a handover,
+//  a few minutes backgrounded. A node that stops heart-beating is dropped
+//  and the exit withdraws its route, so a drop that is not re-established is
+//  a tunnel that is dead rather than one that reports an error.
+//
+//  The policy is `vpn/client.ts`'s, deliberately, and the numbers are the
+//  same: retry forever, from a second, doubling to fifteen, with a quarter
+//  of jitter so every phone on one network does not come back in step. One
+//  refusal is fatal — an auth key the coordinator does not accept, which
+//  will not become correct by being presented again. A key still held by the
+//  connection this phone just lost is retried, because that is the ordinary
+//  case here and it clears itself once the coordinator stops hearing from
+//  the socket it still believes in.
+//
 import Foundation
 import os
 
@@ -59,6 +75,20 @@ struct CoordinatorRegistration {
     let assignedIp: String
     /// The network it belongs to, as a CIDR.
     let network: String
+}
+
+/**
+ The two refusals a client has to tell apart.
+
+ Spelled in `vpn/protocol.ts` and repeated here, because this protocol has
+ no error codes and a client deciding whether to try again is reading
+ English the coordinator wrote. `coordinator-contract.test.ts` checks the
+ wording matches: reworded on the server, a fatal error becomes an infinite
+ retry with nothing failing anywhere.
+ */
+enum CoordinatorError {
+    static let unauthorized = "missing or invalid auth key"
+    static let duplicateKey = "public key is already registered by a live connection"
 }
 
 enum CoordinatorFailure: LocalizedError {
@@ -109,6 +139,21 @@ final class CoordinatorClient {
     private var registration: ((Result<CoordinatorRegistration, Error>) -> Void)?
     private var finished = false
 
+    /// The first wait, which then doubles. `vpn/client.ts`'s numbers.
+    private let reconnectBase: TimeInterval = 1
+    private let reconnectMax: TimeInterval = 15
+    /// Attempts since the last registration that worked, for the backoff.
+    private var attempt = 0
+    private var retry: DispatchWorkItem?
+    /**
+     Whether `close()` was called.
+
+     A connection that dropped and one ended on purpose are the same event
+     here, and must not be the same outcome: reconnecting after a deliberate
+     stop is a client that cannot be stopped.
+     */
+    private var closedByUs = false
+
     /// The directory changed. Carries every peer, not a delta, so a listener
     /// reconciles by replacing its copy — which is what dropping routes for
     /// peers that have left requires.
@@ -117,6 +162,16 @@ final class CoordinatorClient {
     var onStale: ((TimeInterval) -> Void)?
     /// It is answering again.
     var onResumed: ((TimeInterval) -> Void)?
+    /**
+     The connection dropped and another attempt is scheduled.
+
+     Reported so the tunnel can say so rather than going on claiming it is
+     connected: the interface stays up throughout, and being dropped from a
+     directory is not an event anyone sends you.
+     */
+    var onReconnecting: ((_ attempt: Int, _ delay: TimeInterval) -> Void)?
+    /// Reconnection has been abandoned, with the reason it cannot help.
+    var onGaveUp: ((String) -> Void)?
 
     init(url: String,
          publicKey: String,
@@ -135,9 +190,32 @@ final class CoordinatorClient {
         self.staleAfter = staleAfter ?? heartbeatInterval * 3
     }
 
-    /// Connect and register. The completion runs once, either way.
+    /**
+     Connect and register. The completion runs once, either way.
+
+     Once: it is about the *first* registration. Every one after it is a
+     reconnection and belongs to no caller — `onPeers` and the logs are how
+     those are seen.
+     */
     func connect(completion: @escaping (Result<CoordinatorRegistration, Error>) -> Void) {
         registration = completion
+        closedByUs = false
+        attempt = 0
+        openSocket()
+    }
+
+    /// Open a socket and register on it. Used by `connect` and by each retry.
+    private func openSocket() {
+        /*
+         * Cleared per attempt.
+         *
+         * `lastServerError` is what decides whether a drop is worth
+         * retrying, so one left over from an earlier attempt would make a
+         * later, unrelated disconnection look fatal — or, the other way
+         * round, let a rejected auth key be retried because the next attempt
+         * failed before the coordinator could say so again.
+         */
+        lastServerError = nil
         let session = URLSession(configuration: .ephemeral)
         self.session = session
         let task = session.webSocketTask(with: url)
@@ -155,6 +233,12 @@ final class CoordinatorClient {
     }
 
     func close() {
+        // Set first: everything below produces the same failure a dropped
+        // connection does, and `scheduleReconnect` reads this to tell them
+        // apart.
+        closedByUs = true
+        retry?.cancel()
+        retry = nil
         finish(with: .failure(CoordinatorFailure.closedBeforeRegistering))
         heartbeat?.cancel()
         heartbeat = nil
@@ -162,6 +246,52 @@ final class CoordinatorClient {
         task = nil
         session?.invalidateAndCancel()
         session = nil
+    }
+
+    /**
+     How long before the next attempt.
+
+     Doubling from a second, capped at fifteen, with a quarter of jitter
+     either way. The jitter is not decoration: every phone on one network
+     loses a coordinator at the same instant, and without it they come back
+     in step and keep colliding on the same schedule.
+     */
+    private func backoff() -> TimeInterval {
+        let doubled = min(reconnectMax, reconnectBase * pow(2, Double(attempt)))
+        let jitter = doubled * 0.25
+        return doubled - jitter + Double.random(in: 0...(jitter * 2))
+    }
+
+    /**
+     Try again, unless trying again cannot help.
+
+     The one fatal refusal is an auth key the coordinator does not accept:
+     it will not become correct by being presented again, and retrying it
+     forever loops while hiding the only thing anybody could fix. A key still
+     held by the connection this phone just lost is retried — the ordinary
+     case here, and it clears itself.
+     */
+    private func scheduleReconnect() {
+        guard !closedByUs, retry == nil else { return }
+        if lastServerError == CoordinatorError.unauthorized {
+            log.error("not retrying: \(CoordinatorError.unauthorized, privacy: .public)")
+            onGaveUp?(CoordinatorError.unauthorized)
+            return
+        }
+
+        let delay = backoff()
+        attempt += 1
+        log.notice("reconnecting to the coordinator in \(delay, privacy: .public)s (attempt \(self.attempt, privacy: .public))")
+        onReconnecting?(attempt, delay)
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retry = nil
+            guard !self.closedByUs else { return }
+            self.openSocket()
+        }
+        retry = work
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     // MARK: Sending
@@ -190,8 +320,19 @@ final class CoordinatorClient {
                 self.receive()
             case let .failure(error):
                 self.log.error("the coordinator connection ended: \(error.localizedDescription, privacy: .public)")
+                /*
+                 * The heartbeat stops with the socket.
+                 *
+                 * Left running it would go on sending into a dead task and
+                 * calling `checkLiveness`, which would report a stall for a
+                 * connection that has already gone — and a second timer
+                 * would be started by the next registration.
+                 */
+                self.heartbeat?.cancel()
+                self.heartbeat = nil
                 self.finish(with: .failure(self.lastServerError.map { CoordinatorFailure.rejected($0) }
                     ?? CoordinatorFailure.closedBeforeRegistering))
+                self.scheduleReconnect()
             }
         }
     }
@@ -223,6 +364,10 @@ final class CoordinatorClient {
                   let network = frame["network"] as? String
             else { return }
             log.notice("registered as \(assignedIp, privacy: .public) on \(network, privacy: .public)")
+            // A registration that worked ends the backoff: the next drop
+            // starts from a second again rather than from wherever this one
+            // climbed to.
+            attempt = 0
             startHeartbeat()
             finish(with: .success(CoordinatorRegistration(assignedIp: assignedIp, network: network)))
         case "peers":

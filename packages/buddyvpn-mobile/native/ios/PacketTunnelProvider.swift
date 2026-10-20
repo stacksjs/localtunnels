@@ -241,6 +241,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         client.onResumed = { [weak self] _ in
             self?.log.notice("the coordinator is answering again")
         }
+        /*
+         * Said rather than silently retried.
+         *
+         * A phone loses this connection constantly — Wi-Fi to cellular, a
+         * handover, a few minutes backgrounded — and the tunnel goes on
+         * looking connected throughout, because it is: the interface stays
+         * up and being dropped from a directory is not an event anyone sends
+         * you. The log is the only place this is visible until the status
+         * frame carries it.
+         */
+        client.onReconnecting = { [weak self] attempt, delay in
+            self?.log.notice("coordinator reconnect attempt \(attempt, privacy: .public) in \(delay, privacy: .public)s")
+        }
+        client.onGaveUp = { [weak self] reason in
+            self?.log.error("not reconnecting to the coordinator: \(reason, privacy: .public)")
+        }
 
         if let exitKey {
             log.notice("this device is paired to one exit: \(exitKey.prefix(16), privacy: .public)…")
