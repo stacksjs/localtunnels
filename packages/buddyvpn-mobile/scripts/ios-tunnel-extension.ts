@@ -66,10 +66,10 @@ export const TUNNEL_SUFFIX = 'Tunnel'
 export const BRIDGE_DIR = 'Bridge'
 
 /** The app-target sources copied from `native/ios/`, in build order. */
-const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m', 'DeviceIdentityStore.swift']
+const BRIDGE_SOURCES = ['TunnelControl.swift', 'TunnelBootstrap.m', 'DeviceIdentityStore.swift', 'PairingSecretStore.swift']
 
 /** The extension-target sources, likewise. */
-const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift', 'CoordinatorClient.swift', 'DeviceIdentity.swift', 'DeviceIdentityStore.swift']
+const TUNNEL_SOURCES = ['PacketTunnelProvider.swift', 'TunnelSession.swift', 'CoordinatorClient.swift', 'DeviceIdentity.swift', 'DeviceIdentityStore.swift', 'PairingSecretStore.swift']
 
 /** The protocol core, cross-compiled for iOS and linked into the provider. */
 export const CORE_FRAMEWORK = 'libltvpn.xcframework'

@@ -115,6 +115,21 @@ final class TunnelControl: NSObject {
         else { return }
 
         lastNonce = nonce
+        /*
+         * Read, then gone.
+         *
+         * This is a command, not state: nothing reads it back, and the
+         * screens keep their own copy of what they asked for. Leaving it
+         * meant the last request sat in the container's plist until the next
+         * one replaced it — and a connect request carries the secret that
+         * joins this network, which an unencrypted device backup then
+         * contains in the clear.
+         *
+         * Removing it posts another `didChangeNotification`, which arrives
+         * here, finds no data and returns at the guard above. No loop.
+         */
+        UserDefaults.standard.removeObject(forKey: requestKey)
+
         switch request["action"] as? String {
         case "connect":
             guard let region = request["region"] as? String else {
@@ -132,6 +147,20 @@ final class TunnelControl: NSObject {
             )
         case "disconnect":
             disconnect()
+        case "forget-pairing":
+            /*
+             * The secret half of unpairing. The screens forget the rest — the
+             * coordinator's address and the region — in their own Keychain,
+             * and this is the copy the tunnel reads, which would otherwise
+             * outlive the pairing it belongs to.
+             */
+            do {
+                try PairingSecretStore.forget()
+                log.notice("this device's network secret was forgotten")
+            }
+            catch {
+                log.error("could not forget this device's network secret: \(error.localizedDescription, privacy: .public)")
+            }
         case "forget-identity":
             /*
              * A new key is a new device to the coordinator: a fresh address,
@@ -193,8 +222,32 @@ final class TunnelControl: NSObject {
             if let coordinatorUrl {
                 proto.providerConfiguration?["coordinatorUrl"] = coordinatorUrl
             }
-            if let authKey {
-                proto.providerConfiguration?["authKey"] = authKey
+            /*
+             * The join secret is not in there.
+             *
+             * `providerConfiguration` travels with the saved VPN profile,
+             * outside this app's Keychain, and anything that can read the
+             * VPN preferences can read it back. It carries what is not
+             * secret; the secret goes to the group both processes share, and
+             * `PacketTunnelProvider` reads it there.
+             *
+             * Written on every connect rather than once at pairing, so the
+             * pairing the screens hold stays the only source of truth. A
+             * rotated key reaches the tunnel on the next connect without
+             * anything having to notice it changed.
+             */
+            if let authKey, !authKey.isEmpty {
+                do {
+                    try PairingSecretStore.store(authKey)
+                }
+                catch {
+                    // Nothing else will mention it: the provider would start,
+                    // find no secret, and be refused by a coordinator that
+                    // requires one — which looks like a bad key rather than
+                    // a key that never arrived.
+                    self.fail("This device's network secret could not be stored: \(self.describe(error))")
+                    return
+                }
             }
             /*
              * The exit this device will accept, when one was pinned.

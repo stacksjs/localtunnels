@@ -146,9 +146,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
          * secret to join it. Neither is baked into this build and neither
          * should be: `authKey` is shared between every member, and a shared
          * secret in a shipped binary belongs to anyone who downloads it. The
-         * app is meant to pass them in, and has no way to obtain them yet —
-         * see PROVISIONING.md for what is missing and why it is a decision
-         * rather than an oversight.
+         * app passes them in: the coordinator's address in the dictionary
+         * below, and the secret through the Keychain group both processes
+         * share.
          */
         guard let coordinatorUrl = configuration?["coordinatorUrl"] as? String, !coordinatorUrl.isEmpty else {
             completionHandler(TunnelStartFailure.notProvisioned)
@@ -167,7 +167,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
         join(
             coordinatorUrl: coordinatorUrl,
-            authKey: configuration?["authKey"] as? String,
+            /*
+             * From the Keychain, not from the dictionary beside it.
+             *
+             * `providerConfiguration` travels with the saved VPN profile,
+             * outside the app's Keychain, where anything able to read the VPN
+             * preferences can read it back. The app writes the secret to the
+             * access group both processes share; see `PairingSecretStore`.
+             *
+             * Nil is not an error here. A coordinator started without an
+             * auth key wants none, and one started with it answers a device
+             * that presents nothing with `missing or invalid auth key`,
+             * which arrives as an `error` frame and is reported as the
+             * refusal it is.
+             */
+            authKey: PairingSecretStore.load(),
             // Written only when a pin was carried in the pairing, so absent
             // and empty both mean "decide from the directory".
             exitKey: (configuration?["exitKey"] as? String).flatMap { $0.isEmpty ? nil : $0 },
