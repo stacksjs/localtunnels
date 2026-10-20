@@ -27,6 +27,7 @@ const CLOCK_MS = 1000
 export class NativeTunnel implements Tunnel {
   private current: TunnelSnapshot = {
     phase: 'idle',
+    coordinator: null,
     region: null,
     uptimeSeconds: null,
     exitIp: null,
@@ -135,13 +136,14 @@ export class NativeTunnel implements Tunnel {
     if (!frame) {
       this.since = null
       this.stopClock()
-      this.emit({ phase: 'idle', region: null, exitIp: null, uptimeSeconds: null })
+      this.emit({ phase: 'idle', coordinator: null, region: null, exitIp: null, uptimeSeconds: null })
       return
     }
 
     this.since = frame.since
     this.emit({
       phase: frame.phase,
+      coordinator: frame.coordinator,
       region: frame.region,
       exitIp: frame.exitIp,
       error: frame.error,

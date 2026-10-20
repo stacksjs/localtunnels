@@ -26,7 +26,7 @@
  * things. A request is a one-shot the screens already know they made. A
  * status change happens while nobody is asking, and has to arrive on its own.
  */
-import type { TunnelPhase } from './tunnel'
+import type { CoordinatorPhase, TunnelPhase } from './tunnel'
 
 /**
  * Craft's own prefix on everything `craft.storage` writes. Not ours to
@@ -127,6 +127,19 @@ export type TunnelRequest = ConnectRequest | DisconnectRequest | ForgetIdentityR
  */
 export interface TunnelStatusFrame {
   phase: TunnelPhase
+  /**
+   * How the tunnel is getting on with its coordinator.
+   *
+   * Carried separately from `phase` because the two come apart in the one
+   * failure worth a banner: a node dropped from the directory loses the
+   * exit's route to it while iOS goes on reporting `connected`, since the
+   * interface is up. The phase cannot say that and should not try.
+   *
+   * It also crosses a second process boundary to get here. The coordinator
+   * lives in the extension; this frame is written by the app, which has to
+   * ask — see `TunnelControl` and the provider's `handleAppMessage`.
+   */
+  coordinator: CoordinatorPhase | null
   region: string | null
   exitIp: string | null
   /** Why the last attempt failed, in words a person can read. */
@@ -182,11 +195,26 @@ export function parseStatus(raw: string | null | undefined): TunnelStatusFrame |
   if (phase !== 'idle' && phase !== 'connecting' && phase !== 'connected' && phase !== 'disconnecting')
     return null
 
+  /*
+   * An unrecognised coordinator phase reads as none at all.
+   *
+   * Not a reason to discard the frame: this field arrived after the others,
+   * so a Swift half older or newer than these screens sends a frame without
+   * it or with a word they have never heard of — and throwing the whole
+   * thing away for that would lose the phase, the region and the error with
+   * it. No banner is the right answer to not knowing.
+   */
+  const coordinator = frame.coordinator === 'joined' || frame.coordinator === 'retrying' || frame.coordinator === 'refused'
+    ? frame.coordinator
+    : null
+
   const text = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null)
   const since = typeof frame.since === 'number' && Number.isFinite(frame.since) ? frame.since : null
 
   return {
     phase,
+    // A tunnel that is not up has not joined anything, whatever it says.
+    coordinator: phase === 'idle' ? null : coordinator,
     region: text(frame.region),
     exitIp: text(frame.exitIp),
     error: text(frame.error),

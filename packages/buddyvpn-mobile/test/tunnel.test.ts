@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { DEFAULT_REGION, isDeployed, REGIONS, regionById } from '../src/regions'
-import { formatUptime, StubTunnel } from '../src/tunnel'
+import { coordinatorNotice, formatUptime, StubTunnel } from '../src/tunnel'
 
 describe('formatUptime', () => {
   it('pads to hours, which is the width the clock holds', () => {
@@ -14,6 +14,79 @@ describe('formatUptime', () => {
     // beside "Not connected" is a clock that looks stuck.
     expect(formatUptime(null)).toBe('')
     expect(formatUptime(-1)).toBe('')
+  })
+})
+
+/*
+ * The banner for a tunnel that is up and about to stop carrying traffic.
+ *
+ * This is the one state the phase cannot express. A node dropped from its
+ * coordinator's directory loses the exit's route to it, and iOS goes on
+ * reporting `connected` because the interface really is up — so the screen
+ * says Connected, the badge is showing, and the traffic has stopped or is
+ * about to. Being forgotten is not an event anybody sends you.
+ *
+ * The wording is here rather than in `connect.stx` precisely so it can be
+ * checked. A bound expression leaves no trace in the rendered document until
+ * its condition holds, and the shipped build selects the stand-in, which
+ * joins no coordinator and so can never reach these states — a sentence
+ * written in the markup could only have been verified by reading it.
+ */
+describe('coordinatorNotice', () => {
+  // Nothing to say is the common case, and a banner that is always there is
+  // furniture rather than a change.
+  it('says nothing while the coordinator is fine', () => {
+    expect(coordinatorNotice('joined', 'United States')).toBeNull()
+  })
+
+  // Null is an idle tunnel, which has not joined anything to lose.
+  it('says nothing when there is no tunnel', () => {
+    expect(coordinatorNotice(null, 'United States')).toBeNull()
+  })
+
+  /*
+   * Waiting, not broken. The retrying case is the whole reason this exists,
+   * and it has to say that traffic may stop — otherwise it reads as a
+   * cosmetic warning next to a screen that still says Connected.
+   */
+  it('warns while it is trying to get back', () => {
+    const notice = coordinatorNotice('retrying', 'Germany')
+    expect(notice?.tone).toBe('warning')
+    expect(notice?.message).toContain('Germany')
+    expect(notice?.message).toContain('traffic may stop')
+  })
+
+  /*
+   * Broken, and in a way only a person can fix: a coordinator refuses a
+   * device whose auth key it does not accept, which no amount of retrying
+   * will change. So the sentence says what to do instead of what happened.
+   */
+  it('tells somebody to re-pair when the network refused this device', () => {
+    const notice = coordinatorNotice('refused', 'Germany')
+    expect(notice?.tone).toBe('error')
+    expect(notice?.message).toContain('Germany')
+    expect(notice?.message).toContain('Pair it again')
+  })
+
+  // The two are different tones because one of them needs an action, and a
+  // screen that painted them the same would be hiding that.
+  it('distinguishes waiting from needing somebody', () => {
+    expect(coordinatorNotice('retrying', null)?.tone)
+      .not.toBe(coordinatorNotice('refused', null)?.tone)
+  })
+
+  /*
+   * A region the screens cannot name. `running()` resolves the tunnel's own
+   * region and returns null for one this build has never heard of, so both
+   * sentences have to read without it rather than saying "undefined".
+   */
+  it('reads without a region name', () => {
+    for (const phase of ['retrying', 'refused'] as const) {
+      const message = coordinatorNotice(phase, null)?.message ?? ''
+      expect(message.length).toBeGreaterThan(0)
+      expect(message).not.toContain('null')
+      expect(message).not.toContain('undefined')
+    }
   })
 })
 

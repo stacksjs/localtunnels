@@ -24,8 +24,87 @@ import { NativeTunnel } from './tunnel-native'
 
 export type TunnelPhase = 'idle' | 'connecting' | 'connected' | 'disconnecting'
 
+/**
+ * How this device is getting on with its network's coordinator.
+ *
+ * Separate from {@link TunnelPhase}, which is the system's view of the VPN
+ * connection and says nothing about this. The two come apart in the failure
+ * that matters: a node that stops heart-beating is dropped from the
+ * directory and the exit withdraws the route to its address, while iOS goes
+ * on reporting `connected` because the interface is up. Folding this into
+ * the phase would have made that state unrepresentable — the tunnel *is*
+ * connected, and the traffic is about to stop.
+ *
+ * `'retrying'` collapses two things on purpose: a coordinator that has gone
+ * silent on an open socket, and one this device is between sockets with.
+ * There is nothing a person would do differently about them, and the
+ * distinction is in the log.
+ */
+export type CoordinatorPhase = 'joined' | 'retrying' | 'refused'
+
+/**
+ * What to say about the coordinator, if anything.
+ *
+ * Here rather than inline in the screen because the wording is the part
+ * worth testing and a template is where things go to stop being tested: a
+ * bound expression leaves no trace in the rendered document until its
+ * condition holds, so a message written in the markup can only be checked by
+ * reading it.
+ *
+ * Null while it is fine, and null while idle. A banner that is always there
+ * is furniture, and this one has to read as a change.
+ *
+ * `country` rather than a region id, because it is going on a screen. Null
+ * when the region is not known, which the sentences are written to survive.
+ */
+export interface CoordinatorNotice {
+  /** `'error'` needs somebody to act; `'warning'` is waiting. */
+  tone: 'warning' | 'error'
+  message: string
+}
+
+export function coordinatorNotice(
+  coordinator: CoordinatorPhase | null,
+  country: string | null,
+): CoordinatorNotice | null {
+  if (coordinator === 'refused') {
+    /*
+     * The one that needs a person. A coordinator refuses a device whose auth
+     * key it does not accept, which no amount of retrying will fix — the
+     * network's key was rotated, or this pairing was for somewhere else.
+     */
+    return {
+      tone: 'error',
+      message: `${country ?? 'This network'} refused this device. Pair it again from BuddyVPN on your Mac.`,
+    }
+  }
+  if (coordinator === 'retrying') {
+    /*
+     * The one that is only waiting — and the reason any of this is on screen.
+     * A node dropped from the directory loses the exit's route to it, and iOS
+     * goes on reporting `connected` because the interface is up. So the
+     * screen says Connected, the badge is showing, and the traffic has
+     * stopped or is about to. Being forgotten is not an event anybody sends
+     * you, which is why it has to be said from the side that noticed.
+     */
+    return {
+      tone: 'warning',
+      message: `Lost touch with ${country ?? 'the network'}. Trying to get back — traffic may stop until it does.`,
+    }
+  }
+  return null
+}
+
 export interface TunnelSnapshot {
   phase: TunnelPhase
+  /**
+   * The coordinator, or null when there is no tunnel to have one.
+   *
+   * Null rather than `'joined'` for an idle tunnel: a device that is not
+   * connected has not joined anything, and saying it had would put a
+   * reassuring word on a screen for a state nobody is in.
+   */
+  coordinator: CoordinatorPhase | null
   /** Region id, once one has been chosen. */
   region: string | null
   /** Seconds since the tunnel came up, or null when it is not up. */
@@ -69,6 +148,7 @@ const FAKE_DISCONNECT_MS = 600
 export class StubTunnel implements Tunnel {
   private current: TunnelSnapshot = {
     phase: 'idle',
+    coordinator: null,
     region: null,
     uptimeSeconds: null,
     exitIp: null,
@@ -130,7 +210,10 @@ export class StubTunnel implements Tunnel {
     await new Promise(resolve => setTimeout(resolve, FAKE_CONNECT_MS))
 
     this.connectedAt = Date.now()
-    this.emit({ phase: 'connected', exitIp: known.exitIp, uptimeSeconds: 0 })
+    // `'joined'` because the stand-in's pretence is a tunnel that works, and
+    // a banner about a coordinator it never had would be a worse lie than
+    // the one it is already labelled with.
+    this.emit({ phase: 'connected', coordinator: 'joined', exitIp: known.exitIp, uptimeSeconds: 0 })
     this.clock = setInterval(() => {
       if (this.connectedAt === null)
         return
@@ -149,7 +232,7 @@ export class StubTunnel implements Tunnel {
       this.clock = null
     }
     this.connectedAt = null
-    this.emit({ phase: 'idle', uptimeSeconds: null, exitIp: null })
+    this.emit({ phase: 'idle', coordinator: null, uptimeSeconds: null, exitIp: null })
   }
 }
 

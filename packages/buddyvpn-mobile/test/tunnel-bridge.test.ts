@@ -47,6 +47,7 @@ describe('the nonce', () => {
 describe('reading a status frame', () => {
   const connected = JSON.stringify({
     phase: 'connected',
+    coordinator: 'joined',
     region: 'us-west',
     exitIp: '5.78.208.190',
     error: null,
@@ -56,6 +57,7 @@ describe('reading a status frame', () => {
   it('reads one the other process wrote', () => {
     expect(parseStatus(connected)).toEqual({
       phase: 'connected',
+      coordinator: 'joined',
       region: 'us-west',
       exitIp: '5.78.208.190',
       error: null,
@@ -97,13 +99,45 @@ describe('reading a status frame', () => {
       error: null,
       since: null,
       deviceKey: null,
+      coordinator: null,
     })
   })
 
   // Empty strings are what a Swift optional often becomes on the way out.
   it('treats an empty string as absent', () => {
     const frame = parseStatus(JSON.stringify({ phase: 'idle', region: '', exitIp: '', error: '' }))
-    expect(frame).toEqual({ phase: 'idle', region: null, exitIp: null, error: null, since: null, deviceKey: null })
+    expect(frame).toEqual({ phase: 'idle', region: null, exitIp: null, error: null, since: null, deviceKey: null, coordinator: null })
+  })
+
+  /*
+   * The coordinator's own state, which crosses this boundary from a third
+   * place again: it lives in the extension, and the app has to ask for it
+   * before it can be written here.
+   */
+  it('carries how the tunnel is getting on with its coordinator', () => {
+    for (const coordinator of ['joined', 'retrying', 'refused'] as const)
+      expect(parseStatus(JSON.stringify({ phase: 'connected', coordinator }))?.coordinator).toBe(coordinator)
+  })
+
+  /*
+   * This field arrived after the others, so a Swift half on either side of
+   * that sends a frame without it or with a word these screens have never
+   * heard of. Neither is a reason to throw away the phase, the region and
+   * the error along with it — no banner is the right answer to not knowing.
+   */
+  it('reads an unknown coordinator state as none at all', () => {
+    for (const coordinator of [undefined, 'rejoining', 42, {}, null])
+      expect(parseStatus(JSON.stringify({ phase: 'connected', coordinator }))?.coordinator).toBeNull()
+    // And the rest of the frame survives it.
+    const frame = parseStatus(JSON.stringify({ phase: 'connected', coordinator: 'nonsense', region: 'us-west' }))
+    expect(frame?.phase).toBe('connected')
+    expect(frame?.region).toBe('us-west')
+  })
+
+  // A device that is not connected has not joined anything, whatever the
+  // frame says — the same rule `since` follows for the same reason.
+  it('reports no coordinator for a tunnel that is not up', () => {
+    expect(parseStatus(JSON.stringify({ phase: 'idle', coordinator: 'joined' }))?.coordinator).toBeNull()
   })
 
   /*
