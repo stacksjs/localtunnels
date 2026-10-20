@@ -102,7 +102,20 @@ export interface ForgetIdentityRequest {
   nonce: string
 }
 
-export type TunnelRequest = ConnectRequest | DisconnectRequest | ForgetIdentityRequest
+/**
+ * Forget the secret this device joins with.
+ *
+ * The other half of unpairing. The screens hold the coordinator's address
+ * and the region in their own Keychain and can forget those themselves; the
+ * secret has a second copy in the group the tunnel reads, which would
+ * otherwise outlive the pairing it belongs to.
+ */
+export interface ForgetPairingRequest {
+  action: 'forget-pairing'
+  nonce: string
+}
+
+export type TunnelRequest = ConnectRequest | DisconnectRequest | ForgetIdentityRequest | ForgetPairingRequest
 
 /**
  * What Swift reports back.

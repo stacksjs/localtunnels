@@ -52,6 +52,14 @@ export interface Tunnel {
   deviceKey: () => string | null
   /** Throw this device's key away and make another. */
   forgetIdentity: () => Promise<void>
+  /**
+   * Throw away the secret this device joins with.
+   *
+   * Separate from the pairing the screens keep, because there are two
+   * copies and only one of them is theirs: the tunnel runs in another
+   * process and reads its own, which would otherwise outlive the pairing.
+   */
+  forgetPairing: () => Promise<void>
 }
 
 /** How long the stand-in spends pretending to shake hands. */
@@ -82,6 +90,10 @@ export class StubTunnel implements Tunnel {
 
   async forgetIdentity(): Promise<void> {
     // Nothing to forget: the stand-in never had a key.
+  }
+
+  async forgetPairing(): Promise<void> {
+    // Nor a network to be let into.
   }
 
   snapshot(): TunnelSnapshot {

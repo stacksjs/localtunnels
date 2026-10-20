@@ -53,6 +53,10 @@ export class NativeTunnel implements Tunnel {
     await this.request({ action: 'forget-identity', nonce: nextNonce() })
   }
 
+  async forgetPairing(): Promise<void> {
+    await this.request({ action: 'forget-pairing', nonce: nextNonce() })
+  }
+
   snapshot(): TunnelSnapshot {
     return { ...this.current }
   }

@@ -101,6 +101,11 @@ const pairedWith = () => describePairing(pairing())
  */
 const forget = () => {
   haptics.selection()
+  // Both copies. The screens' own is in this process's Keychain; the
+  // tunnel's is in the group it shares with the extension, and a pairing
+  // forgotten here while that one survives is a device that still holds the
+  // secret it was told to forget.
+  void tunnel.forgetPairing()
   void forgetPairing().then(() => pairing.set(null))
 }
 
