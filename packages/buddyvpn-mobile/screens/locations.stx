@@ -17,9 +17,9 @@ import { REGIONS } from '../src/regions'
 </script>
 
 <script client>
-import { haptics, navigation } from '../src/native'
-import { readPairing } from '../src/pairing'
-import { REGIONS, writeRegion } from '../src/regions'
+import { deepLinks, haptics, navigation } from '../src/native'
+import { applyPairingUrl, readPairing } from '../src/pairing'
+import { readRegion, REGIONS, writeRegion } from '../src/regions'
 import { tunnel } from '../src/tunnel'
 
 const snapshot = state(tunnel.snapshot())
@@ -32,6 +32,15 @@ const snapshot = state(tunnel.snapshot())
  * simulated build must not grey out locations that work perfectly well in it.
  */
 const pairing = state(null)
+/*
+ * The region this list is a picker for.
+ *
+ * A picker says which row is the current one; this one said it with a
+ * chevron on every row, which is the mark for a row that pushes a screen.
+ * The resolver list two screens away had it right, and having the two
+ * disagree is worse than either choice.
+ */
+const chosen = state(readRegion())
 
 onMount(() => {
   /*
@@ -43,8 +52,27 @@ onMount(() => {
    * which is what replaces the heading this screen used to draw itself.
    */
   navigation.setOptions({ title: 'Location', largeTitle: true })
-  void readPairing().then(found => pairing.set(found))
-  return tunnel.subscribe(next => snapshot.set(next))
+  const refresh = () => { void readPairing().then(found => pairing.set(found)) }
+  refresh()
+  /*
+   * Codes arriving while the picker is up.
+   *
+   * Craft delivers a link to the screen on top of the stack and to no other,
+   * so a code scanned here reaches this screen or nothing. The list is the
+   * one place where a pairing is visible as it lands: every row this device
+   * cannot join says so, and those rows change the moment a key arrives.
+   */
+  const unlink = deepLinks.onLink((url) => {
+    void applyPairingUrl(url, (region) => {
+      writeRegion(region)
+      chosen.set(region)
+    }).then(refresh)
+  })
+  const stop = tunnel.subscribe(next => snapshot.set(next))
+  return () => {
+    unlink()
+    stop()
+  }
 })
 
 // Changing location while connected would mean tearing the tunnel down and
@@ -75,6 +103,7 @@ const choose = (id: string) => {
    * trusting that a clean compile means a bound name.
    */
   writeRegion(id)
+  chosen.set(id)
   navigation.back()
 }
 </script>
@@ -114,13 +143,20 @@ const choose = (id: string) => {
           @click="choose('{{ region.id }}')"
         >
           <icon class="i-lucide-map-pin shrink-0 text-base text-gray-400"></icon>
-          <text class="shrink-0 text-base text-gray-900 dark:text-gray-100">{{ region.country }}</text>
-          <text class="flex-1 text-right text-sm text-gray-500 dark:text-gray-400">{{ region.city }}</text>
+          <!--
+            The city under the country, not beside it.
+            
+            Side by side the two shared one line, and the detail is long
+            enough — "Hillsboro, Oregon · Pacific" — that it wrapped against
+            the chevron and broke at its own separator, leaving "· Pacific"
+            alone on the second line. Stacked, each has the width of the row.
+          -->
+          <view class="flex-1">
+            <text class="text-base text-gray-900 dark:text-gray-100">{{ region.country }}</text>
+            <text class="pt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ region.city }}</text>
+          </view>
           <!-- A location with no server says so here, rather than looking
                available and failing on tap. -->
-          @if(region.exitIp)
-            <icon class="i-lucide-chevron-right shrink-0 text-base text-gray-400"></icon>
-          @endif
           @if(!region.exitIp)
             <text class="shrink-0 rounded-full bg-gray-200 px-2 py-1 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">No server yet</text>
           @endif
@@ -144,12 +180,26 @@ const choose = (id: string) => {
               :text="joinable('{{ region.id }}') ? '' : 'Not paired'"
             ></text>
           @endif
+          <!--
+            The current region, marked the way the resolver list marks the
+            current resolver: a bound `:text`, because a client condition
+            nested in this render-time loop bakes at hydration and a bound
+            class does not re-resolve a symbol.
+
+            Outside both conditions, because a pairing code sets the region
+            whether or not a server stands behind it — `choose` refuses such
+            a row but `applyPairingUrl` writes whatever the code names. A
+            mark only on deployed rows would leave the app set to a region
+            this list does not mark at all.
+          -->
+          <text
+            class="w-4 shrink-0 text-center text-base text-blue-600"
+            :text="chosen() === '{{ region.id }}' ? '✓' : ''"
+          ></text>
         </a>
       @endforeach
     </view>
 
-    <text class="px-1 py-4 text-xs text-gray-500 dark:text-gray-400">
-      A location appears here once a server has been deployed behind it with bun run deploy:vpn.
-    </text>
+    <text class="px-1 py-4 text-xs text-gray-500 dark:text-gray-400">A location appears here once a server has been deployed behind it with bun run deploy:vpn.</text>
   </scroll-view>
 </view>

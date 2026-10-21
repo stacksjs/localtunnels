@@ -163,24 +163,31 @@ const toggleAutoConnect = () => {
             <text class="pt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ resolver.servers }}</text>
           </view>
           <!--
-            Two complementary conditions rather than `@if`/`@else`, which
-            blanks the screen at hydration on this renderer, and a second
-            element rather than a bound class, because a symbol is resolved
-            from the class list and a bound change re-applies colour without
-            re-resolving the glyph.
+            A bound `:text`, not an icon behind a condition.
+            
+            Both of those were tried. `@if`/`@else` blanks the screen at
+            hydration on this renderer. Two complementary `@if`s draw the
+            right thing once and then stop: a client condition nested inside
+            the render-time `@foreach` bakes at hydration, so the check sat on
+            whichever resolver was stored when the screen opened and stayed
+            there while taps went on changing the setting underneath it. The
+            screen looked right, which is why it survived a test that only
+            counted checks on a freshly drawn screen.
+            
+            A bound class cannot carry a symbol either — the glyph is resolved
+            from the class list once and a bound change re-applies only the
+            colour. `:text` does bind and does update, so the mark is a
+            character. The fixed width keeps the row from shifting as it
+            comes and goes.
           -->
-          @if(dns() === '{{ resolver.id }}')
-            <icon class="i-lucide-check shrink-0 text-base text-blue-600"></icon>
-          @endif
-          @if(dns() !== '{{ resolver.id }}')
-            <view class="h-4 w-4 shrink-0"></view>
-          @endif
+          <text
+            class="w-4 shrink-0 text-center text-base text-blue-600"
+            :text="dns() === '{{ resolver.id }}' ? '✓' : ''"
+          ></text>
         </a>
       @endforeach
     </view>
-    <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
-      Used while connected. A change takes effect on the next connect.
-    </text>
+    <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">Used while connected. A change takes effect on the next connect.</text>
 
     <text class="px-1 pb-2 pt-4 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Network</text>
     <view class="overflow-hidden rounded-2xl bg-white dark:bg-gray-900">
@@ -216,9 +223,7 @@ const toggleAutoConnect = () => {
           :text="scanned().message"></text>
       </view>
     @endif
-    <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
-      Forgetting a network removes it from this device only. Anyone still holding its code can still join it.
-    </text>
+    <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">Forgetting a network removes it from this device only. Anyone still holding its code can still join it.</text>
 
     <!--
       One element, not three siblings behind one `@if`.
@@ -243,9 +248,7 @@ const toggleAutoConnect = () => {
             </a>
           </view>
         </view>
-        <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
-          Resetting makes this a new device to the network. The old key keeps whatever access it had until it is removed on the server.
-        </text>
+        <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">Resetting makes this a new device to the network. The old key keeps whatever access it had until it is removed on the server.</text>
       </view>
     @endif
 
@@ -271,11 +274,9 @@ const toggleAutoConnect = () => {
       Said rather than left to be noticed, which is what the desktop app's
       settings screen does with the same two.
     -->
-    <text class="px-1 pb-2 pt-6 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Not settings</text>
+    <text class="px-1 pb-2 pt-6 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Always on</text>
     <view class="rounded-2xl bg-white p-4 dark:bg-gray-900">
-      <text class="text-xs leading-5 text-gray-500 dark:text-gray-400">
-        The kill switch and full-tunnel mode are always on. An app whose purpose is to put your traffic somewhere else has no honest setting for "but not really", and a kill switch that is off by default protects only the people who already knew to turn it on.
-      </text>
+      <text class="text-xs leading-5 text-gray-500 dark:text-gray-400">The kill switch and full-tunnel mode are always on. An app whose purpose is to put your traffic somewhere else has no honest setting for "but not really", and a kill switch that is off by default protects only the people who already knew to turn it on.</text>
     </view>
 
     <view class="h-8"></view>

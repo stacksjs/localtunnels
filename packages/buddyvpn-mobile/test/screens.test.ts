@@ -150,6 +150,19 @@ function linkRecord(url: string): Record<string, unknown> {
   }
 }
 
+/**
+ * Where the checkmarks are, as positions in the drawn tree.
+ *
+ * A position rather than a count: a check that never moves is still exactly
+ * one check, which is how a picker that had stopped following its own taps
+ * went on passing.
+ */
+function checkedRows(screen: Screen): number[] {
+  return screen.nodes
+    .map((node, index) => ((node.children ?? []).includes('✓') ? index : -1))
+    .filter(index => index >= 0)
+}
+
 /** Run one route against a stub host and read back what it drew. */
 interface Host {
   /** The link the app was launched with, as iOS hands one over. */
@@ -439,6 +452,24 @@ describe('every screen comes up', () => {
   })
 
   /*
+   * A footer written across three lines of template is three lines of text.
+   *
+   * The renderer keeps the newline and the indentation that follow the
+   * opening tag, so every one of these paragraphs reached the screen with a
+   * space in front of it: the first line of each sat a character to the
+   * right of the rest of its own paragraph, and the banner at the top of the
+   * connect screen was indented away from the title above it. Small, and
+   * uniformly wrong on every screen at once, which is what made it read as
+   * the app's own look rather than as a mistake.
+   */
+  it.each(['connect', 'locations', 'settings'])('%s has no stray space around its words', (route) => {
+    const ragged = render(route).nodes.flatMap(node => (node.children ?? []).filter(
+      (child): child is string => typeof child === 'string' && child !== child.trim(),
+    ))
+    expect(ragged).toEqual([])
+  })
+
+  /*
    * Without this the bar is titled `routeName ?? appName`, and a route name
    * is a filename — the picker opened with `locations` above it, lowercase.
    */
@@ -509,15 +540,35 @@ describe('the settings screen', () => {
     expect(JSON.parse(stored['buddyvpn.settings']).dns).toBe('quad9')
   })
 
-  /*
-   * Hydration removes the branch that did not apply, so exactly one check
-   * survives — and it is the stored one. Before the mutations are applied
-   * every row carries a checkmark.
-   */
   it('checks the stored resolver and no other', () => {
     const screen = render('settings', settings({ dns: 'quad9' }))
-    const checks = screen.nodes.filter(node => (node._classes ?? '').includes('i-lucide-check'))
-    expect(checks).toHaveLength(1)
+    expect(checkedRows(screen)).toHaveLength(1)
+  })
+
+  /*
+   * The check has to follow the tap, which is a different claim from being
+   * in the right place when the screen opens — and the one that was false.
+   *
+   * The mark used to be an `<icon>` behind two complementary `@if`s nested
+   * in the render-time `@foreach`. That bakes at hydration: the row drawn
+   * with a check kept it while every later tap changed the stored resolver
+   * underneath. Counting checks on a freshly drawn screen could not see it,
+   * because a freshly drawn screen was always right.
+   */
+  it('moves the check to the resolver that was tapped', async () => {
+    const stored = settings({ dns: 'cloudflare', allowLan: false, autoConnect: false })
+    const screen = render('settings', stored, { keychain: {} })
+    const before = checkedRows(screen)
+    expect(before).toHaveLength(1)
+
+    // The resolver rows are the presses, in the order they were drawn. Read
+    // after it settles: the redraw a tap causes is a turn behind the tap, so
+    // reading straight back shows the screen as it was.
+    const after = await screen.fire(screen.handlerIds('onPress')[2]).settle()
+
+    expect(JSON.parse(stored['buddyvpn.settings']).dns).toBe('quad9')
+    expect(checkedRows(after)).toHaveLength(1)
+    expect(checkedRows(after)).not.toEqual(before)
   })
 
   it('says what is deliberately not a setting', () => {
@@ -575,6 +626,17 @@ describe('the locations screen', () => {
 
   it('names a region with no server rather than offering it', () => {
     expect(render('locations').text).toContain('No server yet')
+  })
+
+  /*
+   * A picker marks the row that is current. This one drew a chevron on every
+   * joinable row instead — the mark for a row that pushes a screen — so the
+   * list showed where it could go and never where it was, while the resolver
+   * list one screen away used a checkmark for the same job.
+   */
+  it('checks the region it is set to and no other', () => {
+    const checked = checkedRows(render('locations', { 'buddyvpn.region': 'us-west' }))
+    expect(checked).toHaveLength(1)
   })
 
   /*
@@ -689,6 +751,20 @@ describe('a scanned pairing code', () => {
    * code. Until this screen listened too, following that instruction did
    * nothing whatsoever.
    */
+  /*
+   * The picker is the other screen a code can land on, and the one where a
+   * pairing is visible as it arrives: the rows this device cannot join say
+   * so, and a key changes which rows those are.
+   */
+  it('is acted on while the location picker is the one in front', async () => {
+    const keychain: Record<string, string> = {}
+    const screen = await render('locations', {}, { keychain }).settle()
+
+    const after = await screen.deliverLink(link)
+    expect(JSON.parse(keychain['vpn.pairing'])).toMatchObject({ region: 'eu-central' })
+    expect(checkedRows(after)).toHaveLength(1)
+  })
+
   it('is acted on while the settings screen is the one in front', async () => {
     const keychain: Record<string, string> = {}
     const screen = await render('settings', {}, { keychain }).settle()
