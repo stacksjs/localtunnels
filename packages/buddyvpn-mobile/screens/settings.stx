@@ -17,8 +17,9 @@ const RESOLVERS = Object.keys(DNS_PRESETS).map(id => ({
 </script>
 
 <script client>
-import { haptics, navigation } from '../src/native'
-import { describePairing, forgetPairing, readPairing } from '../src/pairing'
+import { deepLinks, haptics, navigation } from '../src/native'
+import { applyPairingUrl, describePairing, forgetPairing, readPairing } from '../src/pairing'
+import { writeRegion } from '../src/regions'
 import { readSettings, writeSettings } from '../src/settings'
 import { tunnel } from '../src/tunnel'
 
@@ -41,16 +42,43 @@ const pairing = state(null)
  * because it joins nothing and so is known by nobody.
  */
 const device = state(tunnel.deviceKey())
+/*
+ * What a code scanned on this screen did.
+ *
+ * This screen listens for codes because it is the screen that asks for one:
+ * the row above says to open BuddyVPN on the Mac and point the camera at
+ * the pairing code, and somebody who does that is looking at this screen
+ * when the link arrives. Craft delivers a link only to the screen on top of
+ * the stack, so without this the code lands on a screen that is not
+ * listening and nothing at all happens — which is what the words on this
+ * screen had just told somebody to do.
+ */
+const scanned = state(null)
 
 onMount(() => {
   navigation.setOptions({ title: 'Settings', largeTitle: true })
-  void readPairing().then(found => pairing.set(found))
+  const refresh = () => { void readPairing().then(found => pairing.set(found)) }
+  refresh()
   const stop = tunnel.subscribe(() => device.set(tunnel.deviceKey()))
   // Re-read when the screen comes back to the front, for the same reason the
   // connect screen does: a pushed screen leaves this one mounted, so setup
   // does not run again and anything read once would be stale from then on.
   const unwatch = navigation.onAppear(() => settings.set(readSettings()))
+  /*
+   * Links arriving while this screen is up. Not `initial`: the link the app
+   * was launched with belongs to the first screen, which claims it once, and
+   * asking for it again here would answer null on a good day and take it
+   * from the connect screen on a bad one.
+   */
+  const unlink = deepLinks.onLink((url) => {
+    void applyPairingUrl(url, writeRegion).then((outcome) => {
+      if (outcome)
+        scanned.set(outcome)
+      refresh()
+    })
+  })
   return () => {
+    unlink()
     unwatch()
     stop()
   }
@@ -176,6 +204,18 @@ const toggleAutoConnect = () => {
         </view>
       @endif
     </view>
+    <!--
+      One element with a bound class, not one per tone: a `@if`/`@else` pair
+      blanks the screen at hydration, and the two tones differ only in colour.
+    -->
+    @if(scanned())
+      <view
+        :class="scanned().ok ? 'mt-2 flex-row items-center gap-2 rounded-2xl border border-green-300 bg-green-100 p-3 dark:border-green-700 dark:bg-green-950' : 'mt-2 flex-row items-center gap-2 rounded-2xl border border-red-300 bg-red-100 p-3 dark:border-red-700 dark:bg-red-950'">
+        <text
+          :class="scanned().ok ? 'flex-1 text-xs text-green-800 dark:text-green-300' : 'flex-1 text-xs text-red-800 dark:text-red-300'"
+          :text="scanned().message"></text>
+      </view>
+    @endif
     <text class="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">
       Forgetting a network removes it from this device only. Anyone still holding its code can still join it.
     </text>

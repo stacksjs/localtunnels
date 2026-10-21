@@ -46,7 +46,7 @@ interface CraftBridge {
    */
   deepLinks?: {
     getInitialURL?: () => Promise<unknown>
-    onLink?: (callback: (url: string) => void) => (() => void) | undefined
+    onLink?: (callback: (link: unknown) => void) => (() => void) | undefined
   }
   navigation?: {
     push?: (screen: string, params?: Record<string, unknown>) => void
@@ -140,6 +140,31 @@ export const haptics = {
 }
 
 /**
+ * The URL out of whatever the host calls a link.
+ *
+ * Craft hands a link over as a record — `{ url, scheme, host, path, query,
+ * queryParams, initial }` — from `getInitialURL` and to every `onLink`
+ * subscriber alike. This app read both as strings, so every pairing code
+ * reached `applyPairingUrl` as an object, was refused for not being a
+ * string, and vanished without a message: the link that launched the app
+ * and the one scanned while it was open failed identically, which is why
+ * nothing about it looked like a bug.
+ *
+ * A bare string is accepted too. It is not what the native renderer sends,
+ * and a host that sent one would otherwise break the same silent way.
+ */
+function linkUrl(value: unknown): string | null {
+  if (typeof value === 'string')
+    return value.length > 0 ? value : null
+  if (value && typeof value === 'object') {
+    const url = (value as { url?: unknown }).url
+    if (typeof url === 'string' && url.length > 0)
+      return url
+  }
+  return null
+}
+
+/**
  * Links this app was opened with.
  *
  * Both halves matter and they are different moments. `getInitialURL` is the
@@ -154,8 +179,7 @@ export const deepLinks = {
   /** The link the app was opened with, or null. Claimed once by the host. */
   async initial(): Promise<string | null> {
     try {
-      const found = await window.craft?.deepLinks?.getInitialURL?.()
-      return typeof found === 'string' && found.length > 0 ? found : null
+      return linkUrl(await window.craft?.deepLinks?.getInitialURL?.())
     }
     catch {
       return null
@@ -165,8 +189,14 @@ export const deepLinks = {
   onLink(callback: (url: string) => void): () => void {
     try {
       const native = window.craft?.deepLinks?.onLink
-      if (native)
-        return native.call(window.craft!.deepLinks, callback) ?? (() => {})
+      if (native) {
+        const unsubscribe = native.call(window.craft!.deepLinks, (link) => {
+          const url = linkUrl(link)
+          if (url)
+            callback(url)
+        })
+        return unsubscribe ?? (() => {})
+      }
     }
     catch {
       // A screen that cannot hear links still has to render.

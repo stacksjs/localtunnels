@@ -130,6 +130,26 @@ beforeAll(async () => {
   }
 })
 
+/**
+ * A link in the shape the host hands one over.
+ *
+ * `CraftNativeActions.deepLinkData` builds this, and both halves of the
+ * bridge carry it: the answer to `getInitialURL` and the payload of every
+ * `DEEP_LINK` message. Nothing in Craft ever passes a screen a bare URL
+ * string, so neither does this.
+ */
+function linkRecord(url: string): Record<string, unknown> {
+  const parsed = new URL(url)
+  return {
+    url,
+    scheme: parsed.protocol.replace(':', ''),
+    host: parsed.hostname,
+    path: parsed.pathname,
+    query: parsed.search.replace('?', ''),
+    queryParams: Object.fromEntries(parsed.searchParams),
+  }
+}
+
 /** Run one route against a stub host and read back what it drew. */
 interface Host {
   /** The link the app was launched with, as iOS hands one over. */
@@ -199,8 +219,14 @@ function render(route: string, stored: Record<string, string> = {}, host: Host =
           }))
           return
         }
+        /*
+         * A record, not the URL. `CraftNativeActions` answers this call with
+         * `claimInitialDeepLink().map(deepLinkData)`, the same shape a
+         * `DEEP_LINK` message carries. Answering a bare string here is what
+         * let a screen that could not read a real launch link pass.
+         */
         if (module === 'DeepLinks' && method === 'getInitialURL')
-          return answer(host.initialURL ?? null)
+          return answer(host.initialURL ? linkRecord(host.initialURL) : null)
         if (module === 'SecureStorage' && method === 'get')
           return answer(host.keychain?.[args?.[0]] ?? null)
         if (module === 'SecureStorage' && method === 'set') {
@@ -300,8 +326,18 @@ function render(route: string, stored: Record<string, string> = {}, host: Host =
          * `getInitialURL` has been called, which is precisely the case this
          * is not. This is the other one — a code scanned while the app is
          * already open.
+         *
+         * The payload is a record, because that is what the renderer sends:
+         * `CraftNativeScreen` builds it with `CraftNativeActions.deepLinkData`
+         * and Craft hands the whole thing to each listener. This test used to
+         * send the URL as a bare string, which no host does, and that is what
+         * let a screen that could not read a real link pass it.
          */
-        deliver(JSON.stringify({ id: `l${Math.random()}`, type: 'DEEP_LINK', payload: url }))
+        deliver(JSON.stringify({
+          id: `l${Math.random()}`,
+          type: 'DEEP_LINK',
+          payload: linkRecord(url),
+        }))
         // Three turns: the link being taken, the Keychain write, and the
         // read the screen does to show what happened.
         for (let turn = 0; turn < 3; turn += 1)
@@ -637,6 +673,26 @@ describe('a scanned pairing code', () => {
     const keychain: Record<string, string> = {}
     const screen = await render('connect', {}, { keychain }).settle()
     expect(screen.text).not.toContain('Paired')
+
+    const after = await screen.deliverLink(link)
+    expect(after.text).toContain('Paired')
+    expect(JSON.parse(keychain['vpn.pairing'])).toMatchObject({ region: 'eu-central' })
+  })
+
+  /*
+   * The screen that asks for a code has to be able to take one.
+   *
+   * Craft delivers a link to the screen on top of the stack and to no other,
+   * so while settings is pushed the connect screen's listener is not called.
+   * Settings is exactly where somebody is standing when they pair: its own
+   * row tells them to open BuddyVPN on the Mac and point the camera at the
+   * code. Until this screen listened too, following that instruction did
+   * nothing whatsoever.
+   */
+  it('is acted on while the settings screen is the one in front', async () => {
+    const keychain: Record<string, string> = {}
+    const screen = await render('settings', {}, { keychain }).settle()
+    expect(screen.text).toContain('Not paired')
 
     const after = await screen.deliverLink(link)
     expect(after.text).toContain('Paired')
