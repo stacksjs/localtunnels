@@ -22,12 +22,26 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { build, init } from 'craft-native/ios'
 import config from '../mobile.config'
+import { installAppIcon } from './ios-app-icon'
 import { unjustifiedUsageDescriptions, withoutUnusedUsageDescriptions } from './ios-privacy'
 import { emitTunnelExtension, planTunnel, readPlist, removeTunnelExtension, writePlist } from './ios-tunnel-extension'
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(PACKAGE_DIR, 'ios')
 const BUNDLE = join(PACKAGE_DIR, 'dist', 'native-screens.js')
+/*
+ * The home screen icon, drawn by `scripts/app-icon.swift`.
+ *
+ * Committed rather than rendered here: the icon changes about never, and a
+ * build that shells out to `swift` to produce one would fail on a machine
+ * without Xcode for no gain. `app-icon.swift` paints the background edge to
+ * edge, so the file carries no alpha for anything to flatten.
+ *
+ * Without it `AppIcon.appiconset` is written empty and the app installs
+ * with no icon at all — a blank grey square on the home screen, which is
+ * exactly what it looked like.
+ */
+const APP_ICON = join(PACKAGE_DIR, 'assets', 'app-icon.png')
 
 /*
  * The bundle is rebuilt rather than assumed.
@@ -169,6 +183,17 @@ try {
   }
 
   await build({ nativeBundlePath: BUNDLE, output: OUT_DIR, generateProject: true })
+
+  /*
+   * After `build`, not through Craft's own `appIconPath`.
+   *
+   * Craft writes the asset catalog from `init`, which this build runs once
+   * and skips ever after so a rebuild does not discard Xcode's metadata —
+   * so an icon handed to Craft would land on a fresh checkout and on no
+   * later build. See `ios-app-icon.ts`, which also refuses an icon App
+   * Store Connect would, at build rather than at upload.
+   */
+  installAppIcon(OUT_DIR, APP_ICON)
 
   /*
    * After `build`, because Craft owns this file and writes it.
