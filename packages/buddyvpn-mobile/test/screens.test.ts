@@ -599,15 +599,15 @@ describe('the connect screen', () => {
   })
 
   /*
-   * Disconnected, so the plain shield is the one that survived hydration and
-   * the checkmark branch was removed. This is the pair that failed on a
-   * device: a `:class` swap re-applied colour without re-resolving the glyph,
-   * so the shield never became a checkmark.
+   * Disconnected, so play is the branch that survived hydration and stop was
+   * removed. This is the pair that failed on a device: a `:class` swap
+   * re-applied colour without re-resolving the glyph, so the icon never
+   * changed at all.
    */
-  it('shows the plain shield while nothing is connected', () => {
-    const classes = render('connect').nodes.map(node => node._classes ?? '')
-    expect(classes.some(value => value.includes('i-lucide-shield') && !value.includes('shield-check'))).toBe(true)
-    expect(classes.some(value => value.includes('i-lucide-shield-check'))).toBe(false)
+  it('offers play while nothing is connected', () => {
+    const symbols = render('connect').nodes.map(node => (node.props ?? {}).symbol)
+    expect(symbols).toContain('play.fill')
+    expect(symbols).not.toContain('stop.fill')
   })
 })
 
@@ -808,6 +808,22 @@ describe('the location shown while connected', () => {
     expect(up.text).toContain('Connected')
     return up
   }
+
+  /*
+   * Stop while a tunnel is up, and a filled one.
+   *
+   * The icon says what the tap does. The class names a lucide icon that the
+   * renderer maps to an SF Symbol and `square` maps to the outline, which
+   * beside a filled play triangle reads as a mismatched pair; the explicit
+   * `symbol` wins over that mapping. Asserting on the symbol rather than the
+   * class is the point — the class is what the template says and the symbol
+   * is what the phone draws.
+   */
+  it('offers stop while it is connected', async () => {
+    const symbols = (await connectedTo('us-west')).nodes.map(node => (node.props ?? {}).symbol)
+    expect(symbols).toContain('stop.fill')
+    expect(symbols).not.toContain('play.fill')
+  })
 
   it('is the region the tunnel is on', async () => {
     const up = await connectedTo('us-west')

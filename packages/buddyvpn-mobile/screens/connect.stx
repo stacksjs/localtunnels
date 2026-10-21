@@ -258,22 +258,41 @@ const toggle = () => {
         @click="toggle"
       >
         <!--
+          A transport control, not a badge.
+
+          This was a shield, and a shield is a picture of what the app is for
+          rather than of what the button does. It also had to carry the state
+          twice over: a tick appeared inside it while connected, under the
+          word "Connected", beside a running clock — three ways of saying one
+          thing, and the circle was the least legible of them.
+
+          Play and stop say what the tap does and nothing else, which leaves
+          the colour free to be the action's: red here is the same red as
+          Forget and Reset, not a verdict on a connected tunnel.
+
+          `symbol` is set outright. The class names a lucide icon that the
+          renderer maps to an SF Symbol, and `square` maps to the outline —
+          next to a filled play triangle that reads as a mismatched pair
+          rather than a set. An explicit symbol wins over the mapping, and
+          `stop.fill` is the one Apple ships for this.
+        -->
+        <!--
           Two elements, not one with a bound class.
 
-          A `:class` that swaps `i-lucide-shield` for `i-lucide-shield-check`
-          changes nothing on screen: the symbol is resolved from the class
-          list, but a bound class change re-applies colour and size without
-          re-resolving the glyph. It compiled, it bound, and the shield simply
-          never became a checkmark — visible only by looking at the device.
+          A `:class` that swaps one icon for another changes nothing on
+          screen: the symbol is resolved once, and a bound class change
+          re-applies colour and size without re-resolving the glyph. It
+          compiled, it bound, and the icon simply never changed — visible
+          only by looking at the device.
 
           Complementary conditions rather than `@if`/`@else`, which blanks the
           screen at hydration on this renderer.
         -->
         @if(connected())
-          <icon class="i-lucide-shield-check text-6xl text-white"></icon>
+          <icon class="i-lucide-square text-6xl text-white" symbol="stop.fill"></icon>
         @endif
         @if(!connected())
-          <icon class="i-lucide-shield text-6xl text-white"></icon>
+          <icon class="i-lucide-play text-6xl text-white" symbol="play.fill"></icon>
         @endif
       </a>
 
