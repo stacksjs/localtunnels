@@ -11,7 +11,7 @@
     "typecheck": "bunx tsc --noEmit --project tsconfig.json"
   },
   "devDependencies": {
-    "@stacksjs/stx": "0.2.518",
-    "craft-native": "0.0.173"
+    "@stacksjs/stx": "0.2.682",
+    "craft-native": "0.0.319"
   }
 }
