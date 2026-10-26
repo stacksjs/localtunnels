@@ -234,12 +234,12 @@ html, body {
   margin-top: auto; padding: var(--space-3);
   border: .5px solid var(--card-line); border-radius: 12px;
   background: var(--card); color: inherit;
-  font: inherit; text-align: left; cursor: default;
+  font: inherit; text-align: left; cursor: pointer;
 }
 .location:hover:not(:disabled) { background: var(--surface-soft); }
 /* Still fully readable: this row is where you are, which matters most while
    connected. Only the invitation to change it goes away. */
-.location:disabled { opacity: .72; }
+.location:disabled { opacity: .72; cursor: default; }
 .location:disabled .chevron { visibility: hidden; }
 .location:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -270,7 +270,7 @@ html, body {
 .pick {
   display: flex; align-items: center; gap: var(--space-3); width: 100%;
   padding: var(--space-3); border: 0; background: none;
-  color: inherit; font: inherit; text-align: left; cursor: default;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
 .pick + .pick { box-shadow: inset 0 .5px 0 var(--card-line); }
 .pick:hover { background: var(--hover); }
@@ -406,6 +406,10 @@ html, body {
   font: inherit; font-size: 12px;
   padding: 5px 8px; border-radius: 7px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  /* Both a `<select>` and the pair of buttons beside the pairing code wear
+     this class, and a button inheriting a webview's default cursor is the
+     same arrow a paragraph gets. */
+  cursor: pointer;
 }
 
 /* A checkbox styled as a switch: the native one is a different size in every
