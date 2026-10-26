@@ -411,6 +411,9 @@ html, body {
      same arrow a paragraph gets. */
   cursor: pointer;
 }
+/* A dropdown is not a button. AppKit's own popup buttons keep the arrow, and
+   these two sit in a settings panel that is trying to look like one. */
+select.control { cursor: default; }
 
 /* A checkbox styled as a switch: the native one is a different size in every
  * macOS version and does not take a colour. */
