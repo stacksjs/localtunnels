@@ -42,6 +42,8 @@ const APP_NAME = 'BuddyVPN'
 
 /** How long the agent gets to bind and answer before the launcher gives up. */
 const STARTUP_TIMEOUT_MS = 20_000
+/** How long it gets to bring the tunnel down on the way out. */
+const AGENT_SHUTDOWN_MS = 5000
 const POLL_INTERVAL_MS = 100
 
 const macosDir = path.dirname(process.execPath)
@@ -248,4 +250,17 @@ const craft = Bun.spawn([
 
 const code = await craft.exited
 stopAgent()
+/*
+ * Waited for, not just signalled.
+ *
+ * The agent brings the tunnel down on its way out, and that means shelling
+ * out to lift the kill switch and put the routes back. Exiting the moment
+ * after `kill()` took the agent's parent with it mid-teardown, which is the
+ * one outcome worse than not trying: a machine left part-restored.
+ *
+ * Capped, because quitting an app has to finish. An agent still going after
+ * this long is wedged, and the tunnel it did not stop is recovered by
+ * launching again — the same place a crash leaves it.
+ */
+await Promise.race([agent.exited, Bun.sleep(AGENT_SHUTDOWN_MS)])
 process.exit(code)

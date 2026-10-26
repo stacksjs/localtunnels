@@ -183,8 +183,55 @@ function asset(pathname: string): Response {
   })
 }
 
+/**
+ * Bring this app's tunnel down as the agent goes.
+ *
+ * Quitting used to leave it running. The window closes, the launcher kills
+ * the agent, and the tunnel — a separate process, running as root, detached
+ * from both — carried on holding the default route, the DNS override, the
+ * disabled IPv6 and an armed kill switch, with nothing left on screen that
+ * could turn any of it off. Recoverable by launching the app again, which
+ * finds the tunnel by scanning for it, but nobody should have to guess that.
+ *
+ * A VPN with no interface is not a VPN anybody chose to be running. Quit
+ * means off.
+ *
+ * Returns a function rather than registering one, so the once-only guard
+ * belongs to the caller and can be tested without sending real signals: exit
+ * arrives both as a signal and as `exit`, and tearing a tunnel down twice
+ * means the second attempt runs against whatever took its place.
+ */
+export function agentShutdown(stop: () => unknown): () => void {
+  let done = false
+  return () => {
+    if (done)
+      return
+    done = true
+    try {
+      stop()
+    }
+    catch {
+      // Nothing useful is left to do with this: the process is on its way
+      // out, and a throw here would only replace a tidy exit with a crash.
+    }
+  }
+}
+
 export async function runAgent(): Promise<void> {
   const requested = Number.parseInt(process.env.BUDDYVPN_PORT ?? '0', 10)
+
+  /*
+   * `disconnect` is synchronous all the way down — it shells out and waits —
+   * so it completes inside a signal handler, where an async teardown would
+   * be abandoned at the first await.
+   */
+  const shutdown = agentShutdown(disconnect)
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const)
+    process.on(signal, () => {
+      shutdown()
+      process.exit(0)
+    })
+  process.on('exit', shutdown)
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
