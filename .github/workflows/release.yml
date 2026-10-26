@@ -165,6 +165,32 @@ jobs:
       - name: Install Dependencies
         run: bun install
 
+      # The image arrives with very little room, and almost all of what it
+      # holds is for building iOS apps — simulator runtimes alone are tens of
+      # gigabytes. This job builds a Mac app and needs none of it.
+      #
+      # Reclaimed because `hdiutil` wants a staging copy of the bundle and
+      # then the compressed image on top of it, and ran out part way through:
+      #
+      #     hdiutil: create failed - No space left on device
+      #
+      # after signing had already succeeded, which is the expensive place to
+      # discover it — the notarization that follows is the slow step, and
+      # everything before it had to be redone.
+      #
+      # `df` on both sides so the next person to hit this can see what was
+      # actually available rather than inferring it from a failure.
+      - name: Make room for the disk image
+        run: |
+          echo "Before:"
+          df -h / | tail -1
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches || true
+          sudo rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport || true
+          sudo rm -rf ~/Library/Caches/Homebrew || true
+          echo "After:"
+          df -h / | tail -1
+
       # The bundle ships its own libltvpn.dylib: the CLI resolves the library
       # next to its own executable, so a bundle without it is an app whose
       # every VPN command fails on launch.
