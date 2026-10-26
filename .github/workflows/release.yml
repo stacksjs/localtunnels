@@ -89,15 +89,19 @@ jobs:
   desktop:
     name: BuddyVPN installer
     needs: npm
-    # Skipped until a Developer ID is configured, so the CLI release is never
-    # blocked by a half-finished signing setup.
+    # An explicit switch, because attaching an unsigned build would be worse
+    # than attaching nothing: an ad-hoc seal is valid only on the machine that
+    # produced it, so a download would fail for every person who tried it, and
+    # fail in a way that looks like a broken app rather than a missing
+    # certificate.
     #
-    # Attaching an unsigned build would be worse than attaching nothing. An
-    # ad-hoc seal is valid only on the machine that produced it: Gatekeeper
-    # refuses it everywhere else, so a download would fail for every person
-    # who tried it, and fail in a way that looks like a broken app rather than
-    # a missing certificate.
-    if: ${{ vars.DESKTOP_SIGNING_IDENTITY_NAME != '' }}
+    # It has to be a repository variable rather than anything this job could
+    # work out for itself. GitHub evaluates a job-level `if` before a single
+    # step runs, with only the github, needs, vars and inputs contexts in
+    # scope — `secrets` is not among them, and nor is anything the decrypt
+    # step below produces. A fork, which has neither the variable nor the key,
+    # therefore skips this job instead of failing it.
+    if: ${{ vars.BUILD_DESKTOP_APP == 'true' }}
     runs-on: macos-26
 
     permissions:
@@ -109,6 +113,44 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Every Apple credential this job needs lives encrypted in the committed
+      # .env.production. The only thing GitHub holds is the key that opens it,
+      # so adding a credential later is a commit rather than another secret,
+      # and the set of them can be read from the repository.
+      #
+      # Run through npx rather than bun: bun arrives with Pantry, and the
+      # certificate has to be in hand before Pantry runs. Pinned for the same
+      # reason the action below is — a release pipeline that changes under you
+      # is one that cannot be bisected when it breaks.
+      #
+      # Each value is masked as it is exported. GitHub redacts its own secrets
+      # from logs automatically, but a value that arrives by decryption is not
+      # one it knows about, and would otherwise print in full from any step
+      # that echoed it. The team id and the identity name are left unmasked:
+      # both are public — they are carried in every signed binary — and
+      # reading them in a log is worth more than hiding them.
+      - name: Decrypt the release credentials
+        env:
+          DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
+        run: |
+          npx --yes @dotenvx/dotenvx@2.38.2 decrypt -f .env.production --stdout > "$RUNNER_TEMP/release.env"
+          while IFS= read -r line; do
+            case "$line" in
+              APPLE_*=*|DEVELOPER_ID_*=*|DESKTOP_*=*) ;;
+              *) continue ;;
+            esac
+            key=${line%%=*}
+            value=${line#*=}
+            value=${value%\"}
+            value=${value#\"}
+            case "$key" in
+              APPLE_TEAM_ID|DESKTOP_SIGNING_IDENTITY_NAME) ;;
+              *) printf '::add-mask::%s\n' "$value" ;;
+            esac
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done < "$RUNNER_TEMP/release.env"
+          rm -f "$RUNNER_TEMP/release.env"
+
       # Brings in what deps.yaml declares — the Craft runtime the window is
       # drawn in, and Zig for the native core that goes in the bundle beside
       # the CLI — and imports the Developer ID identity into an ephemeral
@@ -117,8 +159,8 @@ jobs:
         uses: pantry-pm/pantry/packages/action@v0.11.74
         with:
           apple-signing: 'true'
-          apple-signing-application-certificate: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
-          apple-signing-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          apple-signing-application-certificate: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          apple-signing-certificate-password: ${{ env.APPLE_CERTIFICATE_PASSWORD }}
 
       - name: Install Dependencies
         run: bun install
@@ -138,10 +180,7 @@ jobs:
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD"
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
 
       # Signs with the Developer ID, images the .dmg, submits it to Apple and
       # staples the ticket. Stapling rewrites the file, so nothing may read or
@@ -149,7 +188,7 @@ jobs:
       - name: Build, sign and notarize
         run: bun run build:app
         env:
-          DESKTOP_SIGNING_IDENTITY: ${{ vars.DESKTOP_SIGNING_IDENTITY_NAME }}
+          DESKTOP_SIGNING_IDENTITY: ${{ env.DESKTOP_SIGNING_IDENTITY_NAME }}
           NOTARY_PROFILE: buddyvpn
 
       # Resolved to an exact path, and checked.

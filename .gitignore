@@ -35,3 +35,7 @@ pantry
 # turns every diff into churn, and a cache that travels between machines is
 # worse than one rebuilt.
 .stx/
+
+# The dotenvx private key. `.env.production` is deliberately NOT ignored:
+# its values are encrypted, and committing it is the point of the pattern.
+.env.keys
