@@ -1,7 +1,7 @@
 {
   "name": "@localtunnels/buddyvpn-mobile",
   "type": "module",
-  "version": "0.2.13",
+  "version": "0.3.0",
   "private": true,
   "description": "BuddyVPN for iOS — the phone app, drawn in a Craft native shell.",
   "license": "MIT",
