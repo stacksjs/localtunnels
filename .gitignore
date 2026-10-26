@@ -39,3 +39,10 @@ pantry
 # The dotenvx private key. `.env.production` is deliberately NOT ignored:
 # its values are encrypted, and committing it is the point of the pattern.
 .env.keys
+
+# Editor swap files, which is not housekeeping here: a crashed `vim .env.keys`
+# leaves a .env.keys.swp holding the decryption key, and that name matches
+# none of the rules above.
+*.swp
+*.swo
+*~
