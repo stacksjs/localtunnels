@@ -232,7 +232,7 @@ describe('waiting for the bridge', () => {
     const win: any = Object.assign(new EventTarget(), { craft: undefined })
     const queue: (() => void)[] = []
 
-    expect(bootstrapTray(win, fn => queue.push(fn), 10)).toBe(false)
+    expect(bootstrapTray(win, (fn: () => void) => queue.push(fn), 10)).toBe(false)
 
     // Three turns with nothing, then the runtime installs it.
     queue.shift()!()
@@ -249,7 +249,7 @@ describe('waiting for the bridge', () => {
   it('gives up quietly when one never arrives', () => {
     const queue: (() => void)[] = []
     const win = Object.assign(new EventTarget(), { craft: undefined })
-    bootstrapTray(win, fn => queue.push(fn), 2)
+    bootstrapTray(win, (fn: () => void) => queue.push(fn), 2)
     while (queue.length) queue.shift()!()
     expect(queue).toHaveLength(0)
   })
