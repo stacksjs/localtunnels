@@ -7,4 +7,18 @@ dependencies:
   # needs it, and so does `deploy:vpn`, which cross-compiles libltvpn.so for
   # the server mid-deploy — without it the box is provisioned and the build
   # then fails, leaving a half-configured server you are already paying for.
-  ziglang.org: ^0.18
+  # Pinned to an exact dev build, not a range.
+  #
+  # Zig has no 0.18 release — every 0.18 is a prerelease, and `^0.18` matches
+  # none of them, because a caret range excludes prereleases unless it carries
+  # one itself. That spec resolved on this machine, where an older pantry falls
+  # back to downloading from ziglang.org, and failed the first release that
+  # reached CI with the newer resolver: "No version of ziglang.org satisfies
+  # ^0.18 (checked 24 versions, newest 0.18.0-dev.610+720939f8c)".
+  #
+  # Exact rather than `>=0.18.0-dev`, which would resolve to whatever is newest
+  # that hour. This is a compiler whose APIs move between dev builds — the
+  # commit above this one in `git log -- deps.yaml` exists because Zig changed
+  # X25519 key generation — so a range here means the build can break with no
+  # change of ours. Verified: packages/vpn-core builds clean against this one.
+  ziglang.org: 0.18.0-dev.610+720939f8c
