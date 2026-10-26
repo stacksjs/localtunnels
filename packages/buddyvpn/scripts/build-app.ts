@@ -231,6 +231,45 @@ fs.rmSync(plistJson, { force: true })
 // executables inside it carries hashes of files that then changed.
 const identity = process.env.DESKTOP_SIGNING_IDENTITY
 const adhoc = !identity
+/*
+ * What the hardened runtime has to allow, and why each hole is open.
+ *
+ * `--options runtime` turns on protections that a Bun binary, a WebKit view
+ * and a privileged helper each fall foul of, and the runtime refuses the
+ * process rather than degrading. The keys live in `Entitlements.plist`, and
+ * the reasons live here because that file cannot hold them: codesign hands
+ * it to AMFI, whose XML parser rejects comments outright —
+ *
+ *     Failed to parse entitlements: AMFIUnserializeXML: syntax error near line 6
+ *
+ * — while `plutil -lint` calls the same file valid. A commented entitlements
+ * plist therefore passes every check a person would think to run and fails
+ * only at the moment of signing.
+ *
+ *   allow-jit, allow-unsigned-executable-memory
+ *     Both engines in the bundle are JSC: the webview, and Bun, which is the
+ *     launcher and the agent. Granted together, because a JSC allowed one and
+ *     refused the other crashes on the fallback path rather than the common
+ *     one — rarely, and not on the machine that built it.
+ *
+ *   disable-library-validation
+ *     The bundle loads code it did not compile into itself: `libltvpn.dylib`
+ *     beside the executable, and `craft-runtime` spawned as a second binary.
+ *     Validation demands a matching Team ID across all of them, which stops
+ *     being true the moment a contributor builds with their own certificate.
+ *
+ *   automation.apple-events
+ *     The load-bearing one. Bringing a tunnel up means a utun device, routes
+ *     and a packet filter, all root's; `support/elevate.ts` asks via
+ *     `osascript -e 'do shell script … with administrator privileges'`, and
+ *     sending that Apple event is what the hardened runtime blocks. Without
+ *     it the app launches, looks healthy, and silently cannot connect.
+ *
+ *   allow-dyld-environment-variables
+ *     Inherited from the SystemCleaner app, same Bun + Craft pairing through
+ *     the same signing path. Not traced to a call here; kept because this
+ *     stack is identical and a wrong guess costs a notarization round trip.
+ */
 const entitlements = path.join(PACKAGE_DIR, 'Entitlements.plist')
 
 if (!adhoc && !fs.existsSync(entitlements))
