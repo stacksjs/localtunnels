@@ -167,7 +167,7 @@ html, body {
      indistinguishable from a shadow. */
   border: 1.5px solid var(--line); border-radius: 50%;
   background: var(--surface-inset); color: var(--ink);
-  cursor: default;
+  cursor: pointer;
   transition: background .2s ease, color .2s ease, border-color .2s ease, transform .12s ease;
 }
 .power:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--secondary); }
@@ -175,7 +175,10 @@ html, body {
 .power:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 /* Dimmed, not erased: a disabled button still has to show where the control
    is, or the window looks like it failed to load. */
-.power:disabled { opacity: .45; color: var(--secondary); }
+/* `default`, not `not-allowed`: there is nothing wrong with the button, the
+   app simply has no network to connect to yet, and a barred cursor states a
+   problem the person cannot act on. The same reading as `.toggle:disabled`. */
+.power:disabled { opacity: .45; color: var(--secondary); cursor: default; }
 .power .glyph { width: 52px; height: 52px; }
 
 /* Power by default, stop once there is something to stop. */
