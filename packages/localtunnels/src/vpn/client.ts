@@ -346,6 +346,27 @@ export class VpnCoordinatorClient extends TypedEventEmitter<VpnCoordinatorClient
   private startHeartbeat(): void {
     if (this.heartbeatInterval <= 0 || this.heartbeat)
       return
+    /*
+     * A reconnect is a recovery, and has to say so out loud.
+     *
+     * `checkLiveness` is the only other place a stall ends, and it only runs
+     * on a tick of the connection that stalled — so a stall that ends by the
+     * socket coming back instead cleared this flag here, silently. Nothing
+     * was wrong with the client afterwards; it was simply the last thing
+     * anybody heard about the coordinator.
+     *
+     * That silence reaches a person. The desktop decides what to show by
+     * reading back through the tunnel's log for whichever of "silent" or
+     * "answering again" came last, so with no second line the window went on
+     * warning that the connection would stop working shortly — over a tunnel
+     * that was carrying traffic the whole time, with the stated silence
+     * frozen at whatever it had been at the moment of the stall.
+     *
+     * Before `lastFrameAt` moves: the gap being reported is the one that just
+     * ended, and overwriting it first would report zero.
+     */
+    if (this.stalled)
+      this.emit('resumed', { silentForMs: Date.now() - this.lastFrameAt })
     this.lastFrameAt = Date.now()
     this.stalled = false
     this.lastBuffered = 0

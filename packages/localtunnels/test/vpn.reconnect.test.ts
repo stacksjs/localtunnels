@@ -102,6 +102,41 @@ describe('reconnecting', () => {
     expect(node.assignedIp).toBe(registrations[0])
   })
 
+  /*
+   * A stall that ends by reconnecting has to announce itself.
+   *
+   * `checkLiveness` is the only other place a stall ends, and it only runs
+   * on a tick of the connection that stalled — so when the socket came back
+   * instead, `startHeartbeat` cleared the flag without a word. The client
+   * was fine from then on and nothing said so.
+   *
+   * The desktop reads health by scanning the tunnel log back for whichever
+   * of "silent" or "answering again" came last, so one missing line left the
+   * window warning that the connection would stop working shortly, over a
+   * tunnel carrying traffic, for the rest of the session.
+   */
+  it('says the coordinator is answering again when the socket comes back', async () => {
+    const port = startCoordinator()
+    // A stale threshold under one heartbeat: the first tick sends and checks
+    // before any answer can arrive, so the stall is provoked on schedule
+    // rather than waited for.
+    const node = makeClient(port, { heartbeatInterval: 0.02, staleAfter: 0.001 })
+    const heard: string[] = []
+    node.on('stale', () => heard.push('stale'))
+    node.on('resumed', () => heard.push('resumed'))
+
+    await node.connect()
+    await until(() => heard.includes('stale'))
+
+    coordinator!.stop()
+    coordinator = new VpnCoordinator({ port, staleAfterMs: 40 })
+    coordinator.start()
+
+    await until(() => heard.includes('resumed'))
+    expect(heard[0]).toBe('stale')
+    expect(heard).toContain('resumed')
+  })
+
   // Said out loud, because the window otherwise goes on claiming the tunnel
   // is up: the interface stays up throughout and being dropped from a
   // directory is not something anyone sends you.
