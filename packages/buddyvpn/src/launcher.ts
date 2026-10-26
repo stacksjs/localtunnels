@@ -224,6 +224,51 @@ const frameAutosave = runtimeSupports('--frame-autosave') ? ['--frame-autosave',
  */
 const appName = runtimeSupports('--app-name') ? ['--app-name', APP_NAME] : []
 
+/**
+ * The menu bar item, held back.
+ *
+ * A VPN is checked far more often than it is changed, and the icon answers
+ * the common question without opening anything. All of it is written and
+ * tested — `web/tray.js` draws the icon and the menu, and both work. The
+ * flag that turns it on is off because the runtime cannot yet deliver a
+ * click to either:
+ *
+ *   craft-native/craft#419 — `--system-tray` skips `activateWindowedApp()`,
+ *     so the app never claims regular activation, the window never becomes
+ *     key, and every left click *in the window* is swallowed as first-mouse.
+ *     Right clicks work, so this presents as a window that draws correctly
+ *     and ignores its own buttons. `claimWindow` in `web/tray.js` works
+ *     around it from the page.
+ *
+ *   craft-native/craft#420 — a left click on the status item, and a click on
+ *     an item in its menu, never reach JavaScript at all. Polling is on and
+ *     the delivery functions exist; the native side queues the click and the
+ *     page is never told. There is no working around this one from here.
+ *
+ * So turning it on today ships an icon that reports the connection correctly
+ * and does nothing when pressed, which reads as a broken app rather than a
+ * missing feature — the same reason this workflow refuses to attach an
+ * unsigned build. Flip the constant when #420 closes.
+ */
+const TRAY_WORKS = process.env.BUDDYVPN_TRAY === '1'
+
+const systemTray = TRAY_WORKS && runtimeSupports('--system-tray') ? ['--system-tray'] : []
+
+/**
+ * Closing the window stops meaning quit — but only once there is a bar icon
+ * to get back from.
+ *
+ * Deliberately conditional on the flag above rather than passed alongside
+ * it. On a runtime without a tray, `--keep-running` would leave an app with
+ * no window, no icon and no way to summon either: alive, invisible, and
+ * reachable only through Activity Monitor. Quitting still tears the tunnel
+ * down, because that is bound to the process ending rather than to the
+ * window closing.
+ */
+const keepRunning = systemTray.length > 0 && runtimeSupports('--keep-running')
+  ? ['--keep-running']
+  : []
+
 const craft = Bun.spawn([
   craftBinary,
   `http://127.0.0.1:${port}/`,
@@ -234,6 +279,8 @@ const craft = Bun.spawn([
   ...persistentStorage,
   ...frameAutosave,
   ...appName,
+  ...systemTray,
+  ...keepRunning,
   // A consumer VPN window: narrow enough to leave in a corner of the screen,
   // tall enough that the button sits in the middle rather than crowding the
   // location row under it.

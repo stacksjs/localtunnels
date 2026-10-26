@@ -347,6 +347,35 @@
      * describing a state that has since moved on.
      */
     if (!el.settings.hidden) paintSettings()
+    publish()
+  }
+
+  /*
+   * Hand the menu bar what the window just drew.
+   *
+   * From `paint` rather than from `refresh`, so the two can never disagree:
+   * the menu says what is on screen, including the states the agent has no
+   * opinion about — `phase` is this window's, not the agent's, and a menu
+   * that missed it would offer Connect during a handshake already running.
+   *
+   * Demo mode is deliberately not filtered out here. If the window is
+   * pretending, the menu bar pretends with it; a bar that disagreed with the
+   * window would be a worse lie than the one the window is openly telling.
+   */
+  const publish = () => {
+    window.dispatchEvent(new CustomEvent('buddyvpn:status', {
+      detail: {
+        connected: connected(),
+        phase,
+        forgotten: forgotten(),
+        regionId: region,
+        regions: regions().map(entry => ({
+          id: entry.id,
+          country: entry.country,
+          configured: entry.configured,
+        })),
+      },
+    }))
   }
 
   const post = (url, payload) => fetch(url, {
@@ -625,6 +654,28 @@
       return
     }
     if (event.key === 'Escape' && !el.settings.hidden) closeSettings()
+  })
+
+  /*
+   * The menu bar asks; the window does it.
+   *
+   * Routed through `toggle` and `choose` rather than posting on its own, so
+   * the window shows the handshake it started: posting directly would leave
+   * the button idle until the next poll noticed a tunnel it had not asked
+   * for. `show` and `quit` never arrive here — AppKit handles both.
+   */
+  window.addEventListener('buddyvpn:tray', (event) => {
+    const action = (event.detail && event.detail.action) || ''
+    if (action === 'toggle') { toggle(); return }
+    if (!action.startsWith('region:')) return
+
+    const id = action.slice('region:'.length)
+    if (id === region) return
+    choose(id)
+    // Switching location while connected is a disconnect and a fresh
+    // handshake. The window makes you press the button again; doing it for
+    // you from the bar would be the one place in the app where picking a
+    // place also moves your traffic.
   })
 
   el.power.addEventListener('click', toggle)
