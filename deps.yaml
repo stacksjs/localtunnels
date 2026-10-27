@@ -1,8 +1,18 @@
 dependencies:
   bun.sh: ^1.3.11
-  # The webview the VPN app's window is drawn in. Bundled into the .app by
+  # The webview the VPN app is drawn in. Bundled into the .app by
   # packages/buddyvpn/scripts/build-app.ts, which resolves it from pantry/.
-  craft-native.org: ^0.0.90
+  #
+  # Exact, and not the range it looks like: a caret on a 0.0.x version
+  # permits only that patch, so `^0.0.90` was pinning one build while
+  # reading as a range. Written plainly now to stop that being rediscovered.
+  #
+  # 0.0.359 for `--tray-popover`, which arrived in 0.0.98 and is what makes
+  # the menu bar work at all here. On 0.0.90 a left click on the status item
+  # is handed to JavaScript and never arrives (craft-native/craft#420), so
+  # nothing in the bar could be clicked; a popover opens natively and never
+  # involves the page, so the bug does not apply to it.
+  craft-native.org: 0.0.359
   # The native VPN core (packages/vpn-core) is Zig. `bun run build:native`
   # needs it, and so does `deploy:vpn`, which cross-compiles libltvpn.so for
   # the server mid-deploy — without it the box is provisioned and the build
