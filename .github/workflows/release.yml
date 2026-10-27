@@ -32,8 +32,18 @@ jobs:
       # commit between the two is a catalog update, and the only file touched
       # under packages/action is its own package.json. Held here so both
       # repositories move together.
+      #
+      # `install: false` because this job wants the CLI, not the system deps.
+      # Left on, the action reconciles everything in deps.yaml against this
+      # runner — and one of those is the Craft runtime, which the registry
+      # publishes for macOS and not for linux-x86-64, so pinning the version
+      # with the menu bar in it failed the release here on a package no Linux
+      # job has ever used. Bun is installed either way, Zig has its own step
+      # below, and the npm half of the tree is `bun install`.
       - name: Setup Pantry
         uses: pantry-pm/pantry/packages/action@v0.11.74
+        with:
+          install: 'false'
 
       - name: Install Dependencies
         run: bun install
