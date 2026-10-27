@@ -86,50 +86,31 @@ describe('what the menu says', () => {
     }
   })
 
-  it('offers the opposite of what is happening', () => {
-    expect(labelled(trayMenu(view()), 'Connect')).toBeTruthy()
-    expect(labelled(trayMenu(view({ connected: true })), 'Disconnect')).toBeTruthy()
+  /*
+   * The two items here are `show` and `quit`, which AppKit performs itself.
+   * Everything that needed the page to hear about the click — Connect, and
+   * the location submenu — was removed while craft-native/craft#420 is open,
+   * because such an item renders, greys nothing, and silently does nothing.
+   * This is the guard that stops one being added back by eye.
+   */
+  it('offers only what AppKit can act on without the page', () => {
+    const clickable = trayMenu(view())
+      .filter(item => item.type !== 'separator' && item.enabled !== false)
+      .map(item => item.action)
+
+    expect(clickable).toEqual(['show', 'quit'])
+  })
+
+  it('can always be opened and quit', () => {
+    const actions = trayMenu(view()).map(item => item.action)
+    expect(actions).toContain('show')
+    expect(actions).toContain('quit')
   })
 
   // The status line is a label. Enabled, it is also the item the keyboard
   // lands on first, and clicking it would route an action meaning nothing.
   it('does not offer the status line as something to click', () => {
     expect(trayMenu(view())[0].enabled).toBe(false)
-  })
-
-  describe('a location with no server behind it', () => {
-    it('is listed, and cannot be chosen', () => {
-      const germany = labelled(trayMenu(view()), 'Germany')
-      expect(germany).toBeTruthy()
-      expect(germany.enabled).toBe(false)
-    })
-
-    it('cannot be connected to from the bar either', () => {
-      // The window disables its button for exactly this. A menu that did not
-      // would be the easier of the two to reach.
-      expect(labelled(trayMenu(view({ regionId: 'eu-central' })), 'Connect').enabled).toBe(false)
-    })
-  })
-
-  /*
-   * Asked separately from the one above: disconnecting is always allowed.
-   * Tying it to whether the *current* region is configured would strand
-   * somebody connected to a location they had since un-deployed.
-   */
-  it('always lets a running tunnel be stopped', () => {
-    const odd = view({ connected: true, regionId: 'eu-central' })
-    expect(labelled(trayMenu(odd), 'Disconnect').enabled).toBe(true)
-  })
-
-  it('offers nothing to press mid-handshake', () => {
-    const busy = trayMenu(view({ phase: 'connecting' }))
-    expect(labelled(busy, 'Connect').enabled).toBe(false)
-    expect(labelled(busy, 'United States').enabled).toBe(false)
-  })
-
-  it('checks the location it is set to, and no other', () => {
-    const checked = items(trayMenu(view())).filter(item => item.checked)
-    expect(checked.map(item => item.label)).toEqual(['United States'])
   })
 })
 
@@ -176,12 +157,20 @@ describe('driving the runtime', () => {
    * it stays there beside the icon, costing the width of a word in a strip
    * where every other VPN is a glyph and nothing else.
    */
-  it('clears the text the runtime names the item with', () => {
+  /*
+   * Clearing it hides the icon: the runtime sizes the button from its title,
+   * and an empty one collapses the image to nothing — `setIcon` succeeds and
+   * the menu bar shows an item drawing nothing at all. Setting the icon first
+   * does not help, which was tried. So the title is never touched, and this
+   * is the guard that stops it being tidied away again.
+   */
+  it('never clears the title, because that hides the icon', () => {
     const { craft, calls } = stub()
     const target = new EventTarget()
     startTray(craft, target)
     target.dispatchEvent(new CustomEvent('buddyvpn:status', { detail: view() }))
-    expect(calls.titles).toEqual([''])
+    expect(calls.titles).toEqual([])
+    expect(calls.icons).toEqual(['shield'])
   })
 
   it('passes a menu action on as something the window can act on', () => {

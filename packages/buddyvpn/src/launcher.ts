@@ -8,8 +8,8 @@
  *
  *   1. start the agent on a loopback port,
  *   2. wait until it answers,
- *   3. open the Craft window on it,
- *   4. shut the agent down when the window closes.
+ *   3. open the Craft window on it, and the menu bar panel beside it,
+ *   4. shut the agent down when either one is quit.
  *
  * Step 4 is the one to be careful about. Without it, quitting leaves a process
  * holding a port, and the next launch inherits it.
@@ -201,6 +201,9 @@ const chromeControls = runtimeSupports('--no-web-chrome-controls') ? ['--no-web-
  * one: the chosen location lives in `localStorage`, and in an ephemeral store
  * it is forgotten on quit, so the app would reopen on the default location
  * every time no matter what you picked.
+ *
+ * Given to the panel as well, so the two of them open on the same stored
+ * choice rather than disagreeing about where you are.
  */
 const persistentStorage = runtimeSupports('--persistent-storage') ? ['--persistent-storage'] : []
 
@@ -224,53 +227,21 @@ const frameAutosave = runtimeSupports('--frame-autosave') ? ['--frame-autosave',
  */
 const appName = runtimeSupports('--app-name') ? ['--app-name', APP_NAME] : []
 
-/**
- * The menu bar item, held back.
- *
- * A VPN is checked far more often than it is changed, and the icon answers
- * the common question without opening anything. All of it is written and
- * tested — `web/tray.js` draws the icon and the menu, and both work. The
- * flag that turns it on is off because the runtime cannot yet deliver a
- * click to either:
- *
- *   craft-native/craft#419 — `--system-tray` skips `activateWindowedApp()`,
- *     so the app never claims regular activation, the window never becomes
- *     key, and every left click *in the window* is swallowed as first-mouse.
- *     Right clicks work, so this presents as a window that draws correctly
- *     and ignores its own buttons. `claimWindow` in `web/tray.js` works
- *     around it from the page.
- *
- *   craft-native/craft#420 — a left click on the status item, and a click on
- *     an item in its menu, never reach JavaScript at all. Polling is on and
- *     the delivery functions exist; the native side queues the click and the
- *     page is never told. There is no working around this one from here.
- *
- * So turning it on today ships an icon that reports the connection correctly
- * and does nothing when pressed, which reads as a broken app rather than a
- * missing feature — the same reason this workflow refuses to attach an
- * unsigned build. Flip the constant when #420 closes.
- */
-const TRAY_WORKS = process.env.BUDDYVPN_TRAY === '1'
+/** DevTools are off in a shipped build, and on for whoever asks. */
+const devtools = process.env.BUDDYVPN_DEVTOOLS === '1' ? [] : ['--no-devtools']
 
-const systemTray = TRAY_WORKS && runtimeSupports('--system-tray') ? ['--system-tray'] : []
+function spawnCraft(args: string[]) {
+  return Bun.spawn([craftBinary, ...args, ...devtools], {
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+  })
+}
 
 /**
- * Closing the window stops meaning quit — but only once there is a bar icon
- * to get back from.
- *
- * Deliberately conditional on the flag above rather than passed alongside
- * it. On a runtime without a tray, `--keep-running` would leave an app with
- * no window, no icon and no way to summon either: alive, invisible, and
- * reachable only through Activity Monitor. Quitting still tears the tunnel
- * down, because that is bound to the process ending rather than to the
- * window closing.
+ * The window: the app you open, the one with the Dock icon.
  */
-const keepRunning = systemTray.length > 0 && runtimeSupports('--keep-running')
-  ? ['--keep-running']
-  : []
-
-const craft = Bun.spawn([
-  craftBinary,
+const windowProcess = spawnCraft([
   `http://127.0.0.1:${port}/`,
   '--title',
   APP_NAME,
@@ -279,23 +250,89 @@ const craft = Bun.spawn([
   ...persistentStorage,
   ...frameAutosave,
   ...appName,
-  ...systemTray,
-  ...keepRunning,
-  // A consumer VPN window: narrow enough to leave in a corner of the screen,
-  // tall enough that the button sits in the middle rather than crowding the
-  // location row under it.
   '--width',
   '380',
   '--height',
   '620',
-  ...(process.env.BUDDYVPN_DEVTOOLS === '1' ? [] : ['--no-devtools']),
-], {
-  stdin: 'inherit',
-  stdout: 'inherit',
-  stderr: 'inherit',
-})
+])
 
-const code = await craft.exited
+/**
+ * The menu bar panel.
+ *
+ * A VPN is checked far more often than it is changed, so the useful shape for
+ * the checking is a glance: click the status item, see whether you are covered
+ * and for how long, click away again. `--tray-popover` hangs a small window
+ * under the icon and macOS dismisses it when you click elsewhere.
+ *
+ * It also sidesteps the bug that made the first attempt at a menu bar
+ * unusable. Under a plain `--system-tray`, Craft hands a left click to
+ * JavaScript and it never arrives (craft-native/craft#420), so the icon could
+ * not be clicked at all. A popover is opened by AppKit before the page is
+ * involved: there is nothing to deliver and so nothing to lose.
+ *
+ * A second process rather than a second window, and that is forced rather than
+ * chosen. The flag implies `--headless` and `--hide-dock-icon`, which are
+ * properties of an application and not of one of its windows, so asking a
+ * single process for both would be asking it to drop its Dock icon and then
+ * show the window from behind it. That was the previous build, where the panel
+ * was the entire app and there was nothing left to open.
+ */
+const trayProcess = runtimeSupports('--tray-popover')
+  ? spawnCraft([
+      /*
+       * The panel is a different shape from the window and the page is told
+       * so in the URL, rather than left to infer it from the viewport: the
+       * same page is served to both, and once it is rendering, a narrow
+       * window is indistinguishable from a popover.
+       */
+      `http://127.0.0.1:${port}/?compact=1`,
+      '--tray-popover',
+      /*
+       * A popover is closed most of the time, and closing it must not be
+       * quitting. Craft infers this for a tray app; it is passed because here
+       * it is a requirement rather than a preference.
+       */
+      ...(runtimeSupports('--keep-running') ? ['--keep-running'] : []),
+      '--title',
+      APP_NAME,
+      ...appName,
+      ...persistentStorage,
+      /*
+       * The panel's closed size: a status line, the clock under it, the button
+       * and the location. It grows from the page when the settings sheet or
+       * the location picker opens, which Craft keeps hung from the icon across
+       * the resize.
+       */
+      '--width',
+      '300',
+      '--height',
+      '320',
+    ])
+  : null
+
+/**
+ * Either one ending ends the app.
+ *
+ * The two quit paths are the window's menu and the status item's, and each
+ * belongs to one process, so waiting on a particular one would leave the other
+ * half-quit: Quit from the bar would have left a window with no icon behind
+ * it, and closing the window would have left a shield in the menu bar whose
+ * panel still worked but whose app had no way back.
+ */
+const code = await Promise.race([
+  windowProcess.exited,
+  ...(trayProcess ? [trayProcess.exited] : []),
+])
+
+for (const child of [windowProcess, trayProcess]) {
+  try {
+    child?.kill()
+  }
+  catch {
+    // Already gone, which is the usual case for whichever one exited first.
+  }
+}
+
 stopAgent()
 /*
  * Waited for, not just signalled.

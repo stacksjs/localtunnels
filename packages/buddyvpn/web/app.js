@@ -77,6 +77,41 @@
     helperNote: document.querySelector('[data-helper-note]'),
   }
 
+  /*
+   * The popover is a different shape from the window, and says so.
+   *
+   * Passed in the URL rather than guessed from the viewport: the same page
+   * is served to both, and a 300-point popover and a window dragged narrow
+   * look identical from in here.
+   */
+  const compact = new URLSearchParams(window.location.search).has('compact')
+  if (compact) document.body.classList.add('compact')
+
+  /*
+   * Compact panel, closed and with the settings sheet open.
+   *
+   * `short` is measured, not chosen: it is where the bottom of the location
+   * row lands plus the body's padding under it. At 260 the row was below the
+   * panel's edge and clipped away, so the one thing the glance is for after
+   * the status — where you are leaving from — was the one thing it did not
+   * show.
+   */
+  const PANEL = { w: 300, short: 320, tall: 560 }
+
+  /*
+   * Grow for settings, shrink again after.
+   *
+   * Craft keeps a popover hung from its icon across a resize, so this is how
+   * one panel holds both a glance and a sheet full of controls without the
+   * glance being the size of the sheet.
+   */
+  const fitPanel = () => {
+    if (!compact) return
+    const height = el.settings.hidden && !picking ? PANEL.short : PANEL.tall
+    try { window.craft?.window?.setSize?.(PANEL.w, height) }
+    catch { /* No bridge, or a runtime without it: the panel keeps its size. */ }
+  }
+
   /** Last payload from the agent. Null until the first answer arrives. */
   let status = null
   /** '' | 'connecting' | 'disconnecting' — ours, not the agent's. */
@@ -347,6 +382,7 @@
      * describing a state that has since moved on.
      */
     if (!el.settings.hidden) paintSettings()
+    fitPanel()
     publish()
   }
 
@@ -660,9 +696,14 @@
    * The menu bar asks; the window does it.
    *
    * Routed through `toggle` and `choose` rather than posting on its own, so
-   * the window shows the handshake it started: posting directly would leave
+   * the panel shows the handshake it started: posting directly would leave
    * the button idle until the next poll noticed a tunnel it had not asked
    * for. `show` and `quit` never arrive here — AppKit handles both.
+   *
+   * Nothing sends these today. The menu was cut back to the two items AppKit
+   * can perform by itself while craft-native/craft#420 is open, so this is
+   * the receiving half of a pair whose other half is commented out rather
+   * than deleted: it is four lines, and writing it again is not free.
    */
   window.addEventListener('buddyvpn:tray', (event) => {
     const action = (event.detail && event.detail.action) || ''

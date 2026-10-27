@@ -452,3 +452,41 @@ select.control { cursor: default; }
   border: 1px solid var(--card-line); background: var(--card); color: var(--red);
 }
 .danger:hover { background: var(--hover); }
+
+/*
+ * Compact: the menu bar popover.
+ *
+ * A panel hanging off the status item answers one question — am I covered,
+ * and for how long — and anything past that is the window's job. So the
+ * egress block, the caption and the footer go, the location keeps its name
+ * and loses its address, and the button comes down to a size that reads as
+ * part of a panel rather than the whole of one.
+ *
+ * Applied from a class rather than a media query: the same page is served to
+ * both, and nothing about the viewport distinguishes a 300-point popover
+ * from a 300-point window somebody dragged narrow.
+ */
+body.compact .egress,
+body.compact .caption,
+body.compact .foot,
+body.compact .location-kicker,
+body.compact .location-city,
+body.compact .chevron { display: none; }
+
+body.compact .body { padding: 0 var(--space-4) var(--space-4); }
+body.compact .status-label { font-size: 17px; }
+body.compact .power { width: 96px; height: 96px; }
+/*
+ * The ring is 96px here rather than 148, and the wrap's floor was set for the
+ * big one: it reserved 170px for a button that no longer fills it, and the
+ * fifty-odd pixels of nothing under the ring pushed the location row off the
+ * bottom of the panel entirely.
+ */
+body.compact .power-wrap { margin: var(--space-3) 0; min-height: 120px; }
+body.compact .location { padding: var(--space-2) var(--space-3); }
+body.compact .location-name { font-size: 13px; }
+
+/* The clock is the reason this panel exists while connected, so it keeps its
+ * height whether or not it has something to say — a panel that changed size
+ * on connect would jump under the pointer. */
+body.compact .status-clock { height: 16px; }

@@ -100,53 +100,20 @@ export function trayTooltip(view) {
  * being the item the keyboard lands on first.
  */
 export function trayMenu(view) {
-  const regions = view.regions || []
-  const current = regions.find(entry => entry.id === view.regionId)
-  const busy = view.phase === 'connecting' || view.phase === 'disconnecting'
-
   return [
     { label: trayStatusLine(view), action: 'status', enabled: false },
     { type: 'separator' },
-    {
-      label: view.connected ? 'Disconnect' : 'Connect',
-      action: 'toggle',
-      /*
-       * Off mid-handshake, and off for a location with no server behind it.
-       * Both are states the window already refuses, and a menu that offered
-       * what the window greys out would be the easier of the two to reach.
-       */
-      enabled: !busy && (view.connected || Boolean(current && current.configured)),
-    },
-    {
-      label: 'Location',
-      action: 'location',
-      submenu: regions.map(entry => ({
-        label: entry.country,
-        action: `region:${entry.id}`,
-        type: 'radio',
-        checked: entry.id === view.regionId,
-        /*
-         * A location with nothing deployed stays listed and unselectable.
-         * Hiding it would make a half-configured install look like a smaller
-         * product rather than an unfinished one.
-         */
-        enabled: Boolean(entry.configured) && !busy,
-      })),
-    },
-    { type: 'separator' },
-    // Handled natively; neither reaches this page.
-    { label: 'Open BuddyVPN', action: 'show' },
+    // Both handled by AppKit, which is the whole reason they are the only
+    // two here. Connect and Location belonged in this menu and were removed:
+    // every item that needs the page to hear about the click is dead while
+    // craft-native/craft#420 is open, and a menu that greys nothing and does
+    // nothing is worse than a short one. They come back when it closes —
+    // until then the panel is where this app is used.
+    { label: 'Open Panel', action: 'show' },
     { label: 'Quit BuddyVPN', action: 'quit', shortcut: 'Cmd+Q' },
   ]
 }
 
-/**
- * Hand the menu to the runtime, and route what comes back.
- *
- * `craft` is passed in rather than read off `window` so a test can drive this
- * with a recording stand-in. Returns a teardown, which matters less here than
- * it would in a page that navigates — this one never does — but costs a line.
- */
 /** Attach a no-op handler to a bridge call, so a rejection is not unhandled. */
 export function quietly(result) {
   if (result && typeof result.catch === 'function')
@@ -181,12 +148,24 @@ export function startTray(craft, target) {
      */
     /*
      * Every one of these is a promise, and a runtime with no status item
-     * rejects all of them. That is a normal state — the flag that creates
-     * the item is off while craft-native/craft#420 is open — and a page
-     * that logged four unhandled rejections a second would be the louder
-     * bug of the two.
+     * rejects all of them. That is a normal state — the page is served to a
+     * browser during development, where there is no bridge at all — and a
+     * page that logged three unhandled rejections a second would be the
+     * louder bug of the two.
+     *
+     * The title is left alone, and that is not a preference.
+     *
+     * Clearing it hides the icon. The runtime positions the button's image
+     * against the button's own width, and an empty title collapses that to
+     * nothing — so `setIcon` succeeds, the image is set, and the menu bar
+     * shows an item occupying no space and drawing nothing. Order does not
+     * help: setting the icon first and clearing after produces the same
+     * empty slot, which is how this was reported twice, once as "the icon
+     * is gone" and once as a shield that had never actually been ours.
+     *
+     * So the item reads as a glyph beside the app's name. A word of menu
+     * bar is the price of an icon that is there.
      */
-    quietly(tray.setTitle && tray.setTitle(''))
     quietly(tray.setIcon(traySymbol(view)))
     quietly(tray.setTooltip(trayTooltip(view)))
     quietly(tray.setMenu(trayMenu(view)))
@@ -203,63 +182,15 @@ export function startTray(craft, target) {
   })
 
   /*
-   * A left click opens the window rather than the menu: AppKit gives the
-   * menu to the right button already, and a left click that did the same
-   * would leave no way to reach the window from the bar at all.
+   * No left-click handler. AppKit opens the popover itself and the page is
+   * never told, which is exactly why the popover works where a handler
+   * would not — see craft-native/craft#420.
    */
-  const stopClicks = tray.onClick(() => {
-    if (craft.window && craft.window.show)
-      craft.window.show()
-  })
 
   return () => {
     target.removeEventListener('buddyvpn:status', onStatus)
     if (stopActions)
       stopActions()
-    if (stopClicks)
-      stopClicks()
-  }
-}
-
-/**
- * Give the window back its left mouse button.
- *
- * `--system-tray` costs the app its activation, and the cost is not obvious
- * from the flag's name. Craft activates a windowed app like this:
- *
- *     if (self.system_tray == null and !self.headless) {
- *         macos.showAllWindows();
- *         macos.activateWindowedApp();
- *     } else if (self.headless) { ... }
- *
- * With a tray, neither branch runs — so `activateWindowedApp` is never
- * called, and that is the function which both sets the activation policy to
- * Regular and brings the app to the front. The app therefore cannot become
- * active, the window cannot become key, and macOS spends every left click
- * activating a window that never activates. Right-clicks still work, because
- * a context menu does not need a key window: which is exactly how this
- * presented — a window that looked fine, drew fine, and ignored the button.
- *
- * `showDockIcon` is the policy half and `focus` is the ordering half. Both
- * are page-reachable, so this is fixable here rather than by pinning a
- * different runtime.
- *
- * Worth deleting when Craft activates a tray app itself. Harmless until
- * then: an app the person just launched claiming the foreground is what any
- * other app does.
- */
-export function claimWindow(craft) {
-  try {
-    if (craft.app && craft.app.showDockIcon)
-      craft.app.showDockIcon()
-    if (craft.window && craft.window.focus)
-      craft.window.focus()
-    return true
-  }
-  catch {
-    /* An older runtime missing either half is still a working window; it is
-     * only this flag's window that needs the help. */
-    return false
   }
 }
 
@@ -282,7 +213,6 @@ export function bootstrapTray(win, schedule, attempts) {
 
   const attempt = () => {
     if (win && win.craft && win.craft.tray) {
-      claimWindow(win.craft)
       startTray(win.craft, win)
       return true
     }
@@ -302,6 +232,15 @@ export function bootstrapTray(win, schedule, attempts) {
   return attempt()
 }
 
-/* Importing this in a test starts nothing: there is no `window` there. */
-if (typeof window !== 'undefined')
+/*
+ * Only the panel owns the status item.
+ *
+ * The same page is served to both of the app's processes, and only the one
+ * launched with `--tray-popover` has an item in the menu bar to dress. The
+ * window's copy running this too would at best have every call rejected on a
+ * process with no status item, and at worst put a second shield up there.
+ *
+ * Importing this in a test starts nothing: there is no `window` there.
+ */
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('compact'))
   bootstrapTray(window)
