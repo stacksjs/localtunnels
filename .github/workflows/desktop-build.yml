@@ -94,22 +94,26 @@ jobs:
       - name: Install Dependencies
         run: bun install
 
-      # The image arrives with very little room, and almost all of what it
-      # holds is for building iOS apps — simulator runtimes alone are tens of
-      # gigabytes. This job builds a Mac app and needs none of it.
-      #
-      # Reclaimed because `hdiutil` wants a staging copy of the bundle and
-      # then the compressed image on top of it, and ran out part way through:
+      # Mostly here for the `df`. One release failed inside `hdiutil` with
       #
       #     hdiutil: create failed - No space left on device
+      #     could not access /Volumes/BuddyVPN 0.3.0/… - No space left on device
       #
-      # after signing had already succeeded, which is the expensive place to
-      # discover it — the notarization that follows is the slow step, and
-      # everything before it had to be redone.
+      # after the signing had already succeeded, and this step was written on
+      # the assumption that the runner was full of simulator runtimes a Mac
+      # build does not need. The next run says otherwise: 95Gi free before,
+      # 95Gi free after, nothing reclaimed, and the failure did not recur.
       #
-      # `df` on both sides so the next person to hit this can see what was
-      # actually available rather than inferring it from a failure.
-      - name: Make room for the disk image
+      # So the cause is not known. The error naming a path *inside* the image
+      # points at `hdiutil` undersizing what it builds from `-srcfolder`,
+      # which gives ENOSPC in the temporary volume however much room the host
+      # has — in which case no amount of cleaning helps and the fix is an
+      # explicit `-size`. Left in place because it costs a second and would
+      # matter on a tighter image, but it is insurance, not a diagnosis.
+      #
+      # The `df` either side is the part worth keeping: if this returns, the
+      # numbers say immediately which of the two it is.
+      - name: Report free space, and reclaim what a Mac build cannot use
         run: |
           echo "Before:"
           df -h / | tail -1
