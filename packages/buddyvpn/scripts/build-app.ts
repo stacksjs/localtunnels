@@ -294,7 +294,52 @@ fs.cpSync(APP_DIR, path.join(stage, `${APP_NAME}.app`), { recursive: true, verba
 fs.symlinkSync('/Applications', path.join(stage, 'Applications'))
 
 const dmg = path.join(OUT_DIR, `BuddyVPN-${APP_VERSION}.dmg`)
-run('hdiutil', ['create', '-volname', `${APP_NAME} ${APP_VERSION}`, '-srcfolder', stage, '-ov', '-format', 'UDZO', dmg])
+
+/*
+ * The volume is sized here, and its filesystem named, rather than left to
+ * hdiutil.
+ *
+ * A release and a rebuild both died on this line with
+ *
+ *     hdiutil: create failed - No space left on device
+ *     could not access /Volumes/BuddyVPN 0.3.0/… - No space left on device
+ *
+ * on a runner reporting 95Gi free, which is the whole tell: the disk that
+ * ran out is the one hdiutil had just made. Left alone it measures
+ * `-srcfolder`, formats a volume that size and then copies into it — and a
+ * volume holds less than the sum of its files, because its own directory and
+ * allocation metadata live there too. The estimate is close enough to pass
+ * on one machine and short on another, which is exactly how this behaved: it
+ * builds here and has now failed twice on the arm64 runner.
+ *
+ * So the volume is asked for with room to spare. `-format UDZO` compresses
+ * the result, so the slack is not in the file anyone downloads.
+ */
+const measured = spawnSync('du', ['-sk', stage], { encoding: 'utf8' })
+const stagedKb = Number.parseInt(String(measured.stdout).trim().split(/\s+/)[0], 10)
+if (measured.status !== 0 || !Number.isFinite(stagedKb) || stagedKb <= 0)
+  throw new Error(`could not measure ${stage} to size the disk image`)
+
+run('hdiutil', [
+  'create',
+  '-volname',
+  `${APP_NAME} ${APP_VERSION}`,
+  '-srcfolder',
+  stage,
+  /*
+   * Named rather than defaulted: the default has changed with the OS, and an
+   * APFS volume reserves more of itself than this image has slack for. HFS+
+   * is what a distribution image has always been.
+   */
+  '-fs',
+  'HFS+',
+  '-size',
+  `${Math.ceil(stagedKb * 1.3) + 64 * 1024}k`,
+  '-ov',
+  '-format',
+  'UDZO',
+  dmg,
+])
 fs.rmSync(stage, { recursive: true, force: true })
 
 /*
