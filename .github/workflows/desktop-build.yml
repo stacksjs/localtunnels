@@ -1,0 +1,200 @@
+name: Desktop build
+
+# The BuddyVPN installer: built, signed with the Developer ID, notarized,
+# stapled, verified, and attached to a release.
+#
+# Called rather than triggered. The Releaser workflow calls it on a tag; the
+# Desktop installer workflow calls it from a manual dispatch, which is how an
+# installer gets rebuilt without minting a version — the case that came up the
+# day this was written, when four releases in a row got as far as signing and
+# failed on things that had nothing to do with the app.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: What to build. Empty means the ref the caller runs at.
+        type: string
+        required: false
+        default: ''
+      release_tag:
+        description: Release to attach the installer to. Empty builds without publishing.
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  installer:
+    name: BuddyVPN installer
+    runs-on: macos-26
+
+    permissions:
+      contents: write
+
+    steps:
+      # `ref` is empty on a tag release, where the workflow already runs at
+      # the tag. A dispatch names what to build — usually a tag whose
+      # installer needs rebuilding after an infrastructure failure, which is
+      # the case this workflow exists for.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      # Every Apple credential this job needs lives encrypted in the committed
+      # .env.production. The only thing GitHub holds is the key that opens it,
+      # so adding a credential later is a commit rather than another secret,
+      # and the set of them can be read from the repository.
+      #
+      # Run through npx rather than bun: bun arrives with Pantry, and the
+      # certificate has to be in hand before Pantry runs. Pinned for the same
+      # reason the action below is — a release pipeline that changes under you
+      # is one that cannot be bisected when it breaks.
+      #
+      # Each value is masked as it is exported. GitHub redacts its own secrets
+      # from logs automatically, but a value that arrives by decryption is not
+      # one it knows about, and would otherwise print in full from any step
+      # that echoed it. The team id and the identity name are left unmasked:
+      # both are public — they are carried in every signed binary — and
+      # reading them in a log is worth more than hiding them.
+      - name: Decrypt the release credentials
+        env:
+          DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
+        run: |
+          npx --yes @dotenvx/dotenvx@2.38.2 decrypt -f .env.production --stdout > "$RUNNER_TEMP/release.env"
+          while IFS= read -r line; do
+            case "$line" in
+              APPLE_*=*|DEVELOPER_ID_*=*|DESKTOP_*=*) ;;
+              *) continue ;;
+            esac
+            key=${line%%=*}
+            value=${line#*=}
+            value=${value%\"}
+            value=${value#\"}
+            case "$key" in
+              APPLE_TEAM_ID|DESKTOP_SIGNING_IDENTITY_NAME) ;;
+              *) printf '::add-mask::%s\n' "$value" ;;
+            esac
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done < "$RUNNER_TEMP/release.env"
+          rm -f "$RUNNER_TEMP/release.env"
+
+      # Brings in what deps.yaml declares — the Craft runtime the window is
+      # drawn in, and Zig for the native core that goes in the bundle beside
+      # the CLI — and imports the Developer ID identity into an ephemeral
+      # keychain that its post step removes even if the job is cancelled.
+      - name: Setup Pantry
+        uses: pantry-pm/pantry/packages/action@v0.11.74
+        with:
+          apple-signing: 'true'
+          apple-signing-application-certificate: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          apple-signing-certificate-password: ${{ env.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install Dependencies
+        run: bun install
+
+      # The image arrives with very little room, and almost all of what it
+      # holds is for building iOS apps — simulator runtimes alone are tens of
+      # gigabytes. This job builds a Mac app and needs none of it.
+      #
+      # Reclaimed because `hdiutil` wants a staging copy of the bundle and
+      # then the compressed image on top of it, and ran out part way through:
+      #
+      #     hdiutil: create failed - No space left on device
+      #
+      # after signing had already succeeded, which is the expensive place to
+      # discover it — the notarization that follows is the slow step, and
+      # everything before it had to be redone.
+      #
+      # `df` on both sides so the next person to hit this can see what was
+      # actually available rather than inferring it from a failure.
+      - name: Make room for the disk image
+        run: |
+          echo "Before:"
+          df -h / | tail -1
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator/Caches || true
+          sudo rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport || true
+          sudo rm -rf ~/Library/Caches/Homebrew || true
+          echo "After:"
+          df -h / | tail -1
+
+      # The bundle ships its own libltvpn.dylib: the CLI resolves the library
+      # next to its own executable, so a bundle without it is an app whose
+      # every VPN command fails on launch.
+      - name: Build the native core
+        run: bun run build:native
+
+      # A keychain profile notarytool can be pointed at by name, so the
+      # app-specific password never reaches a command line that `ps` would
+      # show to every process on the runner.
+      - name: Store notary credentials
+        run: |
+          xcrun notarytool store-credentials buddyvpn \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+
+      # Signs with the Developer ID, images the .dmg, submits it to Apple and
+      # staples the ticket. Stapling rewrites the file, so nothing may read or
+      # upload it before this finishes.
+      - name: Build, sign and notarize
+        run: bun run build:app
+        env:
+          DESKTOP_SIGNING_IDENTITY: ${{ env.DESKTOP_SIGNING_IDENTITY_NAME }}
+          NOTARY_PROFILE: buddyvpn
+
+      # Resolved to an exact path, and checked.
+      #
+      # The filename carries the version, which `bun run release` bumps across
+      # every workspace package, so a literal path would go stale at the next
+      # release. A glob would fix that only if the upload action expands one —
+      # and if it does not, it sees a path matching no file and treats that as
+      # nothing to upload, passing green having attached no installer at all.
+      # That exact failure shipped two releases of the system-cleaner app.
+      #
+      # So the path is found here, where a missing file is an error rather
+      # than a silently empty upload.
+      - name: Locate the installer
+        id: dmg
+        run: |
+          path=$(ls packages/buddyvpn/dist/*.dmg 2>/dev/null | head -1)
+          if [ -z "$path" ]; then
+            echo "::error::build:app produced no .dmg"
+            exit 1
+          fi
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "Attaching $path ($(du -h "$path" | cut -f1))"
+
+      # Verified before it is published, not after. A DMG that fails this is
+      # one Gatekeeper will refuse on arrival, and finding that out from a
+      # user is finding it out too late.
+      - name: Check it is signed, notarized and stapled
+        run: |
+          codesign --verify --deep --strict --verbose=2 "${{ steps.dmg.outputs.path }}"
+          spctl --assess --type open --context context:primary-signature -v "${{ steps.dmg.outputs.path }}"
+          xcrun stapler validate "${{ steps.dmg.outputs.path }}"
+
+      # Only when a release was named. A dispatch that names none is a
+      # rehearsal — it proves the pipeline and leaves the installer as an
+      # artifact, rather than publishing something nobody asked for.
+      - name: Attach the installer to the release
+        if: ${{ inputs.release_tag != '' }}
+        uses: stacksjs/action-releaser@v1.2.9
+        with:
+          files: ${{ steps.dmg.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Kept either way, and the only output of a rehearsal. Also the copy to
+      # reach for when a release attached the wrong thing: this one is exactly
+      # what was verified a step above.
+      - name: Keep the installer as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyVPN-installer
+          path: ${{ steps.dmg.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14

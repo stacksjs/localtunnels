@@ -1,0 +1,37 @@
+name: Desktop installer
+
+# Build the BuddyVPN installer without cutting a release.
+#
+# The Releaser builds it on a tag, which is right for the normal case and
+# wrong for every other one: a tag publishes to npm, and npm refuses a
+# version it already has, so a release whose installer failed cannot simply
+# be run again. Four attempts in a row got as far as signing and fell over on
+# a dependency spec, a type error, a missing entitlements file and a full
+# disk — none of them the app — and by the last of them the version was spent.
+#
+# So this exists to rebuild and re-sign on demand: for a tag whose installer
+# needs replacing, or to rehearse the pipeline without publishing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag, branch or SHA to build. Blank builds the default branch.
+        type: string
+        required: false
+        default: ''
+      release_tag:
+        description: Release to attach it to, e.g. v0.3.0. Blank builds without publishing.
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  installer:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ inputs.ref }}
+      release_tag: ${{ inputs.release_tag }}
+    secrets: inherit
