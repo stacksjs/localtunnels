@@ -240,7 +240,11 @@ export function bootstrapTray(win, schedule, attempts) {
  * window's copy running this too would at best have every call rejected on a
  * process with no status item, and at worst put a second shield up there.
  *
- * Importing this in a test starts nothing: there is no `window` there.
+ * `window.location` is read for a `window` that has one rather than for any
+ * `window` at all, because a test file elsewhere in the suite leaves a stub
+ * global behind and importing this module threw on it — which failed the
+ * whole file, and took the file after it down too.
  */
-if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('compact'))
-  bootstrapTray(window)
+const trayHost = typeof window !== 'undefined' && window.location ? window : null
+if (trayHost && new URLSearchParams(trayHost.location.search).has('compact'))
+  bootstrapTray(trayHost)
