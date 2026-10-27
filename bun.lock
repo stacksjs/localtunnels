@@ -14,14 +14,14 @@
     },
     "packages/buddyvpn": {
       "name": "@localtunnels/buddyvpn",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "uqr": "^0.1.2",
       },
     },
     "packages/buddyvpn-mobile": {
       "name": "@localtunnels/buddyvpn-mobile",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "devDependencies": {
         "@stacksjs/stx": "0.2.518",
         "craft-native": "0.0.173",
@@ -29,7 +29,7 @@
     },
     "packages/localtunnels": {
       "name": "localtunnels",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "bin": {
         "localtunnel": "./dist/bin/cli.js",
         "lt": "./dist/bin/cli.js",
@@ -46,7 +46,7 @@
     },
     "packages/vpn-core": {
       "name": "@localtunnels/vpn-core",
-      "version": "0.3.0",
+      "version": "0.3.1",
     },
   },
   "overrides": {

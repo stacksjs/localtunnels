@@ -19,14 +19,14 @@
     },
     "packages/buddyvpn": {
       "name": "@localtunnels/buddyvpn",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "uqr": "^0.1.2"
       }
     },
     "packages/buddyvpn-mobile": {
       "name": "@localtunnels/buddyvpn-mobile",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "devDependencies": {
         "@stacksjs/stx": "0.2.518",
         "craft-native": "0.0.173"
@@ -34,7 +34,7 @@
     },
     "packages/localtunnels": {
       "name": "localtunnels",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
         "bunfig": "^0.15.6"
       },
@@ -47,7 +47,7 @@
     },
     "packages/vpn-core": {
       "name": "@localtunnels/vpn-core",
-      "version": "0.3.0"
+      "version": "0.3.1"
     }
   },
   "packages": {
@@ -71,7 +71,9 @@
       "bin": {
         "bunpress": "./dist/bin/cli.js"
       },
-      "optionalPeers": ["@stacksjs/ts-cloud"]
+      "optionalPeers": [
+        "@stacksjs/ts-cloud"
+      ]
     },
     "@stacksjs/clapp@0.2.16": {
       "name": "@stacksjs/clapp",

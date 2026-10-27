@@ -1,5 +1,35 @@
 # Changelog
 
+[Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.3.0...v0.3.1)
+
+## ✨ Features
+
+- **buddyvpn**: a menu bar panel beside the window ([6f574cf](https://github.com/stacksjs/localtunnels/commit/6f574cf)) _(by glennmichael123 <gtorregosa@gmail.com>)_ ([#420](https://github.com/stacksjs/localtunnels/issues/420))
+
+## 🐛 Bug Fixes
+
+- **buddyvpn**: do not read location off a window that has none ([e320f26](https://github.com/stacksjs/localtunnels/commit/e320f26)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+- **buddyvpn**: size the disk image instead of letting hdiutil guess ([00baf5f](https://github.com/stacksjs/localtunnels/commit/00baf5f)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+- **release**: make room for the disk image before building it ([fa27ad8](https://github.com/stacksjs/localtunnels/commit/fa27ad8)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+
+## 📝 Documentation
+
+- **ci**: the disk step did not fix what it claimed to ([addc47b](https://github.com/stacksjs/localtunnels/commit/addc47b)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+
+## 💚 Continuous Integration
+
+- build the installer on demand, not only on a tag ([acb4f99](https://github.com/stacksjs/localtunnels/commit/acb4f99)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+
+## 🔧 Chores
+
+- release v0.3.1 ([d2bb9d8](https://github.com/stacksjs/localtunnels/commit/d2bb9d8)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+- **deps**: pin the craft runtime that has --tray-popover ([0663fe2](https://github.com/stacksjs/localtunnels/commit/0663fe2)) _(by glennmichael123 <gtorregosa@gmail.com>)_ ([#420](https://github.com/stacksjs/localtunnels/issues/420))
+- record the 0.3.0 workspace versions in the lockfile ([8941b25](https://github.com/stacksjs/localtunnels/commit/8941b25)) _(by glennmichael123 <gtorregosa@gmail.com>)_
+
+## Contributors
+
+- _glennmichael123 <gtorregosa@gmail.com>_
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.2.12...v0.2.13)
 
 ## v0.2.13...main

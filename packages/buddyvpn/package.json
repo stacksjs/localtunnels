@@ -1,7 +1,7 @@
 {
   "name": "@localtunnels/buddyvpn",
   "type": "module",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "BuddyVPN — the localtunnels VPN, as a macOS app.",
   "license": "MIT",
