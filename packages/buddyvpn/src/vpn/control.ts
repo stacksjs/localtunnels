@@ -57,9 +57,27 @@ export interface ServerEntry {
 
 export type ServerMap = Record<string, ServerEntry>
 
-/** `~/Library/Application Support/BuddyVPN`. */
+/**
+ * `~/Library/Application Support/BuddyVPN`, or wherever this run was pointed.
+ *
+ * The override is here so that something can exercise this module without
+ * being handed the running app's state. Everything under this directory —
+ * the server list, the recorded pid, the staged auth key — is what tells
+ * `connect` there is a tunnel to start and `disconnect` that there is one to
+ * stop, so code reading the real directory is code operating the real VPN.
+ * A test did exactly that: it called `disconnect()` to check that the cached
+ * location is cleared, found the developer's own tunnel through the pid file
+ * and took it down as root, five seconds at a time.
+ *
+ * It grants nothing. Whoever can set this already runs as the user who owns
+ * the directory and could edit `servers.json` in place instead; the privilege
+ * boundary is the helper, which validates what it is given and is unaffected
+ * by where the caller read it from. `LOCALTUNNELS_HOME` and
+ * `LOCALTUNNELS_BIN` in `core.ts` are the same idea for the CLI.
+ */
 export function appSupportDir(): string {
-  return path.join(os.homedir(), 'Library/Application Support', 'BuddyVPN')
+  return process.env.BUDDYVPN_SUPPORT_DIR
+    || path.join(os.homedir(), 'Library/Application Support', 'BuddyVPN')
 }
 
 /**
