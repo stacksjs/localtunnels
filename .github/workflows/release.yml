@@ -41,7 +41,7 @@ jobs:
       # job has ever used. Bun is installed either way, Zig has its own step
       # below, and the npm half of the tree is `bun install`.
       - name: Setup Pantry
-        uses: pantry-pm/pantry/packages/action@v0.11.74
+        uses: pantry-pm/pantry/packages/action@v0.11.152
         with:
           install: 'false'
 
@@ -77,7 +77,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
-        uses: stacksjs/action-releaser@v1.2.9
+        uses: stacksjs/action-releaser@v1.2.11
         with:
           files: |
             bin/localtunnels-linux-x64.zip
