@@ -85,7 +85,7 @@ jobs:
       # the CLI — and imports the Developer ID identity into an ephemeral
       # keychain that its post step removes even if the job is cancelled.
       - name: Setup Pantry
-        uses: pantry-pm/pantry/packages/action@v0.11.74
+        uses: pantry-pm/pantry/packages/action@v0.11.152
         with:
           apple-signing: 'true'
           apple-signing-application-certificate: ${{ env.DEVELOPER_ID_CERTIFICATE_BASE64 }}
@@ -186,7 +186,7 @@ jobs:
       # artifact, rather than publishing something nobody asked for.
       - name: Attach the installer to the release
         if: ${{ inputs.release_tag != '' }}
-        uses: stacksjs/action-releaser@v1.2.9
+        uses: stacksjs/action-releaser@v1.2.11
         with:
           files: ${{ steps.dmg.outputs.path }}
         env:
