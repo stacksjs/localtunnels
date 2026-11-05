@@ -37,7 +37,7 @@ jobs:
       # installer needs rebuilding after an infrastructure failure, which is
       # the case this workflow exists for.
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
