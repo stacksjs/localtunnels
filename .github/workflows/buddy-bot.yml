@@ -115,7 +115,7 @@ jobs:
     if: ${{ needs.plan.outputs.check == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history: rebasing a PR branch needs the commits it is being
           # rebased onto.
@@ -153,7 +153,7 @@ jobs:
     if: ${{ needs.plan.outputs.update == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: true
@@ -186,7 +186,7 @@ jobs:
     if: ${{ needs.plan.outputs.dashboard == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2.1.3
 
