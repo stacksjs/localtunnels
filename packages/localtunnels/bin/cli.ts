@@ -862,7 +862,7 @@ async function runCmd(cmd: string[]): Promise<void> {
 
 cli
   .command('vpn:up', 'Bring up a layer-3 VPN interface (client or server) on the localtunnels datapath (needs root)')
-  .option('--listen <port>', 'Local UDP port', { default: '51820' })
+  .option('--listen <port>', 'Local UDP port (0 picks an ephemeral port)', { default: '51820' })
   .option('--address <cidr>', 'This node\'s tunnel address, e.g. 10.8.0.1/24', { default: '100.100.0.1/24' })
   .option('--peer <pubkey>', 'Base64 public key of a peer to authorize')
   .option('--allowed-ips <cidrs>', 'Comma-separated CIDRs routed to --peer (client default 0.0.0.0/0)')
@@ -886,7 +886,9 @@ cli
       const { encodeKey } = await import('../src/vpn/keys')
 
       const identity = loadOrCreateIdentity()
-      const listenPort = Number.parseInt(options.listen) || 51820
+      const listenPort = Number(options.listen)
+      if (!Number.isInteger(listenPort) || listenPort < 0 || listenPort > 65535)
+        throw new Error('--listen must be a UDP port from 0 to 65535')
       const mtu = Number.parseInt(options.mtu) || 1420
       const viaCoordinator = !!options.coordinator
       const isClient = !!options.endpoint
@@ -987,8 +989,8 @@ cli
           let coordinator: { ip: string, port: number } | null = null
           if (options.coordinator) {
             coordinator = await resolveCoordinator(options.coordinator)
-            if (!coordinator && options.killSwitch)
-              throw new Error(`the coordinator address ${options.coordinator} could not be resolved, and the kill switch would cut this tunnel off from it within two minutes`)
+            if (!coordinator)
+              throw new Error(`the coordinator address ${options.coordinator} could not be resolved for the VPN route`)
           }
           await captureTraffic({
             tun,
@@ -1272,10 +1274,7 @@ cli
         return
       }
 
-      // The record is cleared either way, so a command that can never succeed
-      // does not make this unrunnable forever. Say what is left.
-      console.error(`\n  ${failed.length} step(s) could not be undone. If this machine still has no network,`)
-      console.error('  the rules above are what to remove by hand.\n')
+      console.error(`\n  ${failed.length} step(s) could not be undone and were saved for another attempt.\n`)
       process.exit(1)
     }
     catch (error: any) {

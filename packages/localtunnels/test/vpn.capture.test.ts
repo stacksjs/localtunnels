@@ -3,6 +3,7 @@ import {
   parseCoordinatorUrl,
   parseDnsServers,
   parseGateway,
+  routePin,
   parseIpv6Setting,
   parseNetworkServices,
   readRestore,
@@ -48,6 +49,22 @@ describe('resolveCoordinator', () => {
    */
   it('reports a name it cannot resolve as unresolved', async () => {
     expect(await resolveCoordinator('ws://coordinator.invalid:51821')).toBeNull()
+  })
+})
+
+describe('routePin', () => {
+  it('leaves direct and existing static host routes in place', () => {
+    const direct = 'interface: bridge100\nflags: <UP,HOST,DONE,LLINFO,WASCLONED>'
+    const staticHost = 'gateway: 192.168.0.1\ninterface: en0\nflags: <UP,GATEWAY,HOST,STATIC>'
+    expect(routePin('192.168.64.2', direct)).toBeNull()
+    expect(routePin('203.0.113.9', staticHost)).toBeNull()
+  })
+
+  it('pins routed addresses using their current gateway and interface', () => {
+    const mac = 'gateway: 192.168.0.1\ninterface: en0\nflags: <UP,GATEWAY,HOST,DONE,WASCLONED>'
+    const linux = '203.0.113.9 via 192.168.0.1 dev eth0 src 192.168.0.10'
+    expect(routePin('203.0.113.9', mac)).toEqual({ address: '203.0.113.9', gateway: '192.168.0.1', iface: 'en0' })
+    expect(routePin('203.0.113.9', linux)).toEqual({ address: '203.0.113.9', gateway: '192.168.0.1', iface: 'eth0' })
   })
 })
 

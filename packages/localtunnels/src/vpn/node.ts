@@ -62,10 +62,9 @@ export interface VpnNodeEvents {
  * discovers other members, and automatically establishes encrypted links to
  * them — no manual key or endpoint exchange.
  *
- * To avoid both sides dialing at once, the node with the lexicographically
- * smaller public key initiates; the other waits for the handshake. The
- * datapath's handshake retransmit absorbs the race where a peer learns of the
- * initiator a moment after the first initiation arrives.
+ * The node with the smaller public key dials first. Its peer gives it a head
+ * start, then dials too if no handshake arrived. This lets a restarted node
+ * recover even when an older peer still believes the previous session is live.
  */
 export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   readonly peer: VpnPeer
@@ -76,6 +75,8 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   private readonly listenPort: number
   private readonly linked = new Set<string>()
   private readonly connecting = new Set<string>()
+  private directory = new Map<string, PeerRecord>()
+  private readonly fallbackDials = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly relayPolicy: 'auto' | 'always' | 'never'
   private readonly authKey?: string
   private readonly exitNode: boolean
@@ -102,6 +103,7 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   async start(): Promise<{ assignedIp: string, network: string }> {
     this.peer.on('link', (link) => {
       this.linked.add(link.peerPublicKey)
+      this.cancelFallback(link.peerPublicKey)
       this.connecting.delete(link.peerPublicKey)
       this.emit('link', { peerPublicKey: link.peerPublicKey })
     })
@@ -141,17 +143,42 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
   }
 
   private onPeers(records: PeerRecord[]): void {
+    const directory = new Map(records.map(record => [record.publicKey, record]))
+    for (const key of this.directory.keys()) {
+      if (!directory.has(key)) {
+        this.linked.delete(key)
+        this.cancelFallback(key)
+      }
+    }
+    this.directory = directory
     this.emit('peers', records)
     for (const rec of records) {
-      this.peer.addPeer({ publicKey: decodeKey(rec.publicKey), endpoint: rec.endpoint })
-
-      const shouldInitiate = this.publicKeyB64 < rec.publicKey
-      if (!shouldInitiate || this.linked.has(rec.publicKey) || this.connecting.has(rec.publicKey))
+      const key = rec.publicKey
+      this.peer.addPeer({ publicKey: decodeKey(key), endpoint: rec.endpoint })
+      if (this.linked.has(key) || this.connecting.has(key))
         continue
 
-      this.connecting.add(rec.publicKey)
-      this.dial(rec)
+      if (this.publicKeyB64 < key) {
+        this.connecting.add(key)
+        this.dial(rec)
+      }
+      else if (!this.fallbackDials.has(key)) {
+        const timer = setTimeout(() => {
+          this.fallbackDials.delete(key)
+          const current = this.directory.get(key)
+          if (current && !this.linked.has(key) && !this.connecting.has(key)) {
+            this.connecting.add(key)
+            this.dial(current)
+          }
+        }, 750)
+        this.fallbackDials.set(key, timer)
+      }
     }
+  }
+
+  private cancelFallback(key: string): void {
+    clearTimeout(this.fallbackDials.get(key))
+    this.fallbackDials.delete(key)
   }
 
   private dial(rec: PeerRecord): void {
@@ -189,5 +216,8 @@ export class VpnNode extends TypedEventEmitter<VpnNodeEvents> {
     this.peer.stop()
     this.linked.clear()
     this.connecting.clear()
+    this.directory.clear()
+    for (const key of this.fallbackDials.keys())
+      this.cancelFallback(key)
   }
 }

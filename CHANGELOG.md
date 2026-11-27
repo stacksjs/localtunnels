@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.2
+
+- Restarted VPN nodes establish a fresh encrypted session even when an older peer still holds the previous session.
+- Full-tunnel routing preserves the existing paths to the exit and coordinator. Disconnect retries network settings that could not be restored.
+- VPN clients can request an ephemeral UDP port with `--listen 0`.
+
 [Compare changes](https://github.com/stacksjs/localtunnels/compare/v0.3.0...v0.3.1)
 
 ## ✨ Features

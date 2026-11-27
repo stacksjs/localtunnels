@@ -14,7 +14,13 @@ const darwin = process.platform === 'darwin'
 const flat = (commands: string[][]) => commands.map(c => c.join(' '))
 
 describe('defaultRouteCommands', () => {
-  const config = { tun: 'utun7', endpointIp: '203.0.113.9', gateway: '192.168.1.1', wanInterface: 'eth0' }
+  const config = {
+    tun: 'utun7',
+    bypass: [
+      { address: '203.0.113.9', gateway: '192.168.1.1', iface: 'eth0' },
+      { address: '198.51.100.2', gateway: '172.16.0.1', iface: 'eth1' },
+    ],
+  }
   const { up, down } = defaultRouteCommands(config)
 
   it('captures everything with two halves rather than one default', () => {
@@ -40,6 +46,7 @@ describe('defaultRouteCommands', () => {
     const capture = text.findIndex(line => line.includes('0.0.0.0/1'))
     expect(hole).toBeGreaterThanOrEqual(0)
     expect(hole).toBeLessThan(capture)
+    expect(text.slice(0, capture).some(line => line.includes('198.51.100.2') && line.includes('172.16.0.1'))).toBe(true)
   })
 
   it('fills the hole only after releasing the capture', () => {
@@ -62,9 +69,9 @@ describe('defaultRouteCommands', () => {
 describe('dnsCommands', () => {
   it('points the resolver at the tunnel and restores what was there', () => {
     if (!darwin) {
-      const { up, down } = dnsCommands({ servers: ['100.100.0.1'] })
-      expect(flat(up).join('\n')).toContain('nameserver 100.100.0.1')
-      expect(flat(down).join('\n')).toContain('/etc/resolv.conf')
+      const { up, down } = dnsCommands({ servers: ['100.100.0.1', '100.100.0.2'] })
+      expect(flat(up).join('\n')).toContain('nameserver 100.100.0.1\nnameserver 100.100.0.2\n')
+      expect(flat(down).join('\n')).toContain('cat /etc/resolv.conf.localtunnels > /etc/resolv.conf')
       return
     }
 

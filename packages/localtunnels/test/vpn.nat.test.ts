@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { generateKeyPair, isVpnAvailable, VpnCoordinator, VpnNode, VpnPeer } from '../src/vpn'
+import { encodeKey, generateKeyPair, isVpnAvailable, VpnCoordinator, VpnNode, VpnPeer } from '../src/vpn'
 
 const available = isVpnAvailable()
 const describeVpn = available ? describe : describe.skip
@@ -104,4 +104,47 @@ describeVpn('vpn/nat-traversal', () => {
     }, 6000)
     expect(atBob).toContain('through-nat')
   }, 10_000)
+
+  it('reconnects with the same key when the other peer still holds the old session', async () => {
+    coordinator = new VpnCoordinator({ host: '127.0.0.1', port: 0 })
+    coordinator.start()
+    const coordinatorUrl = `ws://127.0.0.1:${coordinator.port}`
+    const keys = [generateKeyPair(), generateKeyPair()].sort((a, b) =>
+      encodeKey(a.publicKey) < encodeKey(b.publicKey) ? -1 : 1)
+    const existing = new VpnNode({ keyPair: keys[0], coordinatorUrl, relay: 'never' })
+    const first = new VpnNode({ keyPair: keys[1], coordinatorUrl, relay: 'never' })
+    nodes.push(existing, first)
+
+    let keepOldSession = false
+    const dial = existing.peer.connect.bind(existing.peer)
+    // An older peer suppresses new outbound handshakes for keys it has linked
+    // before, but still responds to incoming initiations with a fresh session.
+    existing.peer.connect = (...args) => keepOldSession
+      ? Promise.reject(new Error('Existing peer keeps its previous session'))
+      : dial(...args)
+    existing.on('error', () => {})
+    first.on('error', () => {})
+
+    await existing.start()
+    let firstLinked = false
+    first.on('link', () => { firstLinked = true })
+    const initial = await first.start()
+    await until(() => firstLinked)
+    keepOldSession = true
+    first.stop()
+
+    const replacement = new VpnNode({ keyPair: keys[1], coordinatorUrl })
+    nodes.push(replacement)
+    replacement.on('error', () => {})
+    let relinked = false
+    replacement.on('link', () => { relinked = true })
+    const received: string[] = []
+    existing.on('message', bytes => received.push(new TextDecoder().decode(bytes)))
+    const rejoined = await replacement.start()
+    expect(rejoined.assignedIp).toBe(initial.assignedIp)
+    await until(() => relinked, 2500)
+    replacement.send(existing.publicKeyB64, new TextEncoder().encode('reconnected'))
+    await until(() => received.includes('reconnected'))
+  })
+
 })

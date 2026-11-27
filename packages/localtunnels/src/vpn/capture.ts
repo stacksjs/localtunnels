@@ -26,6 +26,7 @@ import {
   ipv6Commands,
   killSwitchCommands,
   type Reversible,
+  type RoutePin,
 } from './fulltunnel'
 
 export interface CaptureOptions {
@@ -121,8 +122,8 @@ export async function runCommand(command: string[]): Promise<RunResult> {
 }
 
 /**
- * The physical default gateway, parsed from `route -n get default` (macOS) or
- * `ip route show default` (Linux).
+ * The gateway and interface chosen by the current routing table on macOS or
+ * Linux. A directly attached destination has no gateway.
  *
  * Split from the command so the parsing is testable — the output format is
  * the kind of thing that changes between releases and is never noticed until
@@ -137,27 +138,41 @@ export function parseGateway(output: string): { gateway: string, iface: string |
   }
 
   // Linux: `default via 192.168.1.1 dev eth0 ...`
-  const linux = output.match(/default\s+via\s+(\S+)(?:\s+dev\s+(\S+))?/)
+  const linux = output.match(/^\S+\s+via\s+(\S+)(?:\s+dev\s+(\S+))?/m)
   if (linux)
     return { gateway: linux[1], iface: linux[2] ?? null }
 
   return null
 }
 
-export async function discoverGateway(): Promise<{ gateway: string, iface: string | null } | null> {
-  const command = process.platform === 'darwin'
-    ? ['route', '-n', 'get', 'default']
-    : ['ip', 'route', 'show', 'default']
-
-  try {
-    const proc = Bun.spawn(command, { stdout: 'pipe', stderr: 'pipe' })
-    const output = await new Response(proc.stdout).text()
-    await proc.exited
-    return parseGateway(output)
-  }
-  catch {
+/** Existing direct and static host routes already outrank the tunnel. */
+export function routePin(address: string, route: string): RoutePin | null {
+  const flags = route.match(/^\s*flags:\s*<([^>]+)>/m)?.[1].split(',')
+  if (flags?.includes('HOST') && !flags.includes('WASCLONED'))
     return null
+  const parsed = parseGateway(route)
+  if (!parsed)
+    return null
+  return { address, gateway: parsed.gateway, iface: parsed.iface ?? undefined }
+}
+
+async function discoverRoutePins(addresses: string[]): Promise<RoutePin[]> {
+  const pins: RoutePin[] = []
+  for (const address of new Set(addresses)) {
+    // Full-tunnel routes capture IPv4. Existing IPv6 paths remain separate.
+    if (!net.isIPv4(address))
+      continue
+    const mac = process.platform === 'darwin'
+    const route = await readCommand(mac ? ['route', '-n', 'get', address] : ['ip', '-4', 'route', 'get', address])
+    if (!route)
+      throw new Error(`No existing network route to ${address}`)
+    if (!mac && await readCommand(['ip', '-4', 'route', 'show', 'exact', `${address}/32`]))
+      continue
+    const pin = routePin(address, route)
+    if (pin)
+      pins.push(pin)
   }
+  return pins
 }
 
 /**
@@ -264,17 +279,11 @@ export async function discoverIpv6Services(): Promise<Ipv6Service[]> {
  * tunnel while the window says otherwise.
  */
 export async function captureTraffic(options: CaptureOptions): Promise<void> {
-  const route = await discoverGateway()
-  if (!route)
-    throw new Error('Could not find the default gateway, so the tunnel has nothing to pin its own packets to')
+  const { endpointIp, coordinatorIp } = options
+  const bypass = await discoverRoutePins(coordinatorIp ? [endpointIp, coordinatorIp] : [endpointIp])
 
   const parts: Reversible[] = [
-    defaultRouteCommands({
-      tun: options.tun,
-      endpointIp: options.endpointIp,
-      gateway: route.gateway,
-      wanInterface: route.iface ?? undefined,
-    }),
+    defaultRouteCommands({ tun: options.tun, bypass }),
     dnsCommands({ servers: options.dnsServers, services: await discoverDnsServices() }),
   ]
 
@@ -435,17 +444,25 @@ export function clearRestore(): void {
 }
 
 /**
- * Undo whatever the last capture did, including one from a process that is
- * no longer running.
- *
- * Every failure is swallowed: this runs against a machine that may have none
- * of the changes, some of them, or all of them, and stopping at the first
- * command that finds nothing to undo would leave the rest in place.
+ * Undo the saved changes, including after the VPN process has exited. macOS
+ * already removes routes bound to an interface when the interface goes away.
  */
 export async function releaseTraffic(): Promise<RunResult[]> {
   const results: RunResult[] = []
-  for (const command of readRestore())
-    results.push(await runCommand(command))
-  clearRestore()
+  for (const command of readRestore()) {
+    const result = await runCommand(command)
+    const [tool, numeric, action, subnet, prefix, option, tun] = command
+    const tunnelRoute = process.platform === 'darwin'
+      && tool === 'route' && numeric === '-n' && action === 'delete' && subnet === '-net'
+      && (prefix === '0.0.0.0/1' || prefix === '128.0.0.0/1') && option === '-interface'
+      && /^utun\d+$/.test(tun)
+    const alreadyGone = !result.ok && tunnelRoute && !await readCommand(['ifconfig', tun])
+    results.push(alreadyGone ? { command, ok: true, stderr: '' } : result)
+  }
+  const pending = results.filter(result => !result.ok).map(result => result.command)
+  if (pending.length > 0)
+    writeRestore(pending)
+  else
+    clearRestore()
   return results
 }

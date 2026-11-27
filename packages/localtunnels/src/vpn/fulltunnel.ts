@@ -32,15 +32,17 @@ export interface Reversible {
   down: string[][]
 }
 
+export interface RoutePin {
+  address: string
+  gateway: string
+  iface?: string
+}
+
 export interface RouteConfig {
   /** The tunnel interface, e.g. `utun4`. */
   tun: string
-  /** The VPN server's public address. Its packets must not enter the tunnel. */
-  endpointIp: string
-  /** The gateway those packets keep using — the physical default gateway. */
-  gateway: string
-  /** The physical interface the gateway is on. Linux needs it named. */
-  wanInterface?: string
+  /** Addresses that would otherwise be captured, with their current gateways. */
+  bypass: RoutePin[]
 }
 
 /**
@@ -60,43 +62,43 @@ export interface RouteConfig {
  * **The hole.** The encrypted packets are themselves traffic. With the
  * default route captured, a packet addressed to the VPN server would be
  * routed into the tunnel, encrypted, and addressed to the VPN server again:
- * a loop that wedges the connection the instant it is established. So the
- * server's own address gets a host route out the physical gateway first,
- * which is more specific still.
+ * a loop that wedges the connection the instant it is established. The
+ * exit and coordinator keep using their existing uplinks so that encrypted
+ * traffic and registration heartbeats both continue to reach them.
  *
  * Order matters in both directions: the hole is punched before the capture
  * and filled after it, so there is no window where the tunnel's own packets
  * have nowhere correct to go.
  */
 export function defaultRouteCommands(config: RouteConfig): Reversible {
-  const { tun, endpointIp, gateway, wanInterface } = config
+  const { tun, bypass } = config
 
   if (process.platform === 'darwin') {
     return {
       up: [
-        ['route', '-n', 'add', '-host', endpointIp, gateway],
+        ...bypass.map(({ address, gateway }) => ['route', '-n', 'add', '-host', address, gateway]),
         ['route', '-n', 'add', '-net', '0.0.0.0/1', '-interface', tun],
         ['route', '-n', 'add', '-net', '128.0.0.0/1', '-interface', tun],
       ],
       down: [
         ['route', '-n', 'delete', '-net', '0.0.0.0/1', '-interface', tun],
         ['route', '-n', 'delete', '-net', '128.0.0.0/1', '-interface', tun],
-        ['route', '-n', 'delete', '-host', endpointIp, gateway],
+        ...bypass.map(({ address, gateway }) => ['route', '-n', 'delete', '-host', address, gateway]),
       ],
     }
   }
 
-  const via = wanInterface ? ['via', gateway, 'dev', wanInterface] : ['via', gateway]
+  const via = ({ gateway, iface }: RoutePin): string[] => iface ? ['via', gateway, 'dev', iface] : ['via', gateway]
   return {
     up: [
-      ['ip', 'route', 'add', `${endpointIp}/32`, ...via],
+      ...bypass.map(pin => ['ip', 'route', 'add', `${pin.address}/32`, ...via(pin)]),
       ['ip', 'route', 'add', '0.0.0.0/1', 'dev', tun],
       ['ip', 'route', 'add', '128.0.0.0/1', 'dev', tun],
     ],
     down: [
       ['ip', 'route', 'del', '0.0.0.0/1', 'dev', tun],
       ['ip', 'route', 'del', '128.0.0.0/1', 'dev', tun],
-      ['ip', 'route', 'del', `${endpointIp}/32`, ...via],
+      ...bypass.map(pin => ['ip', 'route', 'del', `${pin.address}/32`, ...via(pin)]),
     ],
   }
 }
@@ -156,11 +158,11 @@ export function dnsCommands(config: DnsConfig): Reversible {
       // Copied rather than moved: a symlink to systemd-resolved is the normal
       // state, and moving it would leave the system without one if we die
       // before writing the replacement.
-      ['sh', '-c', `cp -f /etc/resolv.conf ${backup} 2>/dev/null || true`],
-      ['sh', '-c', `printf %s ${JSON.stringify(contents)} > /etc/resolv.conf`],
+      ['sh', '-c', `cp -f /etc/resolv.conf ${backup}`],
+      ['sh', '-c', `printf '%s' ${shellQuote(contents)} > /etc/resolv.conf`],
     ],
     down: [
-      ['sh', '-c', `[ -f ${backup} ] && mv -f ${backup} /etc/resolv.conf || true`],
+      ['sh', '-c', `if [ -f ${backup} ]; then cat ${backup} > /etc/resolv.conf && rm -f ${backup}; fi`],
     ],
   }
 }
