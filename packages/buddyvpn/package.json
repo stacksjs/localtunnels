@@ -11,6 +11,6 @@
     "dev": "bun run src/launcher.ts agent"
   },
   "dependencies": {
-    "uqr": "^0.1.2"
+    "uqr": "^0.1.3"
   }
 }
